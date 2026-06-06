@@ -50,9 +50,8 @@ export function PosterEditorPage() {
     if (!campaign) return
     setBusy('regen')
     try {
-      // Re-extract the spec, then re-render the poster image.
-      const { error } = await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
-      if (!error) await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+      // Re-extract the spec; the poster re-renders from it client-side.
+      await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
       await reload()
     } finally {
       setBusy(null)

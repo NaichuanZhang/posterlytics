@@ -1,32 +1,37 @@
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
-import type { Campaign, Placement } from '../lib/types'
-import { Poster } from './Poster'
+import type { Campaign, Placement, PosterStyle } from '../lib/types'
+import { SaasPoster } from './posters/SaasPoster'
+import { CozyPoster } from './posters/CozyPoster'
 
 interface Props {
   campaign: Campaign
   placement: Placement
 }
 
-// Exports the poster — with THIS placement's QR embedded — as a high-res PNG.
-// Renders an offscreen Poster bound to the placement code, waits for fonts,
-// captures via html-to-image, and triggers a download.
+// Exports the poster — with THIS placement's QR embedded — as a PNG at the native
+// 1080×1620. The template renders deterministically as HTML/CSS off-screen at full
+// size; html-to-image captures it (the QR is a same-origin data-URL <img>, so no
+// canvas taint). No scaling, no AI image — pixel-exact output.
 export function PosterExportButton({ campaign, placement }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
+
+  const style: PosterStyle =
+    campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
 
   async function handleExport() {
     if (!offscreenRef.current || busy) return
     setBusy(true)
     try {
-      // Ensure brand fonts (and any web fonts) are ready before capture.
       if (document.fonts?.ready) await document.fonts.ready
       // Give the QR image a tick to render.
-      await new Promise((r) => setTimeout(r, 120))
+      await new Promise((r) => setTimeout(r, 150))
       const dataUrl = await toPng(offscreenRef.current, {
-        pixelRatio: 3,
+        width: 1080,
+        height: 1620,
+        pixelRatio: 2,
         cacheBust: true,
-        backgroundColor: campaign.style_profile?.palette.bg ?? '#ffffff',
       })
       const a = document.createElement('a')
       a.href = dataUrl
@@ -34,7 +39,7 @@ export function PosterExportButton({ campaign, placement }: Props) {
       a.click()
     } catch (e) {
       console.error('export failed', e)
-      alert('Export failed — the brand image may not allow cross-origin capture. Try regenerating.')
+      alert('Export failed. Please try again.')
     } finally {
       setBusy(false)
     }
@@ -45,10 +50,13 @@ export function PosterExportButton({ campaign, placement }: Props) {
       <button className="btn secondary sm" onClick={handleExport} disabled={busy}>
         {busy ? 'Exporting…' : `Export PNG`}
       </button>
-      {/* Offscreen render target bound to this placement's QR. Fixed width so
-          the responsive Poster (width:100%) renders at a defined export size. */}
-      <div style={{ position: 'fixed', left: -10000, top: 0, width: 440, pointerEvents: 'none' }} aria-hidden>
-        <Poster ref={offscreenRef} campaign={campaign} code={placement.code} />
+      {/* Offscreen full-size render target bound to this placement's QR. */}
+      <div style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }} aria-hidden>
+        {style === 'saas_glassmorphism' ? (
+          <SaasPoster ref={offscreenRef} campaign={campaign} code={placement.code} />
+        ) : (
+          <CozyPoster ref={offscreenRef} campaign={campaign} code={placement.code} />
+        )}
       </div>
     </>
   )

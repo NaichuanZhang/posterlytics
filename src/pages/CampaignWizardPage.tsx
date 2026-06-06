@@ -4,13 +4,12 @@ import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 
-type Phase = 'form' | 'creating' | 'analyzing' | 'hero' | 'done' | 'error'
+type Phase = 'form' | 'creating' | 'analyzing' | 'done' | 'error'
 
 const PHASE_LABEL: Record<Phase, string> = {
   form: '',
   creating: 'Creating campaign…',
-  analyzing: 'Reading your site — extracting brand, story & game stats…',
-  hero: 'Illustrating your poster — this takes ~30s…',
+  analyzing: 'Reading your site — extracting brand, content & design…',
   done: 'Done!',
   error: '',
 }
@@ -57,17 +56,15 @@ export function CampaignWizardPage() {
     }
     const campaignId = (created as { id: string }).id
 
-    // 2. Analyze: scrape + brand essence + gamified poster spec + landing copy.
+    // 2. Analyze: scrape + brand palette + auto-selected template + poster spec +
+    //    landing copy. The poster itself is rendered deterministically client-side
+    //    (HTML/CSS) from this spec — no separate image-generation step.
     setPhase('analyzing')
     try {
       const { error: aErr } = await insforge.functions.invoke('analyze', { body: { campaignId } })
       if (aErr) throw new Error(aErr.message ?? 'Analysis failed')
-
-      // 3. Render the full cozy-scrapbook poster image (always).
-      setPhase('hero')
-      await insforge.functions.invoke('hero', { body: { campaignId } })
     } catch (err) {
-      // Generation hiccup is recoverable in the editor; proceed anyway.
+      // Analysis hiccup is recoverable in the editor; proceed anyway (defaults render).
       console.error(err)
     }
 
