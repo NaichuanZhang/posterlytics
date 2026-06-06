@@ -50,8 +50,27 @@ export function PosterEditorPage() {
     if (!campaign) return
     setBusy('regen')
     try {
-      // Re-extract the spec; the poster re-renders from it client-side.
+      // Re-extract the spec; the template re-renders from it client-side. If the
+      // active mode is the AI image, also re-paint the image.
       await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
+      if (campaign.poster_mode === 'image') {
+        await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+      }
+      await reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Switch render mode. Going to 'image' with no AI image yet generates one first.
+  async function switchMode(mode: 'template' | 'image') {
+    if (!campaign || campaign.poster_mode === mode) return
+    setBusy('mode')
+    try {
+      if (mode === 'image' && !campaign.hero_image_url) {
+        await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+      }
+      await insforge.database.from('campaigns').update({ poster_mode: mode }).eq('id', campaign.id)
       await reload()
     } finally {
       setBusy(null)
@@ -152,6 +171,29 @@ export function PosterEditorPage() {
               ))}
               <Row label="Tone" value={campaign.style_profile?.tone} />
             </dl>
+
+            {/* Render-mode toggle: deterministic template vs AI illustration. */}
+            <div className="row" style={{ marginTop: 14, gap: 0, border: '1px solid var(--border, rgba(0,0,0,0.12))', borderRadius: 10, overflow: 'hidden', width: 'fit-content' }}>
+              <button
+                className={`btn sm ${campaign.poster_mode !== 'image' ? '' : 'ghost'}`}
+                style={{ borderRadius: 0 }}
+                onClick={() => switchMode('template')}
+                disabled={!!busy || campaign.poster_mode !== 'image'}
+              >
+                Template
+              </button>
+              <button
+                className={`btn sm ${campaign.poster_mode === 'image' ? '' : 'ghost'}`}
+                style={{ borderRadius: 0 }}
+                onClick={() => switchMode('image')}
+                disabled={!!busy || campaign.poster_mode === 'image'}
+              >
+                {busy === 'mode' ? 'Switching…' : 'AI image'}
+              </button>
+            </div>
+            {campaign.poster_mode === 'image' && !campaign.hero_image_url && (
+              <p className="hint" style={{ marginTop: 6 }}>AI image not generated yet — Regenerate to paint it.</p>
+            )}
             <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>
               <button className="btn secondary sm" onClick={regenerate} disabled={!!busy}>
                 {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}

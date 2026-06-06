@@ -3,6 +3,7 @@ import { toPng } from 'html-to-image'
 import type { Campaign, Placement, PosterStyle } from '../lib/types'
 import { SaasPoster } from './posters/SaasPoster'
 import { CozyPoster } from './posters/CozyPoster'
+import { AiPoster } from './posters/AiPoster'
 
 interface Props {
   campaign: Campaign
@@ -19,6 +20,7 @@ export function PosterExportButton({ campaign, placement }: Props) {
 
   const style: PosterStyle =
     campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
+  const isImage = campaign.poster_mode === 'image'
 
   async function handleExport() {
     if (!offscreenRef.current || busy) return
@@ -52,7 +54,9 @@ export function PosterExportButton({ campaign, placement }: Props) {
       </button>
       {/* Offscreen full-size render target bound to this placement's QR. */}
       <div style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }} aria-hidden>
-        {style === 'saas_glassmorphism' ? (
+        {isImage ? (
+          <AiPoster ref={offscreenRef} campaign={campaign} code={placement.code} />
+        ) : style === 'saas_glassmorphism' ? (
           <SaasPoster ref={offscreenRef} campaign={campaign} code={placement.code} />
         ) : (
           <CozyPoster ref={offscreenRef} campaign={campaign} code={placement.code} />

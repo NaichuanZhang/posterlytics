@@ -1,12 +1,14 @@
 import { forwardRef } from 'react'
-import type { Campaign, PosterStyle } from '../lib/types'
+import type { Campaign, PosterStyle, PosterMode } from '../lib/types'
 import { SaasPoster } from './posters/SaasPoster'
 import { CozyPoster } from './posters/CozyPoster'
+import { AiPoster } from './posters/AiPoster'
 
 interface Props {
   campaign: Campaign
   code: string // the placement code whose QR is embedded
   width?: number // rendered preview width in px (defaults to fit the editor column)
+  mode?: PosterMode // override the campaign's stored mode (used by the wizard picker)
 }
 
 // The poster is rendered DETERMINISTICALLY as HTML/CSS at a native 1080×1620 (2:3),
@@ -19,8 +21,9 @@ const NATIVE_W = 1080
 const NATIVE_H = 1620
 const DEFAULT_PREVIEW_W = 440
 
-export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code, width = DEFAULT_PREVIEW_W }, ref) {
+export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code, width = DEFAULT_PREVIEW_W, mode }, ref) {
   const style: PosterStyle = campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
+  const activeMode: PosterMode = mode ?? (campaign.poster_mode === 'image' ? 'image' : 'template')
   const scale = width / NATIVE_W
 
   return (
@@ -43,7 +46,9 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
           transformOrigin: 'top left',
         }}
       >
-        {style === 'saas_glassmorphism' ? (
+        {activeMode === 'image' ? (
+          <AiPoster ref={ref} campaign={campaign} code={code} />
+        ) : style === 'saas_glassmorphism' ? (
           <SaasPoster ref={ref} campaign={campaign} code={code} />
         ) : (
           <CozyPoster ref={ref} campaign={campaign} code={code} />
