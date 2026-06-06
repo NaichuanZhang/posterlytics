@@ -172,9 +172,9 @@ ${statLines || '   • Easy ★★★★★\n   • Fast ★★★★★'}
    each with washi-tape corners and a small hand-drawn icon:
 ${questLines || '   • Get started — in minutes (spark icon)'}
 
-6) CONVERSION ROW (lower band): a calm, mostly-empty light cream paper panel CENTERED here — leave it clean and
-   uncluttered as blank space for a sticker to be added later. DO NOT draw any QR code, barcode, scan square, or
-   pixel-grid in this area; just a small hand-lettered caption beneath it reading "${spec.qr_label ?? 'Scan to Start'}".
+6) CONVERSION ROW (lower band, around 75-80% down): a calm CLEAN BLANK light cream SQUARE panel, perfectly CENTERED
+   horizontally — leave it completely empty (no text, no icons, no caption) as blank space for a sticker to be added
+   later. DO NOT draw any QR code, barcode, scan square, pixel-grid, OR any words inside or beneath this panel.
    To the LEFT of that empty panel, a torn-paper note titled "${spec.conv_left?.heading ?? `Why ${product}`}":
 ${leftLines || '     - Save time\n     - Do more'}
    To the RIGHT, a torn-paper note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
@@ -248,10 +248,11 @@ ${featureLines || '     • Fast: built for speed (bolt icon)'}
    short title + one line, evenly spaced, light-gray text on the dark background:
 ${reasonLines || '     • Trusted: by modern teams (check icon)'}
 
-7) CTA BAND (DARK zone, the conversion strip): on the LEFT a large decisive CTA headline "${spec.cta_main ?? `Try ${product}`}"
-   (key words in ${primary}) with a sub-line "${spec.cta_sub ?? ''}". In the CENTER, leave a CLEAN BLANK light panel
-   (a plain rounded white card) as empty negative space for a sticker to be added later — DO NOT draw any QR code,
-   barcode, scan square, or pixel-grid there; just a small caption beneath it reading "${spec.qr_label ?? 'Scan to Start'}".
+7) CTA BAND (DARK zone, around 78-82% down): on the LEFT a large decisive CTA headline "${spec.cta_main ?? `Try ${product}`}"
+   (key words in ${primary}) with a sub-line "${spec.cta_sub ?? ''}". Perfectly CENTERED horizontally in this band,
+   leave a CLEAN BLANK light SQUARE panel (a plain rounded white card) as completely empty negative space for a sticker
+   to be added later — DO NOT draw any QR code, barcode, scan square, pixel-grid, OR any words inside or beneath it.
+   Keep the CTA headline text on the left clear of this centered panel so they do not overlap.
 
 8) FOOTER (very bottom, centered): a short ALL-CAPS letter-spaced tagline${spec.footer_slogan ? ` "${spec.footer_slogan}"` : ''}${spec.urls ? `, with "${spec.urls}" on a small pill` : ''}, key words in ${primary}.
 
