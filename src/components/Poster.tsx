@@ -14,21 +14,23 @@ interface Props {
 // per-placement tracking + clean PNG export.
 //
 // The image model ALWAYS emits a native 2:3 portrait regardless of the requested
-// aspect ratio, so BOTH templates use a 2:3 display container — the full frame
-// shows with NO side/edge cropping. Each template's prompt reserves a calm blank
-// zone for the chip; qrTopPct is tuned to that zone (a fraction of the full 2:3
-// image height). The chip's opaque card means it reads cleanly even if the art
-// drifts slightly from the reserved spot.
+// aspect ratio, so the display container is locked to a 2:3 aspect-ratio and made
+// RESPONSIVE (fills its column up to a max width) — the full frame shows with NO
+// side/edge cropping and never overflows its card. Each template's prompt
+// reserves a calm blank zone for the chip; qrLeftPct/qrTopPct point the chip at
+// that zone (as % of the frame). The chip is opaque + self-captioned so it reads
+// cleanly even if the art drifts slightly from the reserved spot.
 interface Dims {
-  width: number
-  height: number
+  qrLeftPct: number // chip center, as % of width
   qrTopPct: number // chip center, as % of height
   qrScale: number // QR width as a fraction of container width
 }
+const POSTER_MAX_W = 440 // fits the editor's poster column without clipping
 const POSTER_DIMS: Record<PosterStyle, Dims> = {
-  // 2:3 container (512×768) shows the model's native 2:3 output uncropped.
-  cozy_scrapbook: { width: 512, height: 768, qrTopPct: 77, qrScale: 0.2 },
-  saas_glassmorphism: { width: 512, height: 768, qrTopPct: 80, qrScale: 0.18 },
+  // cozy prompt reserves a clean panel CENTERED in the lower band.
+  cozy_scrapbook: { qrLeftPct: 50, qrTopPct: 77, qrScale: 0.22 },
+  // saas prompt reserves a clean panel in the lower-RIGHT of the dark CTA band.
+  saas_glassmorphism: { qrLeftPct: 72, qrTopPct: 84, qrScale: 0.2 },
 }
 
 export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code }, ref) {
@@ -37,13 +39,16 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
   const dims = POSTER_DIMS[style]
   const spec = campaign.poster_spec as { qr_label?: string } | null
   const caption = spec?.qr_label || 'Scan to Start'
+  // QR pixel size scales with the rendered width (capped at POSTER_MAX_W).
+  const qrSize = Math.round(POSTER_MAX_W * dims.qrScale)
 
   return (
     <div
       ref={ref}
       style={{
-        width: dims.width,
-        height: dims.height,
+        width: '100%',
+        maxWidth: POSTER_MAX_W,
+        aspectRatio: '2 / 3',
         position: 'relative',
         overflow: 'hidden',
         background: '#f4eee3',
@@ -80,11 +85,11 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
         <div
           style={{
             position: 'absolute',
-            left: '50%',
+            left: `${dims.qrLeftPct}%`,
             top: `${dims.qrTopPct}%`,
             transform: 'translate(-50%, -50%)',
             background: '#ffffff',
-            padding: 8,
+            padding: 7,
             borderRadius: 12,
             boxShadow: '0 4px 16px rgba(31,27,22,0.30)',
             display: 'flex',
@@ -93,7 +98,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
             gap: 4,
           }}
         >
-          <QrCode value={buildViewUrl(code)} size={dims.width * dims.qrScale} dark="#1f1b16" light="#ffffff" />
+          <QrCode value={buildViewUrl(code)} size={qrSize} dark="#1f1b16" light="#ffffff" />
           <span
             style={{
               fontSize: 10,
@@ -101,7 +106,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
               letterSpacing: '0.02em',
               color: '#1f1b16',
               lineHeight: 1.1,
-              maxWidth: dims.width * dims.qrScale + 8,
+              maxWidth: qrSize + 8,
               textAlign: 'center',
             }}
           >
