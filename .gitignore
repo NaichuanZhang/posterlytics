@@ -1,0 +1,27 @@
+# Node / Vite
+node_modules
+dist
+functions/dist
+*.tsbuildinfo
+*.log
+.playwright-mcp
+.env
+.env.local
+.env.*.local
+.DS_Store
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
+.mcp.json
