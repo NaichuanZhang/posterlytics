@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import type { Campaign } from '../lib/types'
+import type { Campaign, PosterStyle } from '../lib/types'
 import { buildViewUrl } from '../lib/landingUrl'
 import { QrCode } from './QrCode'
 
@@ -8,17 +8,32 @@ interface Props {
   code: string // the placement code whose QR is embedded
 }
 
-// The poster = a full AI-illustrated cozy-scrapbook image (9:16), with the REAL
-// per-placement QR overlaid on the calm reserved zone the image model left blank
-// (the conversion row's center panel, ~80% down). Image models can't render a
-// scannable QR, so we composite it here — keeping per-placement tracking + clean
-// PNG export. QR_TOP_PCT is tuned to the prompt's reserved "Scan to Start" panel.
-const POSTER_W = 432 // 9:16 preview at 432×768
-const POSTER_H = 768
-const QR_TOP_PCT = 80 // center of the reserved "Scan to Start" panel
+// The poster = a full AI-illustrated image, with the REAL per-placement QR
+// overlaid on the calm reserved zone the image model left blank. Image models
+// can't render a scannable QR, so we composite it here — keeping per-placement
+// tracking + clean PNG export. The model emits a native 2:3 portrait; each
+// template's container and QR position are tuned to where its prompt reserved
+// the blank "Scan to Start" panel.
+//   - cozy_scrapbook: 9:16 container (crops the 2:3 art), QR ~80% down.
+//   - saas_glassmorphism: full 2:3 container, QR in the lower CTA band ~89% down.
+interface Dims {
+  width: number
+  height: number
+  qrTopPct: number
+  qrScale: number // QR width as a fraction of container width
+}
+const POSTER_DIMS: Record<PosterStyle, Dims> = {
+  cozy_scrapbook: { width: 432, height: 768, qrTopPct: 80, qrScale: 0.2 },
+  saas_glassmorphism: { width: 512, height: 768, qrTopPct: 89, qrScale: 0.16 },
+}
 
 export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code }, ref) {
   const img = campaign.hero_image_url
+  const style: PosterStyle = campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
+  const dims = POSTER_DIMS[style]
+  const POSTER_W = dims.width
+  const POSTER_H = dims.height
+  const QR_TOP_PCT = dims.qrTopPct
 
   return (
     <div
@@ -71,7 +86,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
             lineHeight: 0,
           }}
         >
-          <QrCode value={buildViewUrl(code)} size={POSTER_W * 0.2} dark="#1f1b16" light="#ffffff" />
+          <QrCode value={buildViewUrl(code)} size={POSTER_W * dims.qrScale} dark="#1f1b16" light="#ffffff" />
         </div>
       )}
     </div>

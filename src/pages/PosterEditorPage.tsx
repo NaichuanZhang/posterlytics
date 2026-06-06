@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { insforge } from '../lib/insforge'
 import { useCampaign } from '../hooks/useCampaign'
@@ -13,16 +13,38 @@ export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
   const { campaign, loading, reload } = useCampaign(id)
-  const { placements } = usePlacements(id, user?.id)
+  const { placements, ensureDefault } = usePlacements(id, user?.id)
   const [busy, setBusy] = useState<string | null>(null)
   const [agent, setAgent] = useState<AgentResult | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
 
+  // A campaign should always have at least one placement so the poster's QR
+  // encodes a real, trackable code (not a dead preview). Create one if missing.
+  useEffect(() => {
+    if (user?.id) void ensureDefault()
+  }, [user?.id, ensureDefault])
+
   if (loading) return <Layout><Spinner full /></Layout>
   if (!campaign) return <Layout><p className="muted">Campaign not found.</p></Layout>
 
-  // Preview QR uses the first placement, or a placeholder code.
-  const previewCode = placements[0]?.code ?? 'PREVIEW01'
+  // Preview QR uses the first real placement (ensureDefault guarantees one soon).
+  const previewCode = placements[0]?.code ?? null
+  const published = campaign.status === 'published'
+
+  // Spec card rows depend on the auto-selected template shape.
+  const isSaas = campaign.poster_style === 'saas_glassmorphism'
+  const spec = campaign.poster_spec as Record<string, unknown> | null
+  const specRows: Array<{ label: string; value?: string }> = isSaas
+    ? [
+        { label: 'Headline', value: spec?.headline as string },
+        { label: 'Slogan', value: spec?.slogan as string },
+        { label: 'CTA', value: spec?.cta_main as string },
+      ]
+    : [
+        { label: 'Hook', value: [spec?.hook_line1, spec?.hook_line2].filter(Boolean).join(' ') },
+        { label: 'Subtitle', value: spec?.subtitle as string },
+        { label: 'Mascot', value: spec?.mascot as string },
+      ]
 
   async function regenerate() {
     if (!campaign) return
@@ -78,8 +100,6 @@ export function PosterEditorPage() {
     setBusy(null)
   }
 
-  const published = campaign.status === 'published'
-
   return (
     <Layout>
       <div className="row between" style={{ marginBottom: 4 }}>
@@ -90,10 +110,30 @@ export function PosterEditorPage() {
         <Link to="/">← All campaigns</Link>
       </p>
 
+      {!published && (
+        <div className="card" style={{ borderColor: 'var(--accent)', marginBottom: 18 }}>
+          <div className="row between" style={{ gap: 12, alignItems: 'center' }}>
+            <span>
+              <strong style={{ color: 'var(--accent)' }}>Draft — not live.</strong>{' '}
+              <span className="muted">
+                The QR works once you publish; scanning it now shows a "not live yet" page.
+              </span>
+            </span>
+            <button className="btn sm" onClick={() => setStatus('published')} disabled={!!busy}>
+              {busy === 'published' ? 'Publishing…' : 'Publish'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 480px) 1fr', gap: 28, alignItems: 'start' }}>
         {/* Poster preview */}
         <div className="card" style={{ display: 'grid', placeItems: 'center', background: 'var(--panel-2)', padding: 16 }}>
-          <Poster campaign={campaign} code={previewCode} />
+          {previewCode ? (
+            <Poster campaign={campaign} code={previewCode} />
+          ) : (
+            <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
+          )}
         </div>
 
         {/* Controls */}
@@ -101,12 +141,16 @@ export function PosterEditorPage() {
           <div className="card">
             <h3 style={{ margin: '0 0 10px' }}>Poster spec</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
-              Illustrated from your site. Regenerate for a fresh take.
+              Style auto-picked from your site. Regenerate for a fresh take.
             </p>
             <dl style={{ margin: 0, display: 'grid', gap: 8, fontSize: '0.9rem' }}>
-              <Row label="Hook" value={[campaign.poster_spec?.hook_line1, campaign.poster_spec?.hook_line2].filter(Boolean).join(' ')} />
-              <Row label="Subtitle" value={campaign.poster_spec?.subtitle} />
-              <Row label="Mascot" value={campaign.poster_spec?.mascot} />
+              <Row
+                label="Style"
+                value={isSaas ? 'SaaS Glassmorphism' : 'Cozy Scrapbook'}
+              />
+              {specRows.map((r) => (
+                <Row key={r.label} label={r.label} value={r.value} />
+              ))}
               <Row label="Tone" value={campaign.style_profile?.tone} />
             </dl>
             <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>

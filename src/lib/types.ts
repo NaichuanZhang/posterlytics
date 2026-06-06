@@ -40,6 +40,8 @@ export interface BrandAssets {
   theme_color?: string
 }
 
+export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism'
+
 export interface StatNode {
   icon: string
   label: string
@@ -52,7 +54,8 @@ export interface QuestCard {
   desc: string
 }
 
-export interface PosterSpec {
+// Cozy-scrapbook gamified poster (9:16-cropped) zones.
+export interface CozyPosterSpec {
   hook_line1: string
   hook_line2: string
   subtitle: string
@@ -68,6 +71,34 @@ export interface PosterSpec {
   urls: string
 }
 
+export interface SaasCard {
+  icon: string
+  title: string
+  desc: string
+}
+
+// Premium SaaS / glassmorphism product-launch poster (2:3) zones.
+export interface SaasPosterSpec {
+  headline: string
+  sub_name: string
+  slogan: string
+  product_intro: string
+  device_context: string
+  hero_metric: string
+  float_cards: SaasCard[]
+  feature_matrix: SaasCard[]
+  reasons: SaasCard[]
+  cta_main: string
+  cta_sub: string
+  qr_label: string
+  footer_slogan: string
+  urls: string
+}
+
+// poster_spec is one of these, discriminated by Campaign.poster_style. Kept as a
+// loose union (both shapes are optional-friendly) so older rows still type-check.
+export type PosterSpec = CozyPosterSpec | SaasPosterSpec
+
 export interface Campaign {
   id: string
   user_id: string
@@ -81,6 +112,7 @@ export interface Campaign {
   landing_content: LandingContent | null
   brand_assets: BrandAssets | null
   brand_essence: string | null
+  poster_style: PosterStyle
   poster_spec: PosterSpec | null
   hero_image_url: string | null
   hero_image_key: string | null
