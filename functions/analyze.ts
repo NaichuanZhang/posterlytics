@@ -65,6 +65,9 @@ export default async function (req: Request): Promise<Response> {
 
   // 2. Extract real assets + meta from the HTML.
   const assets = extractAssets(scrapeHtml, productUrl);
+  // Mine the site's REAL vivid colors (styles are stripped before the model sees
+  // text, so without this it guesses a generic palette).
+  const siteColors = extractColors(scrapeHtml);
 
   // Re-host logo + up to 2 product images into the public assets bucket so the
   // poster/landing never hot-link the origin (CORS-clean export, survives churn).
@@ -141,13 +144,17 @@ export default async function (req: Request): Promise<Response> {
     '"qr_label":"<=4 words, e.g. Scan to Start",' +
     '"footer_slogan":"a short ALL-CAPS letter-spaced tagline",' +
     '"urls":"primary url, optional secondary"}.\n' +
-    'Keep all poster text SHORT and legible. Match the brand\'s real palette/fonts/tone when discernible; otherwise ' +
-    `infer tasteful defaults. If a theme color was detected, prefer it as the primary: ${assets.themeColor || 'none'}.`;
+    'Keep all poster text SHORT and legible. CRITICAL — the style_profile.palette MUST reflect the brand\'s REAL ' +
+    'colors. You are given the actual hex colors mined from the site\'s own CSS (most-used first); use the most ' +
+    'prominent vivid one as the "accent" and the brand\'s dominant dark/brand tone as "primary". Do NOT substitute a ' +
+    'generic SaaS blue or any color that is not on the site. Only fall back to tasteful defaults if no site colors ' +
+    `are provided. Detected theme-color (if any): ${assets.themeColor || 'none'}.`;
   const user =
     `PRODUCT NAME: ${campaign.product_name}\n` +
     `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
     `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
-    `PRODUCT URL: ${productUrl}\n\n` +
+    `PRODUCT URL: ${productUrl}\n` +
+    `REAL BRAND COLORS mined from the site CSS (most-used first, use these for the palette): ${siteColors.length ? siteColors.join(', ') : '(none found — infer tasteful defaults)'}\n\n` +
     `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}`;
 
   let parsed: ParsedContent;
@@ -156,7 +163,7 @@ export default async function (req: Request): Promise<Response> {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ], { maxTokens: 2200 });
-    parsed = normalize(extractJson(raw), campaign as Record<string, string>);
+    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors);
   } catch {
     // One repair retry with a terse reminder.
     try {
@@ -164,9 +171,9 @@ export default async function (req: Request): Promise<Response> {
         { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
         { role: 'user', content: user },
       ], { maxTokens: 2200 });
-      parsed = normalize(extractJson(raw2), campaign as Record<string, string>);
+      parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors);
     } catch {
-      parsed = fallbackContent(campaign as Record<string, string>);
+      parsed = fallbackContent(campaign as Record<string, string>, siteColors);
     }
   }
 
@@ -266,6 +273,29 @@ function extractAssets(htmlText: string, base: string): {
     /<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i.exec(htmlText)?.[1] || null;
 
   return { logo, images, themeColor };
+}
+
+// Mine the most-used VIVID (non-grayscale, mid-luminance) hex colors from the raw
+// HTML+CSS. The model otherwise only sees text (styles are stripped) and guesses a
+// generic SaaS palette — feeding it the site's REAL colors keeps the poster on-brand.
+function extractColors(htmlText: string): string[] {
+  if (!htmlText) return [];
+  const counts = new Map<string, number>();
+  const re = /#([0-9a-fA-F]{6})\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(htmlText))) {
+    const hex = '#' + m[1].toLowerCase();
+    const r = parseInt(m[1].slice(0, 2), 16);
+    const g = parseInt(m[1].slice(2, 4), 16);
+    const b = parseInt(m[1].slice(4, 6), 16);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    // Keep only colorful, usable accents (drop near-gray, near-black, near-white).
+    if (sat < 0.25 || lum < 0.12 || lum > 0.93) continue;
+    counts.set(hex, (counts.get(hex) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h).slice(0, 6);
 }
 
 function stripToText(htmlText: string): string {
@@ -402,13 +432,37 @@ function normalizeSaasSpec(ps: Record<string, unknown>, product: string, tagline
   };
 }
 
-function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
+// True if a hex is "vivid" (colorful enough to be an intentional accent).
+function isVivid(hex: string | undefined): boolean {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return false;
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const sat = max === 0 ? 0 : (max - min) / max;
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return sat >= 0.25 && lum >= 0.12 && lum <= 0.93;
+}
+
+function normalize(raw: unknown, c: Record<string, string>, siteColors: string[] = []): ParsedContent {
   const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
   const sp = o.style_profile ?? {};
   const lc = o.landing_content ?? {};
   const ps = (o.poster_spec ?? {}) as Record<string, unknown>;
   const product = c.product_name;
   const tagline = c.tagline || '';
+
+  // Accent correction: the poster's whole color identity is the accent. If the
+  // model returned an accent that ISN'T a real site color but the site has vivid
+  // colors, snap to the most-used mined color so the poster stays on-brand.
+  const modelPalette = (sp.palette ?? {}) as Record<string, string>;
+  // The most-used vivid color mined from the site IS the brand accent, by
+  // definition — prefer it over the model's guess (the model often picks a lesser
+  // on-page color or a generic blue). Only fall back to the model/default when the
+  // site yielded no usable colors.
+  const topSiteColor = siteColors.find(isVivid);
+  const modelAccent = modelPalette.accent;
+  const accent = topSiteColor ?? (isVivid(modelAccent) ? modelAccent : '#10b981');
+  // Primary: model's if present, else a dark default (posters use it as dark tone).
+  const primary = modelPalette.primary || '#1f2937';
 
   const poster_style = (o.poster_style as unknown) === 'saas_glassmorphism'
     ? 'saas_glassmorphism'
@@ -438,10 +492,10 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
     poster_style,
     style_profile: {
       palette: {
-        primary: (sp.palette as Record<string, string>)?.primary ?? '#4f46e5',
-        bg: (sp.palette as Record<string, string>)?.bg ?? '#ffffff',
-        text: (sp.palette as Record<string, string>)?.text ?? '#111827',
-        accent: (sp.palette as Record<string, string>)?.accent ?? '#4f46e5',
+        primary,
+        bg: modelPalette.bg ?? '#ffffff',
+        text: modelPalette.text ?? '#111827',
+        accent,
       },
       fonts: {
         heading: (sp.fonts as Record<string, string>)?.heading ?? 'system-ui, sans-serif',
@@ -464,6 +518,6 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
   };
 }
 
-function fallbackContent(c: Record<string, string>): ParsedContent {
-  return normalize({}, c);
+function fallbackContent(c: Record<string, string>, siteColors: string[] = []): ParsedContent {
+  return normalize({}, c, siteColors);
 }
