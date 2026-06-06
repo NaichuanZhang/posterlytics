@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import type { Campaign } from '../lib/types'
+import type { Campaign, PosterStyle } from '../lib/types'
 import { buildViewUrl } from '../lib/landingUrl'
 import { QrCode } from './QrCode'
 
@@ -8,24 +8,47 @@ interface Props {
   code: string // the placement code whose QR is embedded
 }
 
-// The poster = a full AI-illustrated cozy-scrapbook image (9:16), with the REAL
-// per-placement QR overlaid on the calm reserved zone the image model left blank
-// (the conversion row's center panel, ~80% down). Image models can't render a
-// scannable QR, so we composite it here — keeping per-placement tracking + clean
-// PNG export. QR_TOP_PCT is tuned to the prompt's reserved "Scan to Start" panel.
-const POSTER_W = 432 // 9:16 preview at 432×768
-const POSTER_H = 768
-const QR_TOP_PCT = 80 // center of the reserved "Scan to Start" panel
+// The poster = a full AI-illustrated image, with the REAL per-placement QR
+// composited on top as a self-contained "chip" (opaque white card + caption).
+// Image models can't render a scannable QR, so we overlay it — keeping
+// per-placement tracking + clean PNG export.
+//
+// The image model ALWAYS emits a native 2:3 portrait regardless of the requested
+// aspect ratio, so the display container is locked to a 2:3 aspect-ratio and made
+// RESPONSIVE (fills its column up to a max width) — the full frame shows with NO
+// side/edge cropping and never overflows its card. Each template's prompt
+// reserves a calm blank zone for the chip; qrLeftPct/qrTopPct point the chip at
+// that zone (as % of the frame). The chip is opaque + self-captioned so it reads
+// cleanly even if the art drifts slightly from the reserved spot.
+interface Dims {
+  qrLeftPct: number // chip center, as % of width
+  qrTopPct: number // chip center, as % of height
+  qrScale: number // QR width as a fraction of container width
+}
+const POSTER_MAX_W = 440 // fits the editor's poster column without clipping
+const POSTER_DIMS: Record<PosterStyle, Dims> = {
+  // cozy prompt reserves a clean panel CENTERED in the lower band.
+  cozy_scrapbook: { qrLeftPct: 50, qrTopPct: 77, qrScale: 0.22 },
+  // saas prompt reserves a clean panel in the lower-RIGHT of the dark CTA band.
+  saas_glassmorphism: { qrLeftPct: 72, qrTopPct: 84, qrScale: 0.2 },
+}
 
 export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code }, ref) {
   const img = campaign.hero_image_url
+  const style: PosterStyle = campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
+  const dims = POSTER_DIMS[style]
+  const spec = campaign.poster_spec as { qr_label?: string } | null
+  const caption = spec?.qr_label || 'Scan to Start'
+  // QR pixel size scales with the rendered width (capped at POSTER_MAX_W).
+  const qrSize = Math.round(POSTER_MAX_W * dims.qrScale)
 
   return (
     <div
       ref={ref}
       style={{
-        width: POSTER_W,
-        height: POSTER_H,
+        width: '100%',
+        maxWidth: POSTER_MAX_W,
+        aspectRatio: '2 / 3',
         position: 'relative',
         overflow: 'hidden',
         background: '#f4eee3',
@@ -56,22 +79,39 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
         </div>
       )}
 
-      {/* Real QR, overlaid on the reserved calm zone (centered, ~62% down). */}
+      {/* Real QR chip, composited on the reserved calm zone. Self-contained
+          (opaque card + caption) so it always reads as an intentional sticker. */}
       {img && (
         <div
           style={{
             position: 'absolute',
-            left: '50%',
-            top: `${QR_TOP_PCT}%`,
+            left: `${dims.qrLeftPct}%`,
+            top: `${dims.qrTopPct}%`,
             transform: 'translate(-50%, -50%)',
             background: '#ffffff',
-            padding: 6,
-            borderRadius: 8,
-            boxShadow: '0 2px 8px rgba(31,27,22,0.25)',
-            lineHeight: 0,
+            padding: 7,
+            borderRadius: 12,
+            boxShadow: '0 4px 16px rgba(31,27,22,0.30)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 4,
           }}
         >
-          <QrCode value={buildViewUrl(code)} size={POSTER_W * 0.2} dark="#1f1b16" light="#ffffff" />
+          <QrCode value={buildViewUrl(code)} size={qrSize} dark="#1f1b16" light="#ffffff" />
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+              color: '#1f1b16',
+              lineHeight: 1.1,
+              maxWidth: qrSize + 8,
+              textAlign: 'center',
+            }}
+          >
+            {caption}
+          </span>
         </div>
       )}
     </div>

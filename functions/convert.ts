@@ -27,8 +27,20 @@ export default async function (req: Request): Promise<Response> {
   }
 
   if (!destination) {
-    return new Response('This link is no longer active.', {
-      status: 404,
+    // No destination => code unknown, or campaign not published. Distinguish so
+    // an unpublished (but real) link reads as "not live yet" rather than a 404.
+    let unpublished = false;
+    try {
+      const { data } = await client.database.rpc('link_status', { p_code: code });
+      unpublished = data === 'unpublished' || data === 'published';
+    } catch {
+      unpublished = false;
+    }
+    const message = unpublished
+      ? "This poster isn't live yet. Once its campaign is published, this link will work."
+      : 'This link is no longer active.';
+    return new Response(message, {
+      status: unpublished ? 200 : 404,
       headers: { ...CORS, 'Content-Type': 'text/plain' },
     });
   }

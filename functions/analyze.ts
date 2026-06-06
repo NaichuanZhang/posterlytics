@@ -97,16 +97,22 @@ export default async function (req: Request): Promise<Response> {
   const visibleText = stripToText(scrapeHtml).slice(0, 8000);
   const sys =
     'You are a senior product marketer, brand designer, and gamification copywriter. Given a product website and ' +
-    'its GTM inputs, produce a faithful style profile, landing copy, a brand word-portrait, and a structured spec ' +
-    'for a cozy gamified watercolor poster. Output STRICT JSON only — no prose, no code fences.\n' +
-    'Schema: {' +
+    'its GTM inputs, produce a faithful style profile, landing copy, a brand word-portrait, choose the best poster ' +
+    'template for this brand, and fill that template\'s structured spec. Output STRICT JSON only — no prose, no code fences.\n' +
+    '"poster_style" MUST be one of: "saas_glassmorphism" (premium split light/dark product-launch poster with a 3D ' +
+    'device mockup — pick for developer tools, B2B/SaaS, data, fintech, infra, "serious/premium tech" brands), or ' +
+    '"cozy_scrapbook" (warm hand-drawn gamified watercolor — pick for playful, consumer, lifestyle, creative, social, ' +
+    'or otherwise warm/friendly brands). Decide from the brand\'s tone and palette.\n' +
+    'Common schema: {' +
+    '"poster_style":"saas_glassmorphism" | "cozy_scrapbook",' +
     '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
     '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
     '"landing_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
     '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
     '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
     'UI vibe, signature colors (name the hex), and overall feel",' +
-    '"poster_spec":{' +
+    '"poster_spec":{ ...shape depends on poster_style... }}\n' +
+    'IF poster_style == "cozy_scrapbook", poster_spec = {' +
     '"hook_line1":"<=5 words, the foil, e.g. \'Others ship updates.\'",' +
     '"hook_line2":"<=5 words, the payoff, e.g. \'You ship attention.\'",' +
     '"subtitle":"PRODUCT · one-line positioning",' +
@@ -118,10 +124,25 @@ export default async function (req: Request): Promise<Response> {
     '"conv_right":{"heading":"e.g. Start in 3 Steps","steps":["3 short numbered steps"]},' +
     '"qr_label":"<=4 words, e.g. Scan to Start",' +
     '"footer_formula":"A × B × C (three core value words)",' +
-    '"urls":"primary url, optional secondary"}}\n' +
-    'Make the hook a punchy \'Others <do X>. / You <do Y>.\' contrast specific to this product. Keep all poster text ' +
-    'SHORT and legible. Match the brand\'s real palette/fonts/tone when discernible; otherwise infer tasteful defaults. ' +
-    `If a theme color was detected, prefer it as the primary: ${assets.themeColor || 'none'}.`;
+    '"urls":"primary url, optional secondary"}.\n' +
+    'Make the cozy hook a punchy \'Others <do X>. / You <do Y>.\' contrast specific to this product.\n' +
+    'IF poster_style == "saas_glassmorphism", poster_spec = {' +
+    '"headline":"<=4 words, the product/brand name as the hero, split-friendly",' +
+    '"sub_name":"<=6 words, a positioning sub-name or category",' +
+    '"slogan":"one punchy line, the core promise",' +
+    '"product_intro":"2-3 short lines: who it is for + what it does + the problem it solves",' +
+    '"device_context":"what the 3D device screen shows — a realistic, specific product UI (name the key panels/numbers)",' +
+    '"hero_metric":"one bold credible metric shown on the device, e.g. \'+164%\' or \'2.3s\'",' +
+    '"float_cards":[{"icon":"one-word icon idea","title":"<=2 words","desc":"<=6 words"}, ... exactly 3],' +
+    '"feature_matrix":[{"icon":"one-word icon idea","title":"<=2 words feature name","desc":"<=8 words"}, ... exactly 6],' +
+    '"reasons":[{"icon":"one-word icon idea","title":"<=3 words","desc":"<=8 words"}, ... exactly 4 — these go in the dark zone],' +
+    '"cta_main":"a decisive CTA headline",' +
+    '"cta_sub":"one supporting line under the CTA",' +
+    '"qr_label":"<=4 words, e.g. Scan to Start",' +
+    '"footer_slogan":"a short ALL-CAPS letter-spaced tagline",' +
+    '"urls":"primary url, optional secondary"}.\n' +
+    'Keep all poster text SHORT and legible. Match the brand\'s real palette/fonts/tone when discernible; otherwise ' +
+    `infer tasteful defaults. If a theme color was detected, prefer it as the primary: ${assets.themeColor || 'none'}.`;
   const user =
     `PRODUCT NAME: ${campaign.product_name}\n` +
     `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
@@ -153,6 +174,7 @@ export default async function (req: Request): Promise<Response> {
   const { error: upErr } = await client.database
     .from('campaigns')
     .update({
+      poster_style: parsed.poster_style,
       style_profile: parsed.style_profile,
       poster_copy: parsed.poster_copy,
       landing_content: parsed.landing_content,
@@ -165,6 +187,7 @@ export default async function (req: Request): Promise<Response> {
   if (upErr) return jsonResponse({ error: upErr.message }, 500);
 
   return jsonResponse({
+    poster_style: parsed.poster_style,
     style_profile: parsed.style_profile,
     poster_copy: parsed.poster_copy,
     landing_content: parsed.landing_content,
@@ -175,6 +198,7 @@ export default async function (req: Request): Promise<Response> {
 }
 
 interface ParsedContent {
+  poster_style: string;
   style_profile: unknown;
   poster_copy: unknown;
   landing_content: unknown;
@@ -285,16 +309,27 @@ function asArray(v: unknown): string[] {
   return [];
 }
 
-function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
-  const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
-  const sp = o.style_profile ?? {};
-  const pc = o.poster_copy ?? {};
-  const lc = o.landing_content ?? {};
-  const ps = (o.poster_spec ?? {}) as Record<string, unknown>;
-  const product = c.product_name;
-  const tagline = c.tagline || '';
+function cards(
+  raw: unknown,
+  count: number,
+  iconDefault: string,
+  titleMax: number,
+  descMax: number,
+): Array<{ icon: string; title: string; desc: string }> {
+  return (Array.isArray(raw) ? raw : [])
+    .slice(0, count)
+    .map((n) => {
+      const x = (n ?? {}) as Record<string, unknown>;
+      return {
+        icon: String(x.icon ?? iconDefault),
+        title: String(x.title ?? x.name ?? '').slice(0, titleMax),
+        desc: String(x.desc ?? '').slice(0, descMax),
+      };
+    })
+    .filter((q) => q.title);
+}
 
-  // poster_spec: clamp/shape the gamified template zones, with sane fallbacks.
+function normalizeCozySpec(ps: Record<string, unknown>, product: string, tagline: string) {
   const statNodes = (Array.isArray(ps.stat_nodes) ? ps.stat_nodes : [])
     .slice(0, 5)
     .map((n) => {
@@ -303,17 +338,104 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
       return { icon: String(x.icon ?? 'star'), label: String(x.label ?? '').slice(0, 24), stars };
     })
     .filter((n) => n.label);
-  const questCards = (Array.isArray(ps.quest_cards) ? ps.quest_cards : [])
-    .slice(0, 3)
-    .map((n) => {
-      const x = (n ?? {}) as Record<string, unknown>;
-      return { icon: String(x.icon ?? 'spark'), title: String(x.title ?? '').slice(0, 30), desc: String(x.desc ?? '').slice(0, 60) };
-    })
-    .filter((q) => q.title);
+  const questCards = cards(ps.quest_cards, 3, 'spark', 30, 60);
   const convLeft = (ps.conv_left ?? {}) as Record<string, unknown>;
   const convRight = (ps.conv_right ?? {}) as Record<string, unknown>;
+  return {
+    hook_line1: (ps.hook_line1 as string) || `Others just use ${product}.`,
+    hook_line2: (ps.hook_line2 as string) || `You level up with it.`,
+    subtitle: (ps.subtitle as string) || `${product}${tagline ? ' · ' + tagline : ''}`,
+    level_badge: (ps.level_badge as string) || 'Lv.1',
+    xp: (ps.xp as string) || '0 / 100 XP',
+    mascot: (ps.mascot as string) || `a cute chibi mascot embodying ${product}`,
+    stat_nodes: statNodes.length ? statNodes : [
+      { icon: 'spark', label: 'Easy', stars: 5 },
+      { icon: 'bolt', label: 'Fast', stars: 5 },
+      { icon: 'heart', label: 'Loved', stars: 4 },
+    ],
+    quest_cards: questCards.length ? questCards : [
+      { icon: 'spark', title: 'Get started', desc: 'in minutes' },
+    ],
+    conv_left: {
+      heading: String(convLeft.heading ?? `Why ${product}`),
+      lines: asArray(convLeft.lines).slice(0, 3),
+    },
+    conv_right: {
+      heading: String(convRight.heading ?? 'Start in 3 Steps'),
+      steps: asArray(convRight.steps).slice(0, 3),
+    },
+    qr_label: (ps.qr_label as string) || 'Scan to Start',
+    footer_formula: (ps.footer_formula as string) || '',
+    urls: (ps.urls as string) || '',
+  };
+}
+
+function normalizeSaasSpec(ps: Record<string, unknown>, product: string, tagline: string) {
+  const featureMatrix = cards(ps.feature_matrix, 6, 'bolt', 24, 80);
+  const floatCards = cards(ps.float_cards, 3, 'spark', 24, 60);
+  const reasons = cards(ps.reasons, 4, 'check', 30, 80);
+  return {
+    headline: (ps.headline as string) || product,
+    sub_name: (ps.sub_name as string) || tagline,
+    slogan: (ps.slogan as string) || tagline || `Meet ${product}`,
+    product_intro: (ps.product_intro as string) || tagline,
+    device_context: (ps.device_context as string) || `the ${product} dashboard with clean charts and key metrics`,
+    hero_metric: (ps.hero_metric as string) || '',
+    float_cards: floatCards.length ? floatCards : [
+      { icon: 'bolt', title: 'Fast', desc: 'Ships in minutes' },
+      { icon: 'lock', title: 'Secure', desc: 'Enterprise-grade' },
+      { icon: 'spark', title: 'Simple', desc: 'No setup needed' },
+    ],
+    feature_matrix: featureMatrix.length ? featureMatrix : [
+      { icon: 'bolt', title: 'Fast', desc: 'Built for speed' },
+      { icon: 'chart', title: 'Insightful', desc: 'Clear analytics' },
+    ],
+    reasons: reasons.length ? reasons : [
+      { icon: 'check', title: 'Trusted', desc: 'By modern teams' },
+      { icon: 'star', title: 'Loved', desc: 'High ratings' },
+    ],
+    cta_main: (ps.cta_main as string) || `Try ${product} today`,
+    cta_sub: (ps.cta_sub as string) || 'Scan to get started in seconds',
+    qr_label: (ps.qr_label as string) || 'Scan to Start',
+    footer_slogan: (ps.footer_slogan as string) || '',
+    urls: (ps.urls as string) || '',
+  };
+}
+
+function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
+  const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
+  const sp = o.style_profile ?? {};
+  const lc = o.landing_content ?? {};
+  const ps = (o.poster_spec ?? {}) as Record<string, unknown>;
+  const product = c.product_name;
+  const tagline = c.tagline || '';
+
+  const poster_style = (o.poster_style as unknown) === 'saas_glassmorphism'
+    ? 'saas_glassmorphism'
+    : 'cozy_scrapbook';
+
+  const poster_spec = poster_style === 'saas_glassmorphism'
+    ? normalizeSaasSpec(ps, product, tagline)
+    : normalizeCozySpec(ps, product, tagline);
+
+  // poster_copy kept for backward-compat (landing page, optimizer agent, editor
+  // fallbacks). Map from whichever spec shape we produced.
+  const posterCopy = poster_style === 'saas_glassmorphism'
+    ? {
+        hook: (poster_spec as ReturnType<typeof normalizeSaasSpec>).slogan,
+        what_it_does: (poster_spec as ReturnType<typeof normalizeSaasSpec>).product_intro,
+        features: (poster_spec as ReturnType<typeof normalizeSaasSpec>).feature_matrix.map((f) => f.title).slice(0, 3),
+        cta: (poster_spec as ReturnType<typeof normalizeSaasSpec>).cta_main,
+      }
+    : {
+        hook: (poster_spec as ReturnType<typeof normalizeCozySpec>).hook_line1,
+        what_it_does: (poster_spec as ReturnType<typeof normalizeCozySpec>).subtitle,
+        features: (poster_spec as ReturnType<typeof normalizeCozySpec>).quest_cards.map((q) => q.title).slice(0, 3),
+        cta: (poster_spec as ReturnType<typeof normalizeCozySpec>).qr_label,
+      };
 
   return {
+    poster_style,
     style_profile: {
       palette: {
         primary: (sp.palette as Record<string, string>)?.primary ?? '#4f46e5',
@@ -328,13 +450,7 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
       tone: (sp.tone as string) ?? 'modern',
       layout_hint: (sp.layout_hint as string) ?? '',
     },
-    // poster_copy kept for backward-compat (editor copy card / fallbacks).
-    poster_copy: {
-      hook: (ps.hook_line1 as string) || product,
-      what_it_does: (ps.subtitle as string) || tagline,
-      features: questCards.map((q) => q.title).slice(0, 3),
-      cta: (ps.qr_label as string) || c.cta_text || 'Learn more',
-    },
+    poster_copy: posterCopy,
     landing_content: {
       headline: (lc.headline as string) || product,
       what_it_does: (lc.what_it_does as string) || tagline,
@@ -344,33 +460,7 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
       cta: (lc.cta as string) || c.cta_text || 'Learn more',
     },
     brand_essence: String(o.brand_essence ?? `${product}: clean modern product, friendly approachable feel`).slice(0, 400),
-    poster_spec: {
-      hook_line1: (ps.hook_line1 as string) || `Others just use ${product}.`,
-      hook_line2: (ps.hook_line2 as string) || `You level up with it.`,
-      subtitle: (ps.subtitle as string) || `${product}${tagline ? ' · ' + tagline : ''}`,
-      level_badge: (ps.level_badge as string) || 'Lv.1',
-      xp: (ps.xp as string) || '0 / 100 XP',
-      mascot: (ps.mascot as string) || `a cute chibi mascot embodying ${product}`,
-      stat_nodes: statNodes.length ? statNodes : [
-        { icon: 'spark', label: 'Easy', stars: 5 },
-        { icon: 'bolt', label: 'Fast', stars: 5 },
-        { icon: 'heart', label: 'Loved', stars: 4 },
-      ],
-      quest_cards: questCards.length ? questCards : [
-        { icon: 'spark', title: 'Get started', desc: 'in minutes' },
-      ],
-      conv_left: {
-        heading: String(convLeft.heading ?? `Why ${product}`),
-        lines: asArray(convLeft.lines).slice(0, 3),
-      },
-      conv_right: {
-        heading: String(convRight.heading ?? 'Start in 3 Steps'),
-        steps: asArray(convRight.steps).slice(0, 3),
-      },
-      qr_label: (ps.qr_label as string) || 'Scan to Start',
-      footer_formula: (ps.footer_formula as string) || '',
-      urls: (ps.urls as string) || '',
-    },
+    poster_spec,
   };
 }
 

@@ -19,7 +19,7 @@ export default async function (req: Request): Promise<Response> {
 
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
-  if (!code) return html(notFoundHtml(), 400);
+  if (!code) return html(statusHtml('missing'), 400);
 
   const baseUrl = env('INSFORGE_BASE_URL');
   const client = createAnonClient();
@@ -35,6 +35,8 @@ export default async function (req: Request): Promise<Response> {
   const { device, os } = parseUA(req.headers.get('user-agent') ?? '');
 
   // Log the scan (published-check inside the RPC). Returns { scan_id, is_unique }.
+  // A null result means the code is unknown OR the campaign isn't published —
+  // distinguish the two via link_status so we can explain rather than 404 blindly.
   let scanId: string | null = null;
   try {
     const { data, error } = await client.database.rpc('log_scan', {
@@ -43,10 +45,10 @@ export default async function (req: Request): Promise<Response> {
       p_os: os,
       p_visitor_hash: vhash,
     });
-    if (error || !data) return html(notFoundHtml(), 404);
+    if (error || !data) return await statusResponse(client, code);
     scanId = (data as { scan_id?: string }).scan_id ?? null;
   } catch {
-    return html(notFoundHtml(), 404);
+    return await statusResponse(client, code);
   }
 
   // Fetch the campaign content for this code (anon RLS: published only).
@@ -59,7 +61,7 @@ export default async function (req: Request): Promise<Response> {
     .maybeSingle();
 
   if (selErr || !row || !(row as Record<string, unknown>).campaigns) {
-    return html(notFoundHtml(), 404);
+    return await statusResponse(client, code);
   }
 
   const campaign = (row as { campaigns: CampaignContent }).campaigns;
@@ -114,8 +116,35 @@ function html(body: string, status = 200, setCookie?: string | null): Response {
   return new Response(body, { status, headers });
 }
 
-function notFoundHtml(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found</title></head><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#444"><div style="text-align:center"><h1 style="font-size:3rem;margin:0">404</h1><p>This link isn't active.</p></div></body></html>`;
+type LinkKind = 'missing' | 'unpublished';
+
+// Resolve whether a code is unknown ('missing') or just not published yet
+// ('unpublished') and return the matching page. 'unpublished' is a real,
+// owned link that simply isn't live — explain it (200) rather than 404.
+async function statusResponse(
+  client: ReturnType<typeof createAnonClient>,
+  code: string,
+): Promise<Response> {
+  let kind: LinkKind = 'missing';
+  try {
+    const { data } = await client.database.rpc('link_status', { p_code: code });
+    if (data === 'unpublished' || data === 'published') kind = 'unpublished';
+  } catch {
+    kind = 'missing';
+  }
+  // 'published' shouldn't reach here (log_scan would have succeeded), but if it
+  // does, it's a transient hiccup — treat as not-live rather than not-found.
+  return html(statusHtml(kind), kind === 'missing' ? 404 : 200);
+}
+
+function statusHtml(kind: LinkKind): string {
+  const title = kind === 'unpublished' ? "Poster isn't live yet" : 'Link not found';
+  const heading = kind === 'unpublished' ? 'Not live yet' : '404';
+  const message =
+    kind === 'unpublished'
+      ? "This poster's campaign hasn't been published. Once the owner publishes it, this link will work."
+      : "This link isn't active.";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#444;background:#faf7f1"><div style="text-align:center;max-width:340px;padding:24px"><h1 style="font-size:2.4rem;margin:0 0 8px">${heading}</h1><p style="line-height:1.5">${message}</p><p style="font-size:.78rem;opacity:.4;margin-top:18px">via Posterlytics</p></div></body></html>`;
 }
 
 function landingHtml(

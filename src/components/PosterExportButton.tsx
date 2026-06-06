@@ -45,8 +45,9 @@ export function PosterExportButton({ campaign, placement }: Props) {
       <button className="btn secondary sm" onClick={handleExport} disabled={busy}>
         {busy ? 'Exporting…' : `Export PNG`}
       </button>
-      {/* Offscreen render target bound to this placement's QR. */}
-      <div style={{ position: 'fixed', left: -10000, top: 0, pointerEvents: 'none' }} aria-hidden>
+      {/* Offscreen render target bound to this placement's QR. Fixed width so
+          the responsive Poster (width:100%) renders at a defined export size. */}
+      <div style={{ position: 'fixed', left: -10000, top: 0, width: 440, pointerEvents: 'none' }} aria-hidden>
         <Poster ref={offscreenRef} campaign={campaign} code={placement.code} />
       </div>
     </>
