@@ -145,46 +145,51 @@ function buildCozyPrompt(c: Record<string, unknown>): string {
 torn paper edges, washi tape, sticky notes, dotted guide lines, scattered leaf/flower/heart doodles, small stars,
 sparkles and coins around the margins. Warm dark-brown body text (never pure black). One cohesive warm pastel palette.
 
-BRAND TO HONOR (infuse the palette, logo motif and vibe into the cozy style, do NOT copy a corporate look):
+Honor this brand — infuse its palette, logo motif and vibe into the cozy style, do not copy a corporate look:
 ${essence || product}
 Lean the primary accents toward ${primary} and ${accent}, but keep everything warm, soft and hand-painted.
 
-Lay the poster out top-to-bottom in this exact structure:
+CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings given below. Do NOT print any of
+these layout/section descriptions, position words, or instruction words as visible text. Render no labels like "status
+bar", "hero headline", "subtitle", "mascot", "quest cards", "conversion row", "footer", or "empty background" — those
+are directions, not content.
 
-1) STATUS BAR (very top, thin): left = a pixel-art calendar icon with a date; right = a laurel level badge
-   "${spec.level_badge ?? 'Lv.1'}" and an XP progress bar reading "${spec.xp ?? '0 / 100 XP'}".
+Arrange it top to bottom:
 
-2) HERO HEADLINE (upper third, centered, DOMINANT): an oversized hand-painted rounded BRUSH-lettered title, two lines,
-   in a warm vermilion orange-red, with hand-drawn arrows/hearts/leaf sprigs tucked around the words:
-      Line 1: "${spec.hook_line1 ?? `Others use ${product}.`}"
-      Line 2: "${spec.hook_line2 ?? 'You level up.'}"
+- A thin status strip at the very top: on the left a pixel-art calendar icon with a date; on the right a laurel level
+  badge reading "${spec.level_badge ?? 'Lv.1'}" and an XP progress bar reading "${spec.xp ?? '0 / 100 XP'}".
 
-3) SUBTITLE on a washi-tape strip right below the title:
-      "${spec.subtitle ?? product}"
+- The dominant hero area in the upper third, centered: an oversized hand-painted rounded brush-lettered title of two
+  lines, in a warm vermilion orange-red, with hand-drawn arrows/hearts/leaf sprigs tucked around the words —
+      line 1 reads "${spec.hook_line1 ?? `Others use ${product}.`}"
+      line 2 reads "${spec.hook_line2 ?? 'You level up.'}"
 
-4) MASCOT & STAT RING (center): one adorable chibi mascot standing on a little grassy patch —
+- Just below the title, on a washi-tape strip, a subtitle reading "${spec.subtitle ?? product}".
+
+- In the center, one adorable chibi mascot standing on a little grassy patch —
       ${spec.mascot ?? `a cute creature embodying ${product}`}
-   ringed by an arc of soft pastel circular stat nodes (one tint each: green, yellow, pink, blue, peach), each a small
-   hand-drawn icon + label + a 5-star rating shown as filled/empty stars:
+  ringed by an arc of soft pastel circular stat nodes (one tint each: green, yellow, pink, blue, peach), each a small
+  hand-drawn icon with a label and a 5-star rating shown as filled/empty stars:
 ${statLines || '   • Easy ★★★★★\n   • Fast ★★★★★'}
 
-5) QUEST CARDS (middle band): exactly ${(spec.quest_cards ?? []).length || 3} torn-paper sticky-note cards in a row,
-   each with washi-tape corners and a small hand-drawn icon:
+- A middle band of exactly ${(spec.quest_cards ?? []).length || 3} torn-paper sticky-note cards in a row, each with
+  washi-tape corners and a small hand-drawn icon:
 ${questLines || '   • Get started — in minutes (spark icon)'}
 
-6) CONVERSION ROW (lower band, around 75-80% down): a calm CLEAN BLANK light cream SQUARE panel, perfectly CENTERED
-   horizontally — leave it completely empty (no text, no icons, no caption) as blank space for a sticker to be added
-   later. DO NOT draw any QR code, barcode, scan square, pixel-grid, OR any words inside or beneath this panel.
-   To the LEFT of that empty panel, a torn-paper note titled "${spec.conv_left?.heading ?? `Why ${product}`}":
+- A lower band (around 70-84% down): keep the CENTER of this band as completely clean, plain, EMPTY paper background — a
+  calm open roughly-square area, about one third of the width, with absolutely nothing in it: no card, no panel, no
+  frame, no outline, no box, no sticker, no QR code, no barcode, no pixel-grid, and no text. A real QR sticker is
+  composited there afterward, so any drawn shape or label there would clash. To the LEFT of that empty center area, a
+  torn-paper note titled "${spec.conv_left?.heading ?? `Why ${product}`}":
 ${leftLines || '     - Save time\n     - Do more'}
-   To the RIGHT, a torn-paper note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
+  and to the RIGHT, a torn-paper note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
 ${rightSteps || '     1. Scan\n     2. Sign up\n     3. Go'}
 
-7) FOOTER (very bottom, centered): a formula-style tagline${spec.footer_formula ? ` "${spec.footer_formula}"` : ''} framed
-   by little doodles${spec.urls ? `, with the url "${spec.urls}" on a small pill` : ''}.
+- At the very bottom, centered, a formula-style tagline${spec.footer_formula ? ` reading "${spec.footer_formula}"` : ''} framed
+  by little doodles${spec.urls ? `, with the url "${spec.urls}" on a small pill` : ''}.
 
-All hand-lettered text must be crisp, legible and correctly spelled. Keep one consistent hand-drawn icon style and one
-warm pastel palette throughout. High quality, 8k, storybook watercolor.`;
+All hand-lettered text must be crisp, legible and correctly spelled, and limited to the quoted strings above. Keep one
+consistent hand-drawn icon style and one warm pastel palette throughout. High quality, 8k, storybook watercolor.`;
 }
 
 // Compose the text-to-image prompt for the premium SaaS / glassmorphism
@@ -209,53 +214,61 @@ function buildSaasPrompt(c: Record<string, unknown>): string {
     .map((r) => `     • ${r.title}: ${r.desc} (${r.icon} icon)`)
     .join('\n');
 
-  return `Create a single premium PORTRAIT 2:3 SaaS PRODUCT-LAUNCH poster — high-end, glassmorphism + editorial-magazine
+  return `Create a single premium portrait 2:3 SaaS product-launch poster — high-end, glassmorphism + editorial-magazine
 aesthetic: frosted glass cards with soft long shadows, subtle gradients, a realistic 3D device mockup, crisp thin-line
-icons, generous whitespace, professional and trustworthy. NOT cartoon, NOT childish, NOT cluttered.
+icons, generous whitespace, professional and trustworthy. Not cartoon, not childish, not cluttered.
 
-SPLIT LAYOUT (must be clearly visible): the UPPER ~60% is a LIGHT zone (off-white to light-gray gradient); the LOWER
-~40% is a DARK zone (near-black charcoal #0E0E0E). The eye flows top→bottom: brand → product → reasons → action.
+The composition is split into two clearly visible zones: the upper ~60% is a light zone (off-white to light-gray
+gradient); the lower ~40% is a dark zone (near-black charcoal #0E0E0E). The eye flows top to bottom: brand, then
+product, then reasons, then a call to action.
 
-BRAND TO HONOR (infuse the palette, logo motif and vibe — do not invent an unrelated look):
+Honor this brand — infuse its palette, logo motif and vibe, do not invent an unrelated look:
 ${essence || product}
-Use ${primary} as the brand primary (headline hammer, highlights, data bars) and ${accent} as the accent/metallic glow.
-Stay within ONE brand color + neutrals — no rogue colors. If the brand is mono black/white, add tasteful ${accent}
-accents and a metallic pedestal glow as the only vivid decoration.
+Use ${primary} as the brand primary (headline emphasis, highlights, data bars) and ${accent} as the accent / metallic
+glow. Stay within one brand color plus neutrals — no rogue colors. If the brand is mono black/white, add tasteful
+${accent} accents and a metallic pedestal glow as the only vivid decoration.
 
-Lay it out top-to-bottom:
+CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings given below. Do NOT print any of
+these layout/section descriptions, position words, or instruction words as visible text. Render no labels like "brand
+bar", "hero headline", "device", "feature matrix", "cta", "footer", or "empty background" — those are directions, not
+content.
 
-1) BRAND BAR (very top, thin, LIGHT zone): top-left a small square logo mark + the brand name "${product}"; top-right a
-   small laurel ornament + a short identity tagline.
+Arrange it top to bottom:
 
-2) HERO HEADLINE (upper-left, LIGHT zone, DOMINANT): an oversized bold SERIF display headline "${spec.headline ?? product}"
-   with the second half in ${primary} as a visual hammer${spec.sub_name ? `, a lighter sub-name "${spec.sub_name}" beneath it` : ''}.
-   Under it a short ${primary} divider line, then the slogan "${spec.slogan ?? product}", then a 2-3 line product intro:
-   "${spec.product_intro ?? ''}".
+- Very top, a thin brand row in the light zone: top-left a small square logo mark beside the brand name "${product}";
+  top-right a small laurel ornament beside a short identity tagline.
 
-3) 3D DEVICE (center-right, LIGHT zone): a realistic 3D device (laptop or smartphone) resting on a ${accent} metallic
-   circular pedestal with a soft glow halo. The screen shows a clean, credible, READABLE product UI: ${spec.device_context ?? `the ${product} dashboard`}${spec.hero_metric ? `, with one bold hero metric "${spec.hero_metric}" prominent` : ''}.
-   The on-screen UI must look real and sharp — no garbled text, no fake glyphs.
+- Upper-left of the light zone, the dominant hero area: an oversized bold serif display headline reading "${spec.headline ?? product}"
+  with the second half in ${primary} as a visual emphasis${spec.sub_name ? `, and a lighter sub-name "${spec.sub_name}" beneath it` : ''}.
+  Below it a short ${primary} divider line, then the slogan "${spec.slogan ?? product}", then a 2-3 line product intro:
+  "${spec.product_intro ?? ''}".
 
-4) FLOATING GLASS CARDS (around the device, LIGHT zone): 3 small frosted-glass cards, each one thin-line icon + a short
-   title + a tiny description, gently overlapping the device:
+- Center-right of the light zone, a realistic 3D device (laptop or smartphone) resting on a ${accent} metallic circular
+  pedestal with a soft glow halo. The screen shows a clean, credible, readable product UI: ${spec.device_context ?? `the ${product} dashboard`}${spec.hero_metric ? `, with one bold hero metric "${spec.hero_metric}" prominent` : ''}.
+  The on-screen UI must look real and sharp — no garbled text, no fake glyphs.
+
+- Around the device, 3 small frosted-glass cards gently overlapping it, each a thin-line icon with a short title and a
+  tiny description:
 ${floatLines || '     • Fast — ships in minutes (bolt icon)'}
 
-5) FEATURE MATRIX (lower part of LIGHT zone): a small heading "Core Features" + a 2-column tidy grid of thin-line icon +
-   feature name + one-line description:
+- Lower part of the light zone, a tidy 2-column grid under a small heading reading "Core Features", each row a thin-line
+  icon with a feature name and a one-line description:
 ${featureLines || '     • Fast: built for speed (bolt icon)'}
 
-6) WHY-CHOOSE BAND (top of DARK zone): a heading "Why ${product}?" in white, then a row of 4 thin-line icons each with a
-   short title + one line, evenly spaced, light-gray text on the dark background:
+- Top of the dark zone, a heading reading "Why ${product}?" in white, then a row of 4 thin-line icons evenly spaced, each
+  with a short title and one line of light-gray text on the dark background:
 ${reasonLines || '     • Trusted: by modern teams (check icon)'}
 
-7) CTA BAND (DARK zone, around 78-82% down): on the LEFT a large decisive CTA headline "${spec.cta_main ?? `Try ${product}`}"
-   (key words in ${primary}) with a sub-line "${spec.cta_sub ?? ''}". Perfectly CENTERED horizontally in this band,
-   leave a CLEAN BLANK light SQUARE panel (a plain rounded white card) as completely empty negative space for a sticker
-   to be added later — DO NOT draw any QR code, barcode, scan square, pixel-grid, OR any words inside or beneath it.
-   Keep the CTA headline text on the left clear of this centered panel so they do not overlap.
+- Lower dark zone (around 74-90% down): on the LEFT, a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
+  (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". The RIGHT third of this band must be
+  left as completely clean, plain, EMPTY dark background — a calm open roughly-square area with absolutely nothing in it:
+  no card, no panel, no frame, no outline, no box, no sticker, no QR code, no barcode, no pixel-grid, and no text. A real
+  QR sticker is composited there afterward, so any drawn shape or label there would clash. Keep the call-to-action text
+  on the left well clear of this empty right-side area so they never overlap.
 
-8) FOOTER (very bottom, centered): a short ALL-CAPS letter-spaced tagline${spec.footer_slogan ? ` "${spec.footer_slogan}"` : ''}${spec.urls ? `, with "${spec.urls}" on a small pill` : ''}, key words in ${primary}.
+- Very bottom, centered, a short all-caps letter-spaced tagline${spec.footer_slogan ? ` reading "${spec.footer_slogan}"` : ''}${spec.urls ? `, with "${spec.urls}" on a small pill` : ''}, key words in ${primary}.
 
-All text must be crisp, correctly spelled and legible. One consistent thin-line icon style throughout. Frosted glass must
-read as translucent with soft shadows. High-end SaaS launch aesthetic, soft studio lighting, 8k, sharp, clean.`;
+All rendered text must be crisp, correctly spelled and legible, and limited to the quoted strings above. One consistent
+thin-line icon style throughout. Frosted glass must read as translucent with soft shadows. High-end SaaS launch
+aesthetic, soft studio lighting, 8k, sharp, clean.`;
 }

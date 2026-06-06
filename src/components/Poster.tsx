@@ -27,10 +27,10 @@ interface Dims {
 }
 const POSTER_MAX_W = 440 // fits the editor's poster column without clipping
 const POSTER_DIMS: Record<PosterStyle, Dims> = {
-  // cozy prompt reserves a clean panel CENTERED in the lower band.
-  cozy_scrapbook: { qrLeftPct: 50, qrTopPct: 77, qrScale: 0.22 },
-  // saas prompt reserves a clean panel in the lower-RIGHT of the dark CTA band.
-  saas_glassmorphism: { qrLeftPct: 72, qrTopPct: 84, qrScale: 0.2 },
+  // cozy prompt keeps a clean empty area CENTERED in the lower band.
+  cozy_scrapbook: { qrLeftPct: 50, qrTopPct: 77, qrScale: 0.24 },
+  // saas prompt keeps a clean empty area in the RIGHT-third of the dark CTA band.
+  saas_glassmorphism: { qrLeftPct: 75, qrTopPct: 82, qrScale: 0.24 },
 }
 
 export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code }, ref) {
