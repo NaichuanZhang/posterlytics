@@ -90,17 +90,37 @@ export default async function (req: Request): Promise<Response> {
   brand_assets.primary_image_url = brand_assets.images[0]?.url;
   brand_assets.theme_color = assets.themeColor;
 
-  // 3. gpt-4o → poster_copy + landing_content + style_profile (strict JSON).
+  // 3. gpt-4o → landing_content + style_profile + brand_essence + poster_spec.
+  // The poster is a fully AI-illustrated cozy-scrapbook image; poster_spec fills
+  // the gamified template zones, brand_essence is a word-portrait that lets the
+  // image model (which gets text only) infuse the real brand.
   const visibleText = stripToText(scrapeHtml).slice(0, 8000);
   const sys =
-    'You are a senior product marketer and brand designer. Given a product website and its GTM inputs, ' +
-    'produce advertising copy and a faithful style profile. Output STRICT JSON only — no prose, no code fences. ' +
-    'Schema: {"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
+    'You are a senior product marketer, brand designer, and gamification copywriter. Given a product website and ' +
+    'its GTM inputs, produce a faithful style profile, landing copy, a brand word-portrait, and a structured spec ' +
+    'for a cozy gamified watercolor poster. Output STRICT JSON only — no prose, no code fences.\n' +
+    'Schema: {' +
+    '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
     '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
-    '"poster_copy":{"hook":"<=6 word punchy headline","what_it_does":"one sentence","features":["3 short benefit phrases"],"cta":"<=3 words"},' +
     '"landing_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
-    '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"}}. ' +
-    'Match the brand\'s real palette/fonts/tone when discernible from the page; otherwise infer tasteful defaults. ' +
+    '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
+    '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
+    'UI vibe, signature colors (name the hex), and overall feel",' +
+    '"poster_spec":{' +
+    '"hook_line1":"<=5 words, the foil, e.g. \'Others ship updates.\'",' +
+    '"hook_line2":"<=5 words, the payoff, e.g. \'You ship attention.\'",' +
+    '"subtitle":"PRODUCT · one-line positioning",' +
+    '"level_badge":"a short level tag, e.g. \'Lv.26\'","xp":"e.g. \'94 / 100 XP\'",' +
+    '"mascot":"a cute chibi creature that literally EMBODIES this product (what object/animal it should be, its expression, what it holds)",' +
+    '"stat_nodes":[{"icon":"one-word icon idea","label":"<=2 words","stars":4}, ... exactly 5, stars 0-5],' +
+    '"quest_cards":[{"icon":"one-word icon idea","title":"<=3 words","desc":"<=5 words"}, ... exactly 3],' +
+    '"conv_left":{"heading":"e.g. Why <Product>","lines":["3 short benefit lines"]},' +
+    '"conv_right":{"heading":"e.g. Start in 3 Steps","steps":["3 short numbered steps"]},' +
+    '"qr_label":"<=4 words, e.g. Scan to Start",' +
+    '"footer_formula":"A × B × C (three core value words)",' +
+    '"urls":"primary url, optional secondary"}}\n' +
+    'Make the hook a punchy \'Others <do X>. / You <do Y>.\' contrast specific to this product. Keep all poster text ' +
+    'SHORT and legible. Match the brand\'s real palette/fonts/tone when discernible; otherwise infer tasteful defaults. ' +
     `If a theme color was detected, prefer it as the primary: ${assets.themeColor || 'none'}.`;
   const user =
     `PRODUCT NAME: ${campaign.product_name}\n` +
@@ -114,7 +134,7 @@ export default async function (req: Request): Promise<Response> {
     const raw = await aiChat(baseUrl, apiKey, [
       { role: 'system', content: sys },
       { role: 'user', content: user },
-    ], { maxTokens: 1400 });
+    ], { maxTokens: 2200 });
     parsed = normalize(extractJson(raw), campaign as Record<string, string>);
   } catch {
     // One repair retry with a terse reminder.
@@ -122,7 +142,7 @@ export default async function (req: Request): Promise<Response> {
       const raw2 = await aiChat(baseUrl, apiKey, [
         { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
         { role: 'user', content: user },
-      ], { maxTokens: 1400 });
+      ], { maxTokens: 2200 });
       parsed = normalize(extractJson(raw2), campaign as Record<string, string>);
     } catch {
       parsed = fallbackContent(campaign as Record<string, string>);
@@ -136,6 +156,8 @@ export default async function (req: Request): Promise<Response> {
       style_profile: parsed.style_profile,
       poster_copy: parsed.poster_copy,
       landing_content: parsed.landing_content,
+      brand_essence: parsed.brand_essence,
+      poster_spec: parsed.poster_spec,
       brand_assets,
       status: 'draft',
     })
@@ -146,8 +168,9 @@ export default async function (req: Request): Promise<Response> {
     style_profile: parsed.style_profile,
     poster_copy: parsed.poster_copy,
     landing_content: parsed.landing_content,
+    brand_essence: parsed.brand_essence,
+    poster_spec: parsed.poster_spec,
     brand_assets,
-    needs_hero: brand_assets.images.length === 0,
   });
 }
 
@@ -155,6 +178,8 @@ interface ParsedContent {
   style_profile: unknown;
   poster_copy: unknown;
   landing_content: unknown;
+  brand_essence: string;
+  poster_spec: unknown;
 }
 
 // --- helpers -------------------------------------------------------------
@@ -265,6 +290,29 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
   const sp = o.style_profile ?? {};
   const pc = o.poster_copy ?? {};
   const lc = o.landing_content ?? {};
+  const ps = (o.poster_spec ?? {}) as Record<string, unknown>;
+  const product = c.product_name;
+  const tagline = c.tagline || '';
+
+  // poster_spec: clamp/shape the gamified template zones, with sane fallbacks.
+  const statNodes = (Array.isArray(ps.stat_nodes) ? ps.stat_nodes : [])
+    .slice(0, 5)
+    .map((n) => {
+      const x = (n ?? {}) as Record<string, unknown>;
+      const stars = Math.max(0, Math.min(5, Math.round(Number(x.stars) || 4)));
+      return { icon: String(x.icon ?? 'star'), label: String(x.label ?? '').slice(0, 24), stars };
+    })
+    .filter((n) => n.label);
+  const questCards = (Array.isArray(ps.quest_cards) ? ps.quest_cards : [])
+    .slice(0, 3)
+    .map((n) => {
+      const x = (n ?? {}) as Record<string, unknown>;
+      return { icon: String(x.icon ?? 'spark'), title: String(x.title ?? '').slice(0, 30), desc: String(x.desc ?? '').slice(0, 60) };
+    })
+    .filter((q) => q.title);
+  const convLeft = (ps.conv_left ?? {}) as Record<string, unknown>;
+  const convRight = (ps.conv_right ?? {}) as Record<string, unknown>;
+
   return {
     style_profile: {
       palette: {
@@ -280,37 +328,52 @@ function normalize(raw: unknown, c: Record<string, string>): ParsedContent {
       tone: (sp.tone as string) ?? 'modern',
       layout_hint: (sp.layout_hint as string) ?? '',
     },
+    // poster_copy kept for backward-compat (editor copy card / fallbacks).
     poster_copy: {
-      hook: (pc.hook as string) || c.product_name,
-      what_it_does: (pc.what_it_does as string) || c.tagline || '',
-      features: asArray(pc.features).slice(0, 3),
-      cta: (pc.cta as string) || c.cta_text || 'Learn more',
+      hook: (ps.hook_line1 as string) || product,
+      what_it_does: (ps.subtitle as string) || tagline,
+      features: questCards.map((q) => q.title).slice(0, 3),
+      cta: (ps.qr_label as string) || c.cta_text || 'Learn more',
     },
     landing_content: {
-      headline: (lc.headline as string) || c.product_name,
-      what_it_does: (lc.what_it_does as string) || c.tagline || '',
+      headline: (lc.headline as string) || product,
+      what_it_does: (lc.what_it_does as string) || tagline,
       how_it_works: asArray(lc.how_it_works).slice(0, 4),
       why_use_it: asArray(lc.why_use_it).slice(0, 4),
       features: asArray(lc.features).slice(0, 6),
       cta: (lc.cta as string) || c.cta_text || 'Learn more',
     },
+    brand_essence: String(o.brand_essence ?? `${product}: clean modern product, friendly approachable feel`).slice(0, 400),
+    poster_spec: {
+      hook_line1: (ps.hook_line1 as string) || `Others just use ${product}.`,
+      hook_line2: (ps.hook_line2 as string) || `You level up with it.`,
+      subtitle: (ps.subtitle as string) || `${product}${tagline ? ' · ' + tagline : ''}`,
+      level_badge: (ps.level_badge as string) || 'Lv.1',
+      xp: (ps.xp as string) || '0 / 100 XP',
+      mascot: (ps.mascot as string) || `a cute chibi mascot embodying ${product}`,
+      stat_nodes: statNodes.length ? statNodes : [
+        { icon: 'spark', label: 'Easy', stars: 5 },
+        { icon: 'bolt', label: 'Fast', stars: 5 },
+        { icon: 'heart', label: 'Loved', stars: 4 },
+      ],
+      quest_cards: questCards.length ? questCards : [
+        { icon: 'spark', title: 'Get started', desc: 'in minutes' },
+      ],
+      conv_left: {
+        heading: String(convLeft.heading ?? `Why ${product}`),
+        lines: asArray(convLeft.lines).slice(0, 3),
+      },
+      conv_right: {
+        heading: String(convRight.heading ?? 'Start in 3 Steps'),
+        steps: asArray(convRight.steps).slice(0, 3),
+      },
+      qr_label: (ps.qr_label as string) || 'Scan to Start',
+      footer_formula: (ps.footer_formula as string) || '',
+      urls: (ps.urls as string) || '',
+    },
   };
 }
 
 function fallbackContent(c: Record<string, string>): ParsedContent {
-  return normalize(
-    {
-      style_profile: {},
-      poster_copy: { hook: c.product_name, what_it_does: c.tagline ?? '', features: [], cta: c.cta_text },
-      landing_content: {
-        headline: c.product_name,
-        what_it_does: c.tagline ?? '',
-        how_it_works: [],
-        why_use_it: [],
-        features: [],
-        cta: c.cta_text,
-      },
-    },
-    c,
-  );
+  return normalize({}, c);
 }

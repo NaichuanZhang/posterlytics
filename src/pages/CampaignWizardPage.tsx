@@ -9,8 +9,8 @@ type Phase = 'form' | 'creating' | 'analyzing' | 'hero' | 'done' | 'error'
 const PHASE_LABEL: Record<Phase, string> = {
   form: '',
   creating: 'Creating campaign…',
-  analyzing: 'Reading your site — extracting brand, assets & product story…',
-  hero: 'Painting an on-brand hero image…',
+  analyzing: 'Reading your site — extracting brand, story & game stats…',
+  hero: 'Illustrating your poster — this takes ~30s…',
   done: 'Done!',
   error: '',
 }
@@ -57,21 +57,15 @@ export function CampaignWizardPage() {
     }
     const campaignId = (created as { id: string }).id
 
-    // 2. Analyze: scrape + real assets + substance + style.
+    // 2. Analyze: scrape + brand essence + gamified poster spec + landing copy.
     setPhase('analyzing')
     try {
-      const { data: analysis, error: aErr } = await insforge.functions.invoke('analyze', {
-        body: { campaignId },
-      })
+      const { error: aErr } = await insforge.functions.invoke('analyze', { body: { campaignId } })
       if (aErr) throw new Error(aErr.message ?? 'Analysis failed')
 
-      // 3. Hero fallback only if no real product imagery was found.
-      const needsHero = (analysis as { needs_hero?: boolean })?.needs_hero
-      if (needsHero) {
-        setPhase('hero')
-        // Hero failure is non-fatal — the poster falls back to a gradient.
-        await insforge.functions.invoke('hero', { body: { campaignId } }).catch(() => {})
-      }
+      // 3. Render the full cozy-scrapbook poster image (always).
+      setPhase('hero')
+      await insforge.functions.invoke('hero', { body: { campaignId } })
     } catch (err) {
       // Generation hiccup is recoverable in the editor; proceed anyway.
       console.error(err)

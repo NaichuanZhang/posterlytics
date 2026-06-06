@@ -28,16 +28,9 @@ export function PosterEditorPage() {
     if (!campaign) return
     setBusy('regen')
     try {
+      // Re-extract the spec, then re-render the poster image.
       const { error } = await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
-      if (!error) {
-        const fresh = await insforge.database
-          .from('campaigns')
-          .select('brand_assets')
-          .eq('id', campaign.id)
-          .maybeSingle()
-        const needsHero = !((fresh.data as { brand_assets?: { images?: unknown[] } })?.brand_assets?.images?.length)
-        if (needsHero) await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } }).catch(() => {})
-      }
+      if (!error) await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
       await reload()
     } finally {
       setBusy(null)
@@ -97,25 +90,23 @@ export function PosterEditorPage() {
         <Link to="/">← All campaigns</Link>
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 560px) 1fr', gap: 28, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 480px) 1fr', gap: 28, alignItems: 'start' }}>
         {/* Poster preview */}
-        <div className="card" style={{ display: 'grid', placeItems: 'center', background: 'var(--panel-2)' }}>
-          <div style={{ transform: 'scale(0.92)', transformOrigin: 'top center' }}>
-            <Poster campaign={campaign} code={previewCode} />
-          </div>
+        <div className="card" style={{ display: 'grid', placeItems: 'center', background: 'var(--panel-2)', padding: 16 }}>
+          <Poster campaign={campaign} code={previewCode} />
         </div>
 
         {/* Controls */}
         <div className="grid" style={{ gap: 16 }}>
           <div className="card">
-            <h3 style={{ margin: '0 0 10px' }}>Poster copy</h3>
+            <h3 style={{ margin: '0 0 10px' }}>Poster spec</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
-              Generated from your site. Regenerate for a fresh take.
+              Illustrated from your site. Regenerate for a fresh take.
             </p>
             <dl style={{ margin: 0, display: 'grid', gap: 8, fontSize: '0.9rem' }}>
-              <Row label="Hook" value={campaign.poster_copy?.hook} />
-              <Row label="One-liner" value={campaign.poster_copy?.what_it_does} />
-              <Row label="Features" value={(campaign.poster_copy?.features ?? []).join(' · ')} />
+              <Row label="Hook" value={[campaign.poster_spec?.hook_line1, campaign.poster_spec?.hook_line2].filter(Boolean).join(' ')} />
+              <Row label="Subtitle" value={campaign.poster_spec?.subtitle} />
+              <Row label="Mascot" value={campaign.poster_spec?.mascot} />
               <Row label="Tone" value={campaign.style_profile?.tone} />
             </dl>
             <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>

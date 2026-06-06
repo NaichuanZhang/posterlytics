@@ -40,6 +40,34 @@ export interface BrandAssets {
   theme_color?: string
 }
 
+export interface StatNode {
+  icon: string
+  label: string
+  stars: number
+}
+
+export interface QuestCard {
+  icon: string
+  title: string
+  desc: string
+}
+
+export interface PosterSpec {
+  hook_line1: string
+  hook_line2: string
+  subtitle: string
+  level_badge: string
+  xp: string
+  mascot: string
+  stat_nodes: StatNode[]
+  quest_cards: QuestCard[]
+  conv_left: { heading: string; lines: string[] }
+  conv_right: { heading: string; steps: string[] }
+  qr_label: string
+  footer_formula: string
+  urls: string
+}
+
 export interface Campaign {
   id: string
   user_id: string
@@ -52,6 +80,8 @@ export interface Campaign {
   poster_copy: PosterCopy | null
   landing_content: LandingContent | null
   brand_assets: BrandAssets | null
+  brand_essence: string | null
+  poster_spec: PosterSpec | null
   hero_image_url: string | null
   hero_image_key: string | null
   status: CampaignStatus
