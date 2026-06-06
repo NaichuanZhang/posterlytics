@@ -85,19 +85,22 @@ export function CampaignWizardPage() {
 
   return (
     <Layout>
-      <h1 className="page-title">New campaign</h1>
-      <p className="page-sub">Tell us about your product. We'll scrape your site and generate an on-brand poster.</p>
+      <div className="hero-card">
+        <span className="eyebrow">Paste a link, get an on-brand poster</span>
+        <h1>Tell us about your product</h1>
+        <p>We scrape your site for brand style, imagery, and copy — then generate an on-brand poster with a tracked QR for every placement.</p>
+      </div>
 
       {working ? (
-        <div className="card center" style={{ padding: 48 }}>
-          <div className="spinner" style={{ margin: '0 auto 18px' }} />
-          <p style={{ fontSize: '1.05rem' }}>{PHASE_LABEL[phase]}</p>
+        <div className="card center" style={{ padding: 56 }}>
+          <div className="spinner" style={{ margin: '0 auto 20px' }} />
+          <p style={{ fontSize: '1.05rem', fontWeight: 600 }}>{PHASE_LABEL[phase]}</p>
           <p className="muted" style={{ marginTop: 6 }}>This takes ~10–25 seconds.</p>
         </div>
       ) : (
-        <form className="card" onSubmit={handleSubmit} style={{ maxWidth: 620 }}>
-          <div className="field">
-            <label>Product website URL *</label>
+        <form className="card" onSubmit={handleSubmit}>
+          <div className="field field-num">
+            <label data-num="1">Product website URL <span className="req">required</span></label>
             <input
               className="input"
               type="url"
@@ -108,8 +111,8 @@ export function CampaignWizardPage() {
             />
             <div className="hint">We scrape this for your brand style, logo, imagery, and product story.</div>
           </div>
-          <div className="field">
-            <label>Product name *</label>
+          <div className="field field-num">
+            <label data-num="2">Product name <span className="req">required</span></label>
             <input
               className="input"
               required
@@ -118,8 +121,8 @@ export function CampaignWizardPage() {
               onChange={(e) => setProductName(e.target.value)}
             />
           </div>
-          <div className="field">
-            <label>Tagline (optional)</label>
+          <div className="field field-num">
+            <label data-num="3">Tagline <span className="hint" style={{ display: 'inline', marginLeft: 4 }}>(optional)</span></label>
             <input
               className="input"
               placeholder="The fastest way to ship dashboards"
@@ -127,9 +130,9 @@ export function CampaignWizardPage() {
               onChange={(e) => setTagline(e.target.value)}
             />
           </div>
-          <div className="row" style={{ gap: 16 }}>
-            <div className="field" style={{ flex: 1 }}>
-              <label>Call to action *</label>
+          <div className="row wrap" style={{ gap: 18, alignItems: 'flex-start' }}>
+            <div className="field field-num" style={{ flex: '1 1 180px' }}>
+              <label data-num="4">Call to action <span className="req">required</span></label>
               <input
                 className="input"
                 required
@@ -138,8 +141,8 @@ export function CampaignWizardPage() {
                 onChange={(e) => setCtaText(e.target.value)}
               />
             </div>
-            <div className="field" style={{ flex: 2 }}>
-              <label>Destination URL *</label>
+            <div className="field field-num" style={{ flex: '2 1 280px' }}>
+              <label data-num="5">Destination URL <span className="req">required</span></label>
               <input
                 className="input"
                 type="url"
@@ -154,9 +157,9 @@ export function CampaignWizardPage() {
 
           {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
-          <div className="row">
+          <div className="row" style={{ marginTop: 6 }}>
             <button className="btn" type="submit">
-              Generate poster →
+              Generate poster <span className="btn-icon">→</span>
             </button>
             <button type="button" className="btn ghost" onClick={() => navigate('/')}>
               Cancel

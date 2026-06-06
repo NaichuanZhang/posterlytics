@@ -4,10 +4,12 @@ import { insforge } from '../lib/insforge'
 import type { Campaign } from '../lib/types'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
+import { useReveal } from '../hooks/useReveal'
 
 export function CampaignsListPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
+  const revealRef = useReveal<HTMLDivElement>([campaigns.length])
 
   useEffect(() => {
     insforge.database
@@ -22,35 +24,40 @@ export function CampaignsListPage() {
 
   return (
     <Layout>
-      <div className="row between" style={{ marginBottom: 4 }}>
-        <h1 className="page-title">Campaigns</h1>
-        <Link to="/campaigns/new" className="btn">
-          + New campaign
-        </Link>
+      <div className="hero-card" style={{ textAlign: 'left' }}>
+        <div className="row between wrap" style={{ gap: 16 }}>
+          <div>
+            <span className="eyebrow">Your campaigns</span>
+            <h1 style={{ margin: '12px 0 6px' }}>Which placement actually converts?</h1>
+            <p style={{ margin: 0 }}>Every campaign makes an on-brand poster and mints a tracked QR per placement.</p>
+          </div>
+          <Link to="/campaigns/new" className="btn">
+            New campaign <span className="btn-icon">→</span>
+          </Link>
+        </div>
       </div>
-      <p className="page-sub">Each campaign makes an on-brand poster and tracks which placement converts.</p>
 
       {loading ? (
         <Spinner />
       ) : campaigns.length === 0 ? (
-        <div className="card center" style={{ padding: 48 }}>
-          <p style={{ fontSize: '1.1rem', marginBottom: 6 }}>No campaigns yet</p>
-          <p className="muted" style={{ marginBottom: 20 }}>
-            Paste a product URL and we'll generate an on-brand ad poster + tracked QR links.
+        <div className="card center" style={{ padding: 56 }}>
+          <p style={{ fontSize: '1.15rem', marginBottom: 8, letterSpacing: '-0.01em' }}>No campaigns yet</p>
+          <p className="muted" style={{ marginBottom: 24, maxWidth: '42ch', marginInline: 'auto' }}>
+            Paste a product URL and we'll generate an on-brand ad poster plus tracked QR links.
           </p>
           <Link to="/campaigns/new" className="btn">
-            Create your first campaign
+            Create your first campaign <span className="btn-icon">→</span>
           </Link>
         </div>
       ) : (
-        <div className="grid cols-2">
+        <div className="grid cols-2" ref={revealRef}>
           {campaigns.map((c) => {
             const thumb = c.brand_assets?.primary_image_url || c.hero_image_url || ''
             return (
               <Link
                 key={c.id}
                 to={`/campaigns/${c.id}`}
-                className="card"
+                className="card reveal"
                 style={{ textDecoration: 'none', color: 'inherit', display: 'flex', gap: 14 }}
               >
                 <div
