@@ -77,3 +77,17 @@ export interface PlacementStat {
   conversions: number
   conversion_rate: number | null
 }
+
+// Response from the `agent` edge function (Campaign Optimizer).
+export interface AgentProposal {
+  rationale: string
+  poster_copy: PosterCopy
+  landing_content: LandingContent
+}
+
+export interface AgentResult {
+  summary: string
+  proposal: AgentProposal | null
+  toolCalls: string[]
+  steps: number
+}

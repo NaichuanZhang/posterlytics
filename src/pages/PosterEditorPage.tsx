@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
+import type { AgentResult } from '../lib/types'
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -14,6 +15,8 @@ export function PosterEditorPage() {
   const { campaign, loading, reload } = useCampaign(id)
   const { placements } = usePlacements(id, user?.id)
   const [busy, setBusy] = useState<string | null>(null)
+  const [agent, setAgent] = useState<AgentResult | null>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
 
   if (loading) return <Layout><Spinner full /></Layout>
   if (!campaign) return <Layout><p className="muted">Campaign not found.</p></Layout>
@@ -45,6 +48,39 @@ export function PosterEditorPage() {
     if (!campaign) return
     setBusy(status)
     await insforge.database.from('campaigns').update({ status }).eq('id', campaign.id)
+    await reload()
+    setBusy(null)
+  }
+
+  // Run the tool-calling Campaign Optimizer agent (reads stats + copy, proposes new copy).
+  async function optimize() {
+    if (!campaign) return
+    setBusy('optimize')
+    setAgentError(null)
+    setAgent(null)
+    try {
+      const { data, error } = await insforge.functions.invoke('agent', { body: { campaignId: campaign.id } })
+      if (error) setAgentError(error.message ?? 'Agent failed')
+      else setAgent(data as AgentResult)
+    } catch (e) {
+      setAgentError(e instanceof Error ? e.message : 'Agent failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Apply the agent's proposed copy to the campaign.
+  async function applyProposal() {
+    if (!campaign || !agent?.proposal) return
+    setBusy('apply')
+    await insforge.database
+      .from('campaigns')
+      .update({
+        poster_copy: agent.proposal.poster_copy,
+        landing_content: agent.proposal.landing_content,
+      })
+      .eq('id', campaign.id)
+    setAgent(null)
     await reload()
     setBusy(null)
   }
@@ -82,10 +118,61 @@ export function PosterEditorPage() {
               <Row label="Features" value={(campaign.poster_copy?.features ?? []).join(' · ')} />
               <Row label="Tone" value={campaign.style_profile?.tone} />
             </dl>
-            <button className="btn secondary sm" style={{ marginTop: 14 }} onClick={regenerate} disabled={!!busy}>
-              {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
-            </button>
+            <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>
+              <button className="btn secondary sm" onClick={regenerate} disabled={!!busy}>
+                {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
+              </button>
+              <button className="btn sm" onClick={optimize} disabled={!!busy}>
+                {busy === 'optimize' ? 'Optimizing…' : '✦ Optimize with AI'}
+              </button>
+            </div>
+            <p className="hint" style={{ marginTop: 8 }}>
+              The optimizer reads your live per-placement stats and proposes better copy.
+            </p>
           </div>
+
+          {(agent || agentError) && (
+            <div className="card" style={{ borderColor: 'var(--primary)' }}>
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <h3 style={{ margin: 0 }}>✦ AI proposal</h3>
+                <button className="btn ghost sm" onClick={() => { setAgent(null); setAgentError(null) }}>
+                  Dismiss
+                </button>
+              </div>
+              {agentError ? (
+                <p className="error-text">{agentError}</p>
+              ) : agent ? (
+                <>
+                  {agent.summary && (
+                    <p style={{ fontSize: '0.9rem', margin: '0 0 10px' }}>{agent.summary}</p>
+                  )}
+                  {agent.proposal ? (
+                    <>
+                      <p className="muted" style={{ fontSize: '0.82rem', margin: '0 0 10px', fontStyle: 'italic' }}>
+                        {agent.proposal.rationale}
+                      </p>
+                      <dl style={{ margin: 0, display: 'grid', gap: 8, fontSize: '0.9rem' }}>
+                        <Row label="Hook" value={agent.proposal.poster_copy.hook} />
+                        <Row label="One-liner" value={agent.proposal.poster_copy.what_it_does} />
+                        <Row label="Features" value={agent.proposal.poster_copy.features.join(' · ')} />
+                        <Row label="CTA" value={agent.proposal.poster_copy.cta} />
+                      </dl>
+                      <button className="btn sm" style={{ marginTop: 14 }} onClick={applyProposal} disabled={!!busy}>
+                        {busy === 'apply' ? 'Applying…' : 'Apply proposal'}
+                      </button>
+                    </>
+                  ) : (
+                    <p className="muted" style={{ fontSize: '0.85rem' }}>
+                      The agent didn't return a structured proposal. Try again.
+                    </p>
+                  )}
+                  <p className="hint" style={{ marginTop: 10 }}>
+                    Tools used: {agent.toolCalls.length ? agent.toolCalls.join(', ') : '—'} · {agent.steps} steps
+                  </p>
+                </>
+              ) : null}
+            </div>
+          )}
 
           <div className="card">
             <h3 style={{ margin: '0 0 8px' }}>Placements & tracking</h3>
