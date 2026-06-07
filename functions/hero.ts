@@ -140,33 +140,39 @@ function buildCozyPrompt(c: Record<string, unknown>): string {
   const leftLines = (spec.conv_left?.lines ?? []).map((l) => `     - ${l}`).join('\n');
   const rightSteps = (spec.conv_right?.steps ?? []).map((s, i) => `     ${i + 1}. ${s}`).join('\n');
 
-  return `Create a single vivid PORTRAIT 9:16 marketing poster in a warm hand-drawn watercolor + soft ink-linework
-"cozy scrapbook journal / gamified life-RPG" style. Storybook illustration feel, aged kraft/cream paper texture with
-torn paper edges, washi tape, sticky notes, dotted guide lines, scattered leaf/flower/heart doodles, small stars,
-sparkles and coins around the margins. Warm dark-brown body text (never pure black). One cohesive warm pastel palette.
+  return `Create a single PORTRAIT 2:3 product-promotion poster in a warm hand-drawn watercolor + soft ink-linework
+"cozy scrapbook journal / gamified life-RPG / cottagecore healing" style. Storybook illustration feel: an aged
+kraft/cream paper texture with torn paper edges (NEVER a flat solid or dark background), washi tape, sticky notes,
+dotted guide lines, pixel-art widgets, and scattered leaf/flower/heart doodles, small stars, coins and sparkles around
+the margins. Warm dark-brown body text (avoid pure black). One cohesive warm pastel palette throughout, one consistent
+hand-drawn icon style.
 
 Honor this brand — infuse its palette, logo motif and vibe into the cozy style, do not copy a corporate look:
 ${essence || product}
-Lean the primary accents toward ${primary} and ${accent}, but keep everything warm, soft and hand-painted.
+Lean the title and accents toward a warm vermilion orange-red and the brand colors ${primary} / ${accent}, kept warm,
+soft and hand-painted. IF the brand is black-and-white / monochrome, DO NOT output a monochrome poster — add vivid
+decorative color (leaves, washi tape, borders, doodles) in a derived warm complementary accent (sage green, peach,
+dusty rose, or golden amber).
 
-CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings given below. Do NOT print any of
-these layout/section descriptions, position words, or instruction words as visible text. Render no labels like "status
-bar", "hero headline", "subtitle", "mascot", "quest cards", "conversion row", "footer", or "empty background" — those
-are directions, not content.
+CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings given below, and they must all be
+in ENGLISH. Do NOT print any of these layout/section descriptions, position words, or instruction words as visible
+text. Render no labels like "status bar", "hero headline", "subtitle", "mascot", "quest cards", "conversion row",
+"footer", or "empty background" — those are directions, not content.
 
 Arrange it top to bottom:
 
 - A thin status strip at the very top: on the left a pixel-art calendar icon with a date; on the right a laurel level
-  badge reading "${spec.level_badge ?? 'Lv.1'}" and an XP progress bar reading "${spec.xp ?? '0 / 100 XP'}".
+  badge reading "${spec.level_badge ?? 'Lv.5'}" and an XP star bar "${spec.xp ?? '★★★★★'}".
 
-- The dominant hero area in the upper third, centered: an oversized hand-painted rounded brush-lettered title of two
-  lines, in a warm vermilion orange-red, with hand-drawn arrows/hearts/leaf sprigs tucked around the words —
+- The dominant hero area in the upper third, centered: an oversized hand-painted rounded BRUSH / bold-marker title of
+  two lines (the visual hammer), in warm vermilion orange-red, with hand-drawn arrows, hearts and leaf sprigs tucked
+  around the words — a punchy "Others have X / You have Y" contrast:
       line 1 reads "${spec.hook_line1 ?? `Others use ${product}.`}"
       line 2 reads "${spec.hook_line2 ?? 'You level up.'}"
 
 - Just below the title, on a washi-tape strip, a subtitle reading "${spec.subtitle ?? product}".
 
-- In the center, one adorable chibi mascot standing on a little grassy patch —
+- In the center, one adorable chibi mascot embodying the brand's personality, standing on a small decorative patch —
       ${spec.mascot ?? `a cute creature embodying ${product}`}
   ringed by an arc of soft pastel circular stat nodes (one tint each: green, yellow, pink, blue, peach), each a small
   hand-drawn icon with a label and a 5-star rating shown as filled/empty stars:
@@ -176,11 +182,11 @@ ${statLines || '   • Easy ★★★★★\n   • Fast ★★★★★'}
   washi-tape corners and a small hand-drawn icon:
 ${questLines || '   • Get started — in minutes (spark icon)'}
 
-- A lower band (around 70-84% down): keep the CENTER of this band as completely clean, plain, EMPTY paper background — a
-  calm open roughly-square area, about one third of the width, with absolutely nothing in it: no card, no panel, no
-  frame, no outline, no box, no sticker, no QR code, no barcode, no pixel-grid, and no text. A real QR sticker is
-  composited there afterward, so any drawn shape or label there would clash. To the LEFT of that empty center area, a
-  torn-paper note titled "${spec.conv_left?.heading ?? `Why ${product}`}":
+- A lower conversion band: keep the CENTER as completely clean, plain, EMPTY kraft-paper background — a calm open
+  roughly-square area, about one third of the width, with absolutely nothing in it: no card, no panel, no frame, no
+  outline, no box, no sticker, NO QR code, no barcode, no pixel-grid, and no text. (Exactly ONE real QR sticker is
+  composited there afterward, so any drawn shape, code, or label there would clash — leave it bare.) To the LEFT of that
+  empty center area, a torn-paper note titled "${spec.conv_left?.heading ?? `Why ${product}`}":
 ${leftLines || '     - Save time\n     - Do more'}
   and to the RIGHT, a torn-paper note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
 ${rightSteps || '     1. Scan\n     2. Sign up\n     3. Go'}
@@ -188,8 +194,13 @@ ${rightSteps || '     1. Scan\n     2. Sign up\n     3. Go'}
 - At the very bottom, centered, a formula-style tagline${spec.footer_formula ? ` reading "${spec.footer_formula}"` : ''} framed
   by little doodles${spec.urls ? `, with the url "${spec.urls}" on a small pill` : ''}.
 
-All hand-lettered text must be crisp, legible and correctly spelled, and limited to the quoted strings above. Keep one
-consistent hand-drawn icon style and one warm pastel palette throughout. High quality, 8k, storybook watercolor.`;
+All hand-lettered text must be crisp, legible, correctly spelled, ENGLISH only, and limited to the quoted strings above.
+Quality: warm hand-drawn watercolor, cozy scrapbook journal aesthetic, kraft paper texture, torn paper edges, washi
+tape, cute chibi mascot, gamified RPG UI with star-rating stats, soft pastel palette, doodle decorations, storybook
+illustration, high quality, 8k.
+Avoid: corporate / glassmorphism / SaaS look, neon or high-saturation colors, 3D renders or photoreal imagery, dark
+backgrounds, cluttered layout, unreadable or messy text, more than one QR code, any QR/barcode drawn by you, any
+non-English text, and monochrome output.`;
 }
 
 // Compose the text-to-image prompt for the premium SaaS / glassmorphism
