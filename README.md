@@ -8,20 +8,55 @@ Per-placement attribution is the moat: same product, N unique codes, every scan
 and conversion logged, so the dashboard answers "the bulletin board out-pulled
 LinkedIn" — which a generic shortener can't.
 
+> Live: **https://3f9q2998.insforge.site**
+
+## Pick your poster
+
+Paste a URL and Posterlytics generates **two on-brand posters** from the same
+analysis — a crisp **deterministic HTML/CSS template** and an **AI illustration**
+— then you choose. Both carry a real, always-scannable QR.
+
+![Pick your poster — two takes on the same brand](docs/screenshots/03-picker.png)
+
+## Editor
+
+The chosen poster, the auto-extracted spec (style, headline, slogan, CTA, tone),
+a Template ↔ AI-image toggle, and one-click publish.
+
+![Editor](docs/screenshots/04-editor.png)
+
+## Per-placement tracking
+
+Every placement mints its own short code → unique QR + tracked link, so you can
+tell which channel converts.
+
+![Placements — unique QR + link per channel](docs/screenshots/05-placements.png)
+
+## Attribution dashboard
+
+Scans, unique visitors, conversions, and conversion rate — per placement.
+
+![Analytics dashboard](docs/screenshots/06-analytics.png)
+
 ## How it works
 
 1. **Sign in** (email + password, no verification).
 2. **New campaign** — paste your product URL + GTM details (name, tagline, CTA,
    destination).
-3. **Poster Agent** (`analyze` function) scrapes the site, pulls **real brand
-   assets** (logo, og:image, product images → re-hosted in Storage), and uses
-   gpt-4o to produce:
-   - `poster_copy` — a scannable poster (hook + one-liner + top-3 features + CTA)
+3. **Poster Agent** (`analyze` function) scrapes the site, mines the brand's
+   **real palette** from its CSS, pulls assets (logo, og:image → re-hosted in
+   Storage), and uses gpt-4o to produce:
+   - `poster_style` + `poster_spec` — the auto-selected template (cozy scrapbook
+     or SaaS glassmorphism) and its structured content
    - `landing_content` — the full story (features, how-it-works, why-use-it)
    - `style_profile` — the brand's palette / fonts / tone
-   If no usable imagery is found, the `hero` function paints an AI fallback.
-4. **Poster** — hybrid: real brand visual (or AI hero) + a crisp HTML/CSS overlay
-   with the QR. Exportable to PNG per placement (`html-to-image`).
+4. **Two posters** — both rendered from that spec:
+   - **Template** — deterministic HTML/CSS at 1080×1620, on-brand accent color,
+     a real fixed-size QR at a known anchor.
+   - **AI image** — the `hero` function paints an illustrated poster; the real
+     per-placement QR is composited on the reserved zone (`AiPoster`).
+   The user picks one (`poster_mode`); either is exportable to PNG per placement
+   (`html-to-image`).
 5. **Placements** — each mints a unique short code → unique QR/link.
 6. **Publish** — activates the hosted landing page.
 7. **Scan** → `view` logs the scan (device from UA, first-party visitor cookie,
@@ -61,7 +96,7 @@ npx @insforge/cli functions deploy view --file ./functions/dist/view.ts
 ### Database
 
 ```bash
-npx @insforge/cli db import db/01_campaigns.sql   # in numeric order: 01→06
+npx @insforge/cli db import db/01_campaigns.sql   # apply all db/*.sql in numeric order
 npx @insforge/cli db tables && npx @insforge/cli db policies
 ```
 
