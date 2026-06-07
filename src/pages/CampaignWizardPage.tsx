@@ -31,6 +31,8 @@ export function CampaignWizardPage() {
   const [tagline, setTagline] = useState('')
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
+  // 'auto' lets the analyzer pick; otherwise force the template.
+  const [styleChoice, setStyleChoice] = useState<'auto' | 'saas_glassmorphism' | 'cozy_scrapbook'>('auto')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -65,7 +67,9 @@ export function CampaignWizardPage() {
     // 2. Analyze: scrape + brand palette + auto-selected template + poster spec.
     setPhase('analyzing')
     try {
-      const { error: aErr } = await insforge.functions.invoke('analyze', { body: { campaignId } })
+      const { error: aErr } = await insforge.functions.invoke('analyze', {
+        body: { campaignId, posterStyle: styleChoice === 'auto' ? undefined : styleChoice },
+      })
       if (aErr) throw new Error(aErr.message ?? 'Analysis failed')
     } catch (err) {
       console.error(err)
@@ -209,6 +213,34 @@ export function CampaignWizardPage() {
                 onChange={(e) => setDestinationUrl(e.target.value)}
               />
               <div className="hint">Where the QR ultimately sends people (after we log the conversion).</div>
+            </div>
+          </div>
+
+          <div className="field field-num">
+            <label data-num="6">Poster style</label>
+            <div className="row wrap" style={{ gap: 8 }}>
+              {([
+                { key: 'auto', label: 'Auto', hint: 'Pick for me' },
+                { key: 'saas_glassmorphism', label: 'SaaS', hint: 'Sleek / glassmorphism' },
+                { key: 'cozy_scrapbook', label: 'Cozy', hint: 'Warm / scrapbook' },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  className={`btn sm ${styleChoice === opt.key ? '' : 'ghost'}`}
+                  onClick={() => setStyleChoice(opt.key)}
+                  title={opt.hint}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="hint">
+              {styleChoice === 'auto'
+                ? 'We choose the template that fits your brand.'
+                : styleChoice === 'saas_glassmorphism'
+                  ? 'Premium split light/dark launch poster with a 3D device mockup.'
+                  : 'Warm hand-drawn scrapbook poster with a mascot and stat ring.'}
             </div>
           </div>
 

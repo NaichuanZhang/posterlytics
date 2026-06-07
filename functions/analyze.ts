@@ -25,13 +25,20 @@ export default async function (req: Request): Promise<Response> {
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
 
-  let body: { campaignId?: string };
+  let body: { campaignId?: string; posterStyle?: string };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'bad json' }, 400);
   }
   if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
+
+  // Optional forced template. 'auto' (or absent) lets the model pick; otherwise
+  // we honor the explicit choice and override the model's pick in normalize().
+  const forcedStyle =
+    body.posterStyle === 'saas_glassmorphism' || body.posterStyle === 'cozy_scrapbook'
+      ? body.posterStyle
+      : null;
 
   // Load the campaign (owner RLS guarantees it's the caller's).
   const { data: campaign, error: cErr } = await client.database
@@ -163,7 +170,7 @@ export default async function (req: Request): Promise<Response> {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ], { maxTokens: 2200 });
-    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors);
+    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, forcedStyle);
   } catch {
     // One repair retry with a terse reminder.
     try {
@@ -173,7 +180,7 @@ export default async function (req: Request): Promise<Response> {
       ], { maxTokens: 2200 });
       parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors);
     } catch {
-      parsed = fallbackContent(campaign as Record<string, string>, siteColors);
+      parsed = fallbackContent(campaign as Record<string, string>, siteColors, forcedStyle);
     }
   }
 
@@ -442,7 +449,12 @@ function isVivid(hex: string | undefined): boolean {
   return sat >= 0.25 && lum >= 0.12 && lum <= 0.93;
 }
 
-function normalize(raw: unknown, c: Record<string, string>, siteColors: string[] = []): ParsedContent {
+function normalize(
+  raw: unknown,
+  c: Record<string, string>,
+  siteColors: string[] = [],
+  forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | null = null,
+): ParsedContent {
   const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
   const sp = o.style_profile ?? {};
   const lc = o.landing_content ?? {};
@@ -464,9 +476,9 @@ function normalize(raw: unknown, c: Record<string, string>, siteColors: string[]
   // Primary: model's if present, else a dark default (posters use it as dark tone).
   const primary = modelPalette.primary || '#1f2937';
 
-  const poster_style = (o.poster_style as unknown) === 'saas_glassmorphism'
-    ? 'saas_glassmorphism'
-    : 'cozy_scrapbook';
+  // Honor an explicit user choice; otherwise use the model's auto-pick.
+  const poster_style = forcedStyle
+    ?? ((o.poster_style as unknown) === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook');
 
   const poster_spec = poster_style === 'saas_glassmorphism'
     ? normalizeSaasSpec(ps, product, tagline)
@@ -518,6 +530,10 @@ function normalize(raw: unknown, c: Record<string, string>, siteColors: string[]
   };
 }
 
-function fallbackContent(c: Record<string, string>, siteColors: string[] = []): ParsedContent {
-  return normalize({}, c, siteColors);
+function fallbackContent(
+  c: Record<string, string>,
+  siteColors: string[] = [],
+  forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | null = null,
+): ParsedContent {
+  return normalize({}, c, siteColors, forcedStyle);
 }
