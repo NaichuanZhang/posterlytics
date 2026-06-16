@@ -5,20 +5,15 @@ import type { Placement } from '../lib/types'
 
 export function usePlacements(campaignId: string | undefined, userId: string | undefined) {
   const [placements, setPlacements] = useState<Placement[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     if (!campaignId) return
-    setLoading(true)
     const { data, error } = await insforge.database
       .from('placements')
       .select('*')
       .eq('campaign_id', campaignId)
       .order('created_at', { ascending: true })
-    if (error) setError(error.message)
-    else setPlacements((data ?? []) as Placement[])
-    setLoading(false)
+    if (!error) setPlacements((data ?? []) as Placement[])
   }, [campaignId])
 
   useEffect(() => {
@@ -69,5 +64,5 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
     await addPlacement('Primary')
   }, [campaignId, userId, addPlacement])
 
-  return { placements, loading, error, reload, addPlacement, removePlacement, ensureDefault }
+  return { placements, reload, addPlacement, removePlacement, ensureDefault }
 }

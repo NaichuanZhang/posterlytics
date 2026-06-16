@@ -83,7 +83,6 @@ export default async function (req: Request): Promise<Response> {
     logo_key?: string;
     images: Array<{ url: string; key: string }>;
     primary_image_url?: string;
-    theme_color?: string;
   } = { images: [] };
 
   if (assets.logo) {
@@ -98,7 +97,6 @@ export default async function (req: Request): Promise<Response> {
     if (up) brand_assets.images.push({ url: up.url, key: up.key });
   }
   brand_assets.primary_image_url = brand_assets.images[0]?.url;
-  brand_assets.theme_color = assets.themeColor;
 
   // 3. gpt-4o → landing_content + style_profile + brand_essence + poster_spec.
   // The poster is a fully AI-illustrated cozy-scrapbook image; poster_spec fills

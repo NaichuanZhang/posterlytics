@@ -70,13 +70,13 @@ export async function aiChat(
   baseUrl: string,
   apiKey: string,
   messages: Array<{ role: string; content: string }>,
-  opts: { model?: string; maxTokens?: number } = {},
+  opts: { maxTokens?: number } = {},
 ): Promise<string> {
   const r = await fetch(`${baseUrl}/api/ai/chat/completion`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: opts.model ?? Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o',
+      model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o',
       messages,
       max_completion_tokens: opts.maxTokens ?? 1200,
     }),

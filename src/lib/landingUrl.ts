@@ -4,8 +4,3 @@ import { FUNCTIONS_HOST } from './insforge'
 export function buildViewUrl(code: string): string {
   return `${FUNCTIONS_HOST}/view?code=${encodeURIComponent(code)}`
 }
-
-// Where the landing CTA forwards (logs a conversion, then 302s to destination).
-export function buildConvertUrl(code: string): string {
-  return `${FUNCTIONS_HOST}/convert?code=${encodeURIComponent(code)}`
-}

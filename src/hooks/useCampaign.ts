@@ -24,5 +24,5 @@ export function useCampaign(id: string | undefined) {
     void reload()
   }, [reload])
 
-  return { campaign, setCampaign, loading, error, reload }
+  return { campaign, loading, error, reload }
 }

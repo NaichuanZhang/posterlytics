@@ -1,6 +1,6 @@
 // Shared types mirroring the InsForge schema.
 
-export type CampaignStatus = 'draft' | 'analyzing' | 'ready' | 'published'
+export type CampaignStatus = 'draft' | 'analyzing' | 'published'
 
 // How the poster is rendered: deterministic HTML/CSS template, or an AI-generated
 // image (hero_image_url) with the real QR overlaid. Chosen by the user at creation.
@@ -41,7 +41,6 @@ export interface BrandAssets {
   logo_key?: string
   images: Array<{ url: string; key: string }>
   primary_image_url?: string
-  theme_color?: string
 }
 
 export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism'
@@ -123,7 +122,6 @@ export interface Campaign {
   hero_image_key: string | null
   status: CampaignStatus
   created_at: string
-  updated_at: string
 }
 
 export interface Placement {
@@ -145,16 +143,15 @@ export interface PlacementStat {
   conversion_rate: number | null
 }
 
-// Response from the `agent` edge function (Campaign Optimizer).
-export interface AgentProposal {
-  rationale: string
-  poster_copy: PosterCopy
-  landing_content: LandingContent
+// One row of an audience breakdown (a device type, OS, or country) with its scan count.
+export interface BreakdownBucket {
+  key: string
+  scans: number
 }
 
-export interface AgentResult {
-  summary: string
-  proposal: AgentProposal | null
-  toolCalls: string[]
-  steps: number
+// Campaign-wide audience breakdowns from the `campaign_breakdowns` RPC.
+export interface CampaignBreakdowns {
+  devices: BreakdownBucket[]
+  os: BreakdownBucket[]
+  countries: BreakdownBucket[]
 }
