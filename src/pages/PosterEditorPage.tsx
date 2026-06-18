@@ -7,6 +7,8 @@ import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
+import { PosterExportButton } from '../components/PosterExportButton'
+import { buildViewUrl } from '../lib/landingUrl'
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -14,6 +16,8 @@ export function PosterEditorPage() {
   const { campaign, loading, reload } = useCampaign(id)
   const { placements, ensureDefault } = usePlacements(id, user?.id)
   const [busy, setBusy] = useState<string | null>(null)
+  const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   // A campaign should always have at least one placement so the poster's QR
   // encodes a real, trackable code (not a dead preview). Create one if missing.
@@ -21,12 +25,33 @@ export function PosterEditorPage() {
     if (user?.id) void ensureDefault()
   }, [user?.id, ensureDefault])
 
+  // Keep the selection valid as placements load/change: default to the first, and
+  // recover if the selected placement was removed.
+  useEffect(() => {
+    if (placements.length === 0) {
+      if (selectedPlacementId !== null) setSelectedPlacementId(null)
+      return
+    }
+    if (!placements.some((p) => p.id === selectedPlacementId)) {
+      setSelectedPlacementId(placements[0].id)
+    }
+  }, [placements, selectedPlacementId])
+
   if (loading) return <Layout><Spinner full /></Layout>
   if (!campaign) return <Layout><p className="muted">Campaign not found.</p></Layout>
 
-  // Preview QR uses the first real placement (ensureDefault guarantees one soon).
-  const previewCode = placements[0]?.code ?? null
+  // The preview, download, and copy-link all act on the selected placement (the
+  // first by default). ensureDefault guarantees one exists soon.
+  const selectedPlacement = placements.find((p) => p.id === selectedPlacementId) ?? placements[0] ?? null
+  const previewCode = selectedPlacement?.code ?? null
   const published = campaign.status === 'published'
+
+  function copyLink() {
+    if (!selectedPlacement) return
+    navigator.clipboard?.writeText(buildViewUrl(selectedPlacement.code))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   // Spec card rows depend on the auto-selected template shape.
   const isSaas = campaign.poster_style === 'saas_glassmorphism'
@@ -168,8 +193,42 @@ export function PosterEditorPage() {
           <div className="card">
             <h3 style={{ margin: '0 0 8px' }}>Placements & tracking</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
-              {placements.length} placement{placements.length === 1 ? '' : 's'}. Each gets a unique QR + link.
+              {placements.length} placement{placements.length === 1 ? '' : 's'}. The preview and
+              download below use the selected placement's unique QR + link.
             </p>
+
+            {placements.length === 0 ? (
+              <p className="muted" style={{ marginBottom: 12 }}>Preparing your placement…</p>
+            ) : (
+              <>
+                <div className="field" style={{ marginBottom: 12 }}>
+                  <label>Placement</label>
+                  <select
+                    className="input"
+                    value={selectedPlacement?.id ?? ''}
+                    onChange={(e) => setSelectedPlacementId(e.target.value)}
+                  >
+                    {placements.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
+                  {selectedPlacement && (
+                    <PosterExportButton
+                      key={selectedPlacement.id}
+                      campaign={campaign}
+                      placement={selectedPlacement}
+                      label="Download poster"
+                    />
+                  )}
+                  <button className="btn secondary sm" onClick={copyLink} disabled={!selectedPlacement}>
+                    {copied ? 'Copied!' : 'Copy link'}
+                  </button>
+                </div>
+              </>
+            )}
+
             <div className="row wrap">
               <Link to={`/campaigns/${campaign.id}/placements`} className="btn secondary sm">
                 Manage placements

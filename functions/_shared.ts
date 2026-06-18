@@ -66,10 +66,13 @@ export function readCookie(req: Request, name: string): string | null {
 }
 
 // Call the InsForge AI chat proxy. Returns the model's text output.
+// `content` may be a plain string OR an OpenAI-style multimodal parts array
+// ([{type:'text',text},{type:'image_url',image_url:{url}}]) — the proxy forwards
+// the messages verbatim, so vision-capable models (gpt-4o) accept both.
 export async function aiChat(
   baseUrl: string,
   apiKey: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | unknown[] }>,
   opts: { maxTokens?: number } = {},
 ): Promise<string> {
   const r = await fetch(`${baseUrl}/api/ai/chat/completion`, {
@@ -84,6 +87,69 @@ export async function aiChat(
   if (!r.ok) throw new Error(`AI chat failed: ${r.status} ${await r.text()}`);
   const j = await r.json();
   return j.text ?? '';
+}
+
+// Vision-detected calm zone for the AI-poster QR: 0..1 fractions, top-left origin.
+export interface QrZone { x: number; y: number; w: number; h: number }
+
+// Ask a vision model (gpt-4o via the chat proxy) for the bounding box of the
+// largest clean/empty region in a generated poster image, suitable for compositing
+// a square QR sticker. Returns 0..1 fractions (top-left origin) or null on ANY
+// failure/uncertainty — NEVER throws, so callers can treat it as best-effort.
+// `styleHint` nudges where the gap likely is for the active template.
+export async function detectQrZone(
+  baseUrl: string,
+  apiKey: string,
+  imageUrl: string,
+  styleHint: string,
+): Promise<QrZone | null> {
+  try {
+    const sys =
+      'You are a precise layout analyzer. You receive a portrait product poster ' +
+      'image. Find the SINGLE largest clean, empty area suitable for placing a ' +
+      'square QR sticker — an area with no text, icons, cards, or busy detail. ' +
+      'Respond with ONLY minified JSON: {"x":<0..1>,"y":<0..1>,"w":<0..1>,"h":<0..1>} ' +
+      'where x,y is the TOP-LEFT corner as a fraction of image width/height and w,h ' +
+      'are its width/height fractions. No prose, no code fences.';
+    const user =
+      `The empty area is most likely toward the ${styleHint} of the poster. Return the ` +
+      'box for that area. If unsure, return the calmest large region you can find.';
+
+    const raw = await aiChat(
+      baseUrl,
+      apiKey,
+      [
+        { role: 'system', content: sys },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: user },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+      { maxTokens: 200 },
+    );
+
+    const j = extractJson(raw) as Record<string, unknown>;
+    const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : NaN);
+    let x = num(j.x), y = num(j.y), w = num(j.w), h = num(j.h);
+    if ([x, y, w, h].some((n) => Number.isNaN(n))) return null;
+
+    // Clamp into bounds, keep the box inside the image.
+    const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+    x = clamp01(x); y = clamp01(y); w = clamp01(w); h = clamp01(h);
+    if (x + w > 1) w = 1 - x;
+    if (y + h > 1) h = 1 - y;
+
+    // Lenient size gate: reject only pathological/degenerate boxes. The frontend
+    // positions the QR from the box CENTER and sizes it mostly from width, so a
+    // short (low-h) gap — common for the SaaS CTA band — is still usable.
+    if (w < 0.08 || h < 0.04 || w > 0.6 || h > 0.6) return null;
+    return { x, y, w, h };
+  } catch {
+    return null; // proxy rejected multimodal content / junk output / parse failure
+  }
 }
 
 // Call the InsForge AI image proxy. Returns a base64 data URL.

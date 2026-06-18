@@ -45,6 +45,15 @@ export interface BrandAssets {
 
 export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism'
 
+// Vision-detected calm zone for the AI-poster QR, as 0..1 fractions (top-left
+// origin) of the hero image. null → AiPoster falls back to the per-style ANCHORS.
+export interface QrZone {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface StatNode {
   icon: string
   label: string
@@ -120,6 +129,7 @@ export interface Campaign {
   poster_spec: PosterSpec | null
   hero_image_url: string | null
   hero_image_key: string | null
+  qr_zone: QrZone | null
   status: CampaignStatus
   created_at: string
 }

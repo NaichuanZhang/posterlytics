@@ -5,6 +5,8 @@ import {
   dataUrlToBlob,
   jsonResponse,
   createUserClient,
+  detectQrZone,
+  type QrZone,
 } from './_shared.ts';
 
 // `hero` renders the full gamified "cozy scrapbook" poster (9:16) as a single
@@ -53,6 +55,21 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: String(e) }, 502);
   }
 
+  // Vision pass: locate the calm zone the diffusion model actually left, so the
+  // SPA can snap the QR to it instead of a fixed guess. Best-effort and non-fatal
+  // — on any failure we store null and the frontend falls back to its ANCHORS.
+  // The base64 dataUrl is sent directly (no upload-propagation race); the proxy
+  // accepts ~750KB data URLs (verified).
+  const styleHint = style === 'saas_glassmorphism'
+    ? 'lower-right area of the dark bottom call-to-action band'
+    : 'lower-center band, between the two torn-paper notes';
+  let qrZone: QrZone | null = null;
+  try {
+    qrZone = await detectQrZone(baseUrl, apiKey, dataUrl, styleHint);
+  } catch {
+    qrZone = null;
+  }
+
   let url: string;
   let key: string;
   try {
@@ -67,13 +84,15 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: String(e) }, 500);
   }
 
+  // Persist qr_zone alongside the image. Writing null on a failed/absent detection
+  // also clears any stale box from a prior regeneration → clean ANCHORS fallback.
   const { error: upErr } = await client.database
     .from('campaigns')
-    .update({ hero_image_url: url, hero_image_key: key })
+    .update({ hero_image_url: url, hero_image_key: key, qr_zone: qrZone })
     .eq('id', campaign.id);
   if (upErr) return jsonResponse({ error: upErr.message }, 500);
 
-  return jsonResponse({ poster_image_url: url });
+  return jsonResponse({ poster_image_url: url, qr_zone: qrZone });
 }
 
 interface StatNode { icon: string; label: string; stars: number }
