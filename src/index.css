@@ -552,7 +552,9 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
 
 @container (max-width: 660px) {
   .ed-canvas { grid-template-columns: 1fr; }
-  .ed-preview { max-width: 540px; margin-inline: auto; }
+  /* Fill the column: width:100% stops the grid item from shrinking to its
+     child's intrinsic size (which collapsed the preview to the 160px floor). */
+  .ed-preview { width: 100%; max-width: 540px; margin-inline: auto; }
 }
 
 /* Below ~1080px a fixed 340px rail beside the dual-preview canvas starves the
@@ -568,7 +570,7 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
   }
   .ed-rail { position: static; max-height: none; overflow: visible; }
   .ed-canvas { grid-template-columns: 1fr; }
-  .ed-preview { max-width: 560px; margin-inline: auto; }
+  .ed-preview { width: 100%; max-width: 560px; margin-inline: auto; }
 }
 
 /* Phones: tighten the generous desktop spacing so the stacked editor isn't a
