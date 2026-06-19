@@ -124,50 +124,56 @@ export function PosterEditorPage() {
 
   return (
     <Layout>
-      <div className="row between" style={{ marginBottom: 4 }}>
-        <h1 className="page-title">{campaign.product_name}</h1>
-        <span className={`badge ${campaign.status}`}>{campaign.status}</span>
-      </div>
-      <p className="page-sub">
-        <Link to="/">← All campaigns</Link>
-      </p>
-
-      {!published && (
-        <div className="card" style={{ borderColor: 'var(--accent)', marginBottom: 18 }}>
-          <div className="row between" style={{ gap: 12, alignItems: 'center' }}>
-            <span>
-              <strong style={{ color: 'var(--accent)' }}>Draft — not live.</strong>{' '}
-              <span className="muted">
-                The QR works once you publish; scanning it now shows a "not live yet" page.
-              </span>
-            </span>
-            <button className="btn sm" onClick={() => setStatus('published')} disabled={!!busy}>
-              {busy === 'published' ? 'Publishing…' : 'Publish'}
-            </button>
+      {/* Editor = inspector + canvas. Single canvas-first DOM order; CSS grid
+          areas place the control rail LEFT on desktop, and the single-column
+          mobile flow drops it to the BOTTOM (no `order` needed). See .poster-editor
+          in index.css. */}
+      <div className="poster-editor">
+        <header className="ed-head">
+          <div className="row between" style={{ marginBottom: 4 }}>
+            <h1 className="page-title">{campaign.product_name}</h1>
+            <span className={`badge ${campaign.status}`}>{campaign.status}</span>
           </div>
-        </div>
-      )}
+          <p className="page-sub" style={{ margin: 0 }}>
+            <Link to="/">← All campaigns</Link>
+          </p>
+        </header>
 
-      {/* Poster, landing, and controls flow naturally in one auto-fit grid: side
-          by side when there's horizontal room, wrapping/stacking vertically when
-          there isn't. Each preview measures its own column and scales to fit. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20, alignItems: 'start' }}>
-        <PreviewCell label="Poster">
-          {(w) =>
-            previewCode ? (
-              <Poster campaign={campaign} code={previewCode} width={w} />
-            ) : (
-              <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
-            )
-          }
-        </PreviewCell>
-        <PreviewCell label="Landing page">
-          {(w) => <LandingPreview campaign={campaign} width={w} />}
-        </PreviewCell>
+        {!published && (
+          <div className="ed-banner card" style={{ borderColor: 'var(--accent)' }}>
+            <div className="row between" style={{ gap: 12, alignItems: 'center' }}>
+              <span>
+                <strong style={{ color: 'var(--accent)' }}>Draft — not live.</strong>{' '}
+                <span className="muted">
+                  The QR works once you publish; scanning it now shows a "not live yet" page.
+                </span>
+              </span>
+              <button className="btn sm" onClick={() => setStatus('published')} disabled={!!busy}>
+                {busy === 'published' ? 'Publishing…' : 'Publish'}
+              </button>
+            </div>
+          </div>
+        )}
 
-        {/* Controls — a vertical stack of cards, one flow item in the grid.
-            Capped so it stays readable while the previews take the extra width. */}
-        <div className="grid" style={{ gap: 16, alignContent: 'start', maxWidth: 420 }}>
+        {/* Canvas: poster + landing previews. DOM-before the rail so mobile stacks
+            previews on top. Each PreviewCell measures its own cell and scales. */}
+        <section className="ed-canvas">
+          <PreviewCell label="Poster">
+            {(w) =>
+              previewCode ? (
+                <Poster campaign={campaign} code={previewCode} width={w} />
+              ) : (
+                <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
+              )
+            }
+          </PreviewCell>
+          <PreviewCell label="Landing page">
+            {(w) => <LandingPreview campaign={campaign} width={w} />}
+          </PreviewCell>
+        </section>
+
+        {/* Control rail: the 4 cards, placed LEFT on desktop / BOTTOM on mobile. */}
+        <aside className="ed-rail">
           <div className="card">
             <h3 style={{ margin: '0 0 10px' }}>Poster spec</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
@@ -300,7 +306,7 @@ export function PosterEditorPage() {
               </button>
             )}
           </div>
-        </div>
+        </aside>
       </div>
     </Layout>
   )
