@@ -148,33 +148,26 @@ export function PosterEditorPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 320px)', gap: 24, alignItems: 'start' }}>
-        {/* Previews: poster + generated landing as two separate cards, side by
-            side. Each cell measures itself and scales its preview to fit. */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 16,
-            alignItems: 'start',
-          }}
-        >
-          <PreviewCell label="Poster">
-            {(w) =>
-              previewCode ? (
-                <Poster campaign={campaign} code={previewCode} width={w} />
-              ) : (
-                <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
-              )
-            }
-          </PreviewCell>
-          <PreviewCell label="Landing page">
-            {(w) => <LandingPreview campaign={campaign} width={w} />}
-          </PreviewCell>
-        </div>
+      {/* Poster, landing, and controls flow naturally in one auto-fit grid: side
+          by side when there's horizontal room, wrapping/stacking vertically when
+          there isn't. Each preview measures its own column and scales to fit. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20, alignItems: 'start' }}>
+        <PreviewCell label="Poster">
+          {(w) =>
+            previewCode ? (
+              <Poster campaign={campaign} code={previewCode} width={w} />
+            ) : (
+              <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
+            )
+          }
+        </PreviewCell>
+        <PreviewCell label="Landing page">
+          {(w) => <LandingPreview campaign={campaign} width={w} />}
+        </PreviewCell>
 
-        {/* Controls */}
-        <div className="grid" style={{ gap: 16 }}>
+        {/* Controls — a vertical stack of cards, one flow item in the grid.
+            Capped so it stays readable while the previews take the extra width. */}
+        <div className="grid" style={{ gap: 16, alignContent: 'start', maxWidth: 420 }}>
           <div className="card">
             <h3 style={{ margin: '0 0 10px' }}>Poster spec</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
