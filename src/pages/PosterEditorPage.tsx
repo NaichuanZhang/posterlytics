@@ -320,7 +320,7 @@ function PreviewCell({ label, children }: { label: string; children: (width: num
   // Leave a hair of slack so the rounded preview never touches the card edge.
   const fitted = width > 0 ? Math.max(160, Math.floor(width) - 2) : 0
   return (
-    <div ref={ref} className="card" style={{ display: 'grid', justifyItems: 'center', gap: 8, minWidth: 0, background: 'var(--panel-2)', padding: 16 }}>
+    <div ref={ref} className="card ed-preview">
       <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>{label}</span>
       {fitted > 0 ? children(fitted) : null}
     </div>
