@@ -202,3 +202,287 @@ export function extractJson(text: string): unknown {
   if (start === -1 || end === -1) throw new Error('No JSON object found in model output');
   return JSON.parse(candidate.slice(start, end + 1));
 }
+
+// =====================================================================
+// Programmatic design tokens (capture-service → normalized DesignTokens)
+// Canonical copy of src/lib/{colorUtils,designTokens}.ts. The Deno bundle
+// can't import across the SPA boundary, so this is mirrored (same pattern as
+// QrZone). The SPA copy carries the unit tests; keep the two in sync.
+// =====================================================================
+
+export type RGB = [number, number, number];
+
+export interface DesignTokens {
+  typography: { headingFamily: string; bodyFamily: string; scale: number[]; weights: number[] };
+  colors: { bg: string; text: string; primary: string; accent: string; palette: string[] };
+  radii: number[];
+  shadows: string[];
+  spacing: number[];
+  button: { bg: string; color: string; radius: number; paddingX: number; paddingY: number; weight: number; shadow?: string } | null;
+  fontLinks: string[];
+}
+
+// Compact wire shape returned by the capture-service (all-optional / loose).
+export interface RawTokens {
+  fonts?: Array<{ value: string; count: number; role: string }>;
+  fontSizes?: number[];
+  fontWeights?: number[];
+  colors?: Array<{ value: string; count: number; role: string }>;
+  radii?: number[];
+  shadows?: string[];
+  spacing?: number[];
+  button?: { bg?: string; color?: string; radius?: number; paddingX?: number; paddingY?: number; weight?: number; shadow?: string } | null;
+  fontLinks?: string[];
+  meta?: unknown;
+}
+
+export function parseColor(input: string | undefined | null): RGB | null {
+  if (!input) return null;
+  const s = input.trim().toLowerCase();
+  const fn = /^rgba?\(([^)]+)\)$/.exec(s);
+  if (fn) {
+    const parts = fn[1].split(',').map((p) => p.trim());
+    if (parts.length < 3) return null;
+    const r = Number(parts[0]), g = Number(parts[1]), b = Number(parts[2]);
+    const a = parts.length >= 4 ? Number(parts[3]) : 1;
+    if (![r, g, b].every((n) => Number.isFinite(n))) return null;
+    if (Number.isFinite(a) && a < 0.05) return null;
+    return [clamp255(r), clamp255(g), clamp255(b)];
+  }
+  let h = s.replace(/^#/, '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (!/^[0-9a-f]{6}$/.test(h)) return null;
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function clamp255(n: number): number { return Math.max(0, Math.min(255, Math.round(n))); }
+
+export function toHex(rgb: RGB): string {
+  return '#' + rgb.map((c) => clamp255(c).toString(16).padStart(2, '0')).join('');
+}
+
+export function relativeLuminance(rgb: RGB): number {
+  return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+}
+
+export function vividness(rgb: RGB): number {
+  const max = Math.max(...rgb), min = Math.min(...rgb);
+  const sat = max === 0 ? 0 : (max - min) / max;
+  const lum = relativeLuminance(rgb);
+  const lumOk = lum > 0.18 && lum < 0.9 ? 1 : 0.25;
+  return sat * lumOk;
+}
+
+const GENERIC_FONTS = new Set(['system-ui', '-apple-system', 'sans-serif', 'serif', 'monospace', 'inherit', 'blinkmacsystemfont']);
+
+function firstNonGenericFont(fonts: Array<{ value: string; role: string }>, role: string): string {
+  const inRole = fonts.filter((f) => f.role === role && f.value);
+  const named = inRole.find((f) => !GENERIC_FONTS.has(f.value.toLowerCase()));
+  return (named ?? inRole[0])?.value ?? '';
+}
+
+function pickBy<T extends { rgb: RGB }>(entries: T[], score: (e: T) => number): RGB | null {
+  let best: RGB | null = null, bestScore = -Infinity;
+  for (const e of entries) {
+    const s = score(e);
+    if (s > bestScore) { bestScore = s; best = e.rgb; }
+  }
+  return best;
+}
+
+function dedupeHex(rgbs: RGB[]): string[] {
+  const seen = new Set<string>(); const out: string[] = [];
+  for (const rgb of rgbs) {
+    const hex = toHex(rgb);
+    if (!seen.has(hex)) { seen.add(hex); out.push(hex); }
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+function assignColors(raw: RawTokens): DesignTokens['colors'] {
+  const entries = (raw.colors ?? [])
+    .map((c) => ({ rgb: parseColor(c.value), count: c.count ?? 1, role: c.role ?? 'other' }))
+    .filter((c): c is { rgb: RGB; count: number; role: string } => c.rgb !== null);
+  const palette = dedupeHex(entries.map((e) => e.rgb));
+  const bgC = entries.filter((e) => e.role === 'bg');
+  const bg = pickBy(bgC.length ? bgC : entries, (e) => relativeLuminance(e.rgb) * Math.log2(e.count + 2)) ?? [255, 255, 255];
+  const textC = entries.filter((e) => e.role === 'text');
+  const text = pickBy(textC.length ? textC : entries, (e) => (1 - relativeLuminance(e.rgb)) * Math.log2(e.count + 2)) ?? [17, 24, 39];
+  const brandC = entries.filter((e) => e.role === 'button-bg' || e.role === 'link' || e.role === 'border');
+  const primary = pickBy(brandC.length ? brandC : entries, (e) => (vividness(e.rgb) + 0.15) * Math.log2(e.count + 2)) ?? [31, 41, 55];
+  const accent = pickBy(entries, (e) => vividness(e.rgb)) ?? primary;
+  return { bg: toHex(bg), text: toHex(text), primary: toHex(primary), accent: toHex(accent), palette };
+}
+
+function cleanNums(arr: number[] | undefined, limit: number): number[] {
+  return [...new Set((arr ?? []).filter((n) => Number.isFinite(n) && n > 0).map((n) => Math.round(n)))]
+    .sort((a, b) => a - b).slice(0, limit);
+}
+
+function numOr(n: number | undefined, fallback: number): number {
+  return Number.isFinite(n) ? Math.round(n as number) : fallback;
+}
+
+function normHex(c: string | undefined): string | null {
+  const rgb = parseColor(c);
+  return rgb ? toHex(rgb) : null;
+}
+
+// RawTokens -> bounded, role-assigned DesignTokens. Returns null for an empty
+// capture so callers fall back to legacy regex mining.
+export function normalizeDesignTokens(raw: RawTokens | null | undefined): DesignTokens | null {
+  if (!raw || (!raw.colors?.length && !raw.fonts?.length)) return null;
+  const fonts = (raw.fonts ?? []).filter((f) => f && f.value);
+  const headingFamily = firstNonGenericFont(fonts, 'heading');
+  const bodyFamily = firstNonGenericFont(fonts, 'body');
+  const button = raw.button
+    ? {
+        bg: normHex(raw.button.bg) ?? '',
+        color: normHex(raw.button.color) ?? '',
+        radius: numOr(raw.button.radius, 0),
+        paddingX: numOr(raw.button.paddingX, 0),
+        paddingY: numOr(raw.button.paddingY, 0),
+        weight: numOr(raw.button.weight, 600),
+        shadow: raw.button.shadow && raw.button.shadow !== 'none' ? raw.button.shadow : undefined,
+      }
+    : null;
+  return {
+    typography: {
+      headingFamily,
+      bodyFamily: bodyFamily || headingFamily,
+      scale: cleanNums(raw.fontSizes, 8),
+      weights: cleanNums(raw.fontWeights, 6),
+    },
+    colors: assignColors(raw),
+    radii: cleanNums(raw.radii, 5),
+    shadows: (raw.shadows ?? []).filter((s) => s && s !== 'none').slice(0, 4),
+    spacing: cleanNums(raw.spacing, 6),
+    button,
+    fontLinks: [...new Set((raw.fontLinks ?? []).filter(Boolean))].slice(0, 8),
+  };
+}
+
+// Call the Playwright capture-service for a URL. Best-effort: returns null on any
+// failure (missing config, network, non-200, bad payload) so analyze degrades to
+// its legacy regex extraction. Never throws.
+export async function captureSite(
+  url: string,
+): Promise<{ tokens: DesignTokens | null; rawTokens: RawTokens | null; screenshotDataUrl: string | null } | null> {
+  const serviceUrl = Deno.env.get('CAPTURE_SERVICE_URL');
+  const token = Deno.env.get('CAPTURE_TOKEN');
+  if (!serviceUrl || !token) return null;
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 20000);
+    const r = await fetch(`${serviceUrl.replace(/\/$/, '')}/capture`, {
+      method: 'POST',
+      signal: ctl.signal,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    clearTimeout(to);
+    if (!r.ok) return null;
+    const j = await r.json() as { raw_tokens?: RawTokens; screenshot_b64?: string | null };
+    const rawTokens = j.raw_tokens ?? null;
+    const tokens = normalizeDesignTokens(rawTokens);
+    const screenshotDataUrl = j.screenshot_b64 ? `data:image/jpeg;base64,${j.screenshot_b64}` : null;
+    return { tokens, rawTokens, screenshotDataUrl };
+  } catch {
+    return null;
+  }
+}
+
+// =====================================================================
+// Generated-landing safety + runtime injection (pure)
+//
+// The landing agent authors full HTML but is FORBIDDEN to ship JavaScript. We
+// enforce that here, then inject the two pieces that MUST be per-request and
+// can't be baked into stored HTML: the tracked CTA href and the scan geo-beacon.
+// This is the programmatic seam guaranteeing tracking integrity regardless of
+// what the model wrote.
+// =====================================================================
+
+export const CTA_PLACEHOLDER = '{{CTA_HREF}}';
+export const BEACON_PLACEHOLDER = '{{SCAN_BEACON}}';
+
+// Strip every script/handler the model may have emitted; guarantee the two
+// runtime placeholders exist. Returns HTML that is inert until injection.
+export function sanitizeLandingHtml(html: string): string {
+  let out = String(html ?? '');
+
+  // Defense in depth: remove anything executable the model produced. Only our
+  // injected beacon is ever allowed to run.
+  out = out.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '');
+  out = out.replace(/<script\b[^>]*>/gi, ''); // stray unclosed <script>
+  // Inline event handlers: on...="..." / on...='...' / on...=value
+  out = out.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');
+  out = out.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
+  out = out.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
+  // Neutralize dangerous URL schemes (javascript:, data: — a data:text/html href
+  // executes JS on click) in any URL-bearing attribute. action/formaction also
+  // matter: <form action="https://evil"> would exfiltrate inputs.
+  const badScheme = '(?:\\s*(?:javascript|data|vbscript):)';
+  out = out.replace(new RegExp(`(href|src|action|formaction)\\s*=\\s*"${badScheme}[^"]*"`, 'gi'), '$1="#"');
+  out = out.replace(new RegExp(`(href|src|action|formaction)\\s*=\\s*'${badScheme}[^']*'`, 'gi'), "$1='#'");
+  out = out.replace(new RegExp(`(href|src|action|formaction)\\s*=\\s*${badScheme}[^\\s>]*`, 'gi'), '$1="#"');
+  // Strip CSS @import from inline <style> blocks — it loads attacker-controlled
+  // external CSS on every view (a silent visitor beacon / exfiltration vector).
+  out = out.replace(
+    /(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi,
+    (_m, open: string, body: string, close: string) => open + body.replace(/@import\b[^;]*;?/gi, '') + close,
+  );
+
+  // Guarantee a tracked CTA placeholder. If the model omitted it, append a
+  // fallback CTA bar before </body> so the link is never dead.
+  if (!out.includes(CTA_PLACEHOLDER)) {
+    const fallbackCta =
+      `<div style="position:sticky;bottom:14px;margin:44px auto 0;max-width:680px;padding:0 20px">` +
+      `<a href="${CTA_PLACEHOLDER}" style="display:block;text-align:center;background:#111;color:#fff;` +
+      `text-decoration:none;font-weight:700;padding:16px;border-radius:14px">Learn more</a></div>`;
+    out = insertBeforeBodyClose(out, fallbackCta);
+  }
+
+  // Guarantee a beacon placeholder slot (rendered inert in preview, real in view).
+  if (!out.includes(BEACON_PLACEHOLDER)) {
+    out = insertBeforeBodyClose(out, `<!--${BEACON_PLACEHOLDER}-->`);
+  }
+
+  return out;
+}
+
+// Build the per-request geo-beacon script (mirrors the one in view.ts). When
+// scanId is null (e.g. preview), returns '' so nothing fires.
+export function beaconScript(scanId: string | null, fnHost: string): string {
+  if (!scanId) return '';
+  return (
+    `<script>(function(){var scanId=${JSON.stringify(scanId)};if(!scanId)return;` +
+    `fetch('https://ipapi.co/json/').then(function(r){return r.json()}).then(function(g){` +
+    `if(!g||!g.country)return;` +
+    `fetch(${JSON.stringify(fnHost)}+'/scan-geo',{method:'POST',headers:{'Content-Type':'application/json'},` +
+    `body:JSON.stringify({scan_id:scanId,country:g.country_name||g.country,city:g.city||null})}).catch(function(){});` +
+    `}).catch(function(){});})();</script>`
+  );
+}
+
+// Replace the placeholders with the live tracked CTA + beacon. The BEACON
+// placeholder may appear bare or wrapped in an HTML comment (from sanitize).
+export function injectLandingRuntime(
+  html: string,
+  code: string,
+  scanId: string | null,
+  fnHost: string,
+): string {
+  const ctaHref = `${fnHost}/convert?code=${encodeURIComponent(code)}`;
+  let out = String(html ?? '').split(CTA_PLACEHOLDER).join(ctaHref);
+  const beacon = beaconScript(scanId, fnHost);
+  out = out.split(`<!--${BEACON_PLACEHOLDER}-->`).join(beacon);
+  out = out.split(BEACON_PLACEHOLDER).join(beacon);
+  return out;
+}
+
+function insertBeforeBodyClose(html: string, snippet: string): string {
+  const idx = html.toLowerCase().lastIndexOf('</body>');
+  if (idx === -1) return html + snippet;
+  return html.slice(0, idx) + snippet + html.slice(idx);
+}

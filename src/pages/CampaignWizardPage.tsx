@@ -12,7 +12,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   form: '',
   creating: 'Creating campaign…',
   analyzing: 'Reading your site — extracting brand, content & design…',
-  generating: 'Painting an AI poster variant — this takes ~25s…',
+  generating: 'Painting an AI poster + building your landing page — this takes ~25s…',
   choose: '',
   saving: 'Saving your choice…',
   error: '',
@@ -75,16 +75,25 @@ export function CampaignWizardPage() {
       console.error(err)
     }
 
-    // 3. Generate the AI image variant up front so the user can compare both.
+    // 3. In parallel: paint the AI poster variant AND generate the landing page.
+    // They write disjoint columns (hero_image_* / qr_zone vs landing_html), so
+    // running them concurrently is safe and keeps total wait down. Both are
+    // best-effort — failures are non-fatal and recoverable in the editor.
     setPhase('generating')
     let imageOk = false
-    try {
-      const { error: hErr } = await insforge.functions.invoke('hero', { body: { campaignId } })
-      imageOk = !hErr
-    } catch (err) {
-      console.error(err)
-      imageOk = false
-    }
+    const heroCall = insforge.functions
+      .invoke('hero', { body: { campaignId } })
+      .then(({ error }) => {
+        imageOk = !error
+      })
+      .catch((err) => {
+        console.error(err)
+        imageOk = false
+      })
+    const landingCall = insforge.functions
+      .invoke('landing', { body: { campaignId } })
+      .catch((err) => console.error(err))
+    await Promise.all([heroCall, landingCall])
 
     // 4. Load the finished campaign and show the side-by-side picker.
     const { data: full } = await insforge.database

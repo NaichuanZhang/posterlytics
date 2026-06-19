@@ -1,0 +1,21 @@
+{
+  "name": "posterlytics-capture-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless-Chromium capture service: returns programmatic design tokens (computed styles) + a screenshot for a given URL. Deployed as an InsForge compute (Fly) container; called only by the analyze edge function.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "playwright": "1.49.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -5,6 +5,11 @@ import {
   extractJson,
   jsonResponse,
   createUserClient,
+  captureSite,
+  dataUrlToBlob,
+  parseColor,
+  toHex,
+  type DesignTokens,
 } from './_shared.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
@@ -72,9 +77,26 @@ export default async function (req: Request): Promise<Response> {
 
   // 2. Extract real assets + meta from the HTML.
   const assets = extractAssets(scrapeHtml, productUrl);
-  // Mine the site's REAL vivid colors (styles are stripped before the model sees
-  // text, so without this it guesses a generic palette).
-  const siteColors = extractColors(scrapeHtml);
+  // Mine the site's REAL vivid colors from raw CSS (cheap fallback seed).
+  const regexColors = extractColors(scrapeHtml);
+
+  // 2b. Programmatic style capture via the headless-browser service: real
+  // computed fonts/colors/radii/shadows/spacing + a screenshot. Best-effort —
+  // null when the service is unconfigured/unreachable, in which case we fall
+  // back to the regex-mined colors below. (Capture happens here so its palette
+  // can seed the model and its tokens are persisted.)
+  const capture = await captureSite(productUrl);
+  const design_tokens: DesignTokens | null = capture?.tokens ?? null;
+  // Prefer the programmatic palette (computed, role-aware) over regex mining;
+  // fall back to regex colors when capture is unavailable.
+  const siteColors = design_tokens
+    ? dedupeColors([
+        design_tokens.colors.accent,
+        design_tokens.colors.primary,
+        ...design_tokens.colors.palette,
+        ...regexColors,
+      ])
+    : regexColors;
 
   // Re-host logo + up to 2 product images into the public assets bucket so the
   // poster/landing never hot-link the origin (CORS-clean export, survives churn).
@@ -97,6 +119,25 @@ export default async function (req: Request): Promise<Response> {
     if (up) brand_assets.images.push({ url: up.url, key: up.key });
   }
   brand_assets.primary_image_url = brand_assets.images[0]?.url;
+
+  // Upload the captured screenshot (a JPEG data URL) to the public assets bucket
+  // so the landing agent's vision step can reference it by URL.
+  let screenshot_url: string | null = null;
+  let screenshot_key: string | null = null;
+  if (capture?.screenshotDataUrl) {
+    try {
+      const blob = dataUrlToBlob(capture.screenshotDataUrl);
+      const { data } = await client.storage
+        .from('assets')
+        .upload(`screenshot/${campaign.id}/${crypto.randomUUID().slice(0, 8)}.jpg`, blob);
+      if (data) {
+        screenshot_url = data.url;
+        screenshot_key = data.key;
+      }
+    } catch {
+      screenshot_url = null;
+    }
+  }
 
   // 3. gpt-4o → landing_content + style_profile + brand_essence + poster_spec.
   // The poster is a fully AI-illustrated cozy-scrapbook image; poster_spec fills
@@ -168,7 +209,7 @@ export default async function (req: Request): Promise<Response> {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ], { maxTokens: 2200 });
-    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, forcedStyle);
+    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
   } catch {
     // One repair retry with a terse reminder.
     try {
@@ -176,13 +217,15 @@ export default async function (req: Request): Promise<Response> {
         { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
         { role: 'user', content: user },
       ], { maxTokens: 2200 });
-      parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors);
+      parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
     } catch {
-      parsed = fallbackContent(campaign as Record<string, string>, siteColors, forcedStyle);
+      parsed = fallbackContent(campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
     }
   }
 
-  // 4. Persist.
+  // 4. Persist. design_tokens/screenshot are written even when the AI step used a
+  // fallback. landing_html is intentionally NOT touched here — the landing agent
+  // owns it (a stale landing for the old style is cleared by re-running landing).
   const { error: upErr } = await client.database
     .from('campaigns')
     .update({
@@ -193,6 +236,9 @@ export default async function (req: Request): Promise<Response> {
       brand_essence: parsed.brand_essence,
       poster_spec: parsed.poster_spec,
       brand_assets,
+      design_tokens,
+      screenshot_url,
+      screenshot_key,
       status: 'draft',
     })
     .eq('id', campaign.id);
@@ -206,7 +252,25 @@ export default async function (req: Request): Promise<Response> {
     brand_essence: parsed.brand_essence,
     poster_spec: parsed.poster_spec,
     brand_assets,
+    design_tokens,
+    screenshot_url,
   });
+}
+
+// Dedupe a list of color strings (any format), preserving order, dropping blanks
+// and exact-rgb duplicates. Used to merge the captured palette with regex colors.
+function dedupeColors(colors: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of colors) {
+    const rgb = parseColor(c);
+    if (!rgb) continue;
+    const hex = toHex(rgb);
+    if (seen.has(hex)) continue;
+    seen.add(hex);
+    out.push(hex);
+  }
+  return out.slice(0, 8);
 }
 
 interface ParsedContent {
@@ -452,6 +516,7 @@ function normalize(
   c: Record<string, string>,
   siteColors: string[] = [],
   forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | null = null,
+  tokens: DesignTokens | null = null,
 ): ParsedContent {
   const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
   const sp = o.style_profile ?? {};
@@ -467,12 +532,16 @@ function normalize(
   // The most-used vivid color mined from the site IS the brand accent, by
   // definition — prefer it over the model's guess (the model often picks a lesser
   // on-page color or a generic blue). Only fall back to the model/default when the
-  // site yielded no usable colors.
+  // site yielded no usable colors. The programmatic capture (when present) is the
+  // strongest signal of all, so its computed accent/primary win outright.
   const topSiteColor = siteColors.find(isVivid);
   const modelAccent = modelPalette.accent;
-  const accent = topSiteColor ?? (isVivid(modelAccent) ? modelAccent : '#10b981');
-  // Primary: model's if present, else a dark default (posters use it as dark tone).
-  const primary = modelPalette.primary || '#1f2937';
+  const accent =
+    (isVivid(tokens?.colors.accent) ? tokens!.colors.accent : null) ??
+    topSiteColor ??
+    (isVivid(modelAccent) ? modelAccent : '#10b981');
+  // Primary: captured computed color wins, then model's, else a dark default.
+  const primary = tokens?.colors.primary || modelPalette.primary || '#1f2937';
 
   // Honor an explicit user choice; otherwise use the model's auto-pick.
   const poster_style = forcedStyle
@@ -503,13 +572,14 @@ function normalize(
     style_profile: {
       palette: {
         primary,
-        bg: modelPalette.bg ?? '#ffffff',
-        text: modelPalette.text ?? '#111827',
+        bg: tokens?.colors.bg || modelPalette.bg || '#ffffff',
+        text: tokens?.colors.text || modelPalette.text || '#111827',
         accent,
       },
       fonts: {
-        heading: (sp.fonts as Record<string, string>)?.heading ?? 'system-ui, sans-serif',
-        body: (sp.fonts as Record<string, string>)?.body ?? 'system-ui, sans-serif',
+        // Captured computed font families win; the model is the fallback.
+        heading: fontStack(tokens?.typography.headingFamily) ?? (sp.fonts as Record<string, string>)?.heading ?? 'system-ui, sans-serif',
+        body: fontStack(tokens?.typography.bodyFamily) ?? (sp.fonts as Record<string, string>)?.body ?? 'system-ui, sans-serif',
       },
       tone: (sp.tone as string) ?? 'modern',
       layout_hint: (sp.layout_hint as string) ?? '',
@@ -532,6 +602,24 @@ function fallbackContent(
   c: Record<string, string>,
   siteColors: string[] = [],
   forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | null = null,
+  tokens: DesignTokens | null = null,
 ): ParsedContent {
-  return normalize({}, c, siteColors, forcedStyle);
+  return normalize({}, c, siteColors, forcedStyle, tokens);
+}
+
+// Turn a bare captured family ("Inter") into a CSS stack with a sane generic
+// fallback. Returns null for an empty/whitespace family so callers can fall back.
+function fontStack(family: string | undefined): string | null {
+  const f = (family ?? '').trim();
+  if (!f) return null;
+  // Already a stack (has a comma) — pass through.
+  if (f.includes(',')) return f;
+  const lower = f.toLowerCase();
+  if (lower === 'system-ui' || lower === '-apple-system') return 'system-ui, sans-serif';
+  const generic = /serif|times|georgia|playfair|merriweather|lora/.test(lower) && !/sans/.test(lower)
+    ? 'serif'
+    : /mono|code|consol/.test(lower)
+      ? 'monospace'
+      : 'sans-serif';
+  return `"${f}", ${generic}`;
 }

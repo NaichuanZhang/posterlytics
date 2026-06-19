@@ -1,4 +1,5 @@
 import type { StyleProfile } from './types'
+import { parseColor, vividness, lighten, type RGB } from './colorUtils'
 
 // Derives a poster color scheme from the analyzed brand palette. Both HTML poster
 // templates are rendered deterministically (no AI image), so the accent here is
@@ -22,39 +23,13 @@ export interface PosterColors {
 const DEFAULT_ACCENT = '#10b981' // emerald
 const DEFAULT_ACCENT2 = '#93c5fd' // signal blue
 
-// Parse #rgb / #rrggbb into [r,g,b] (0-255), or null.
-function parseHex(hex: string | undefined): [number, number, number] | null {
-  if (!hex) return null
-  let h = hex.trim().replace(/^#/, '')
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('')
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
-}
-
-// Saturation-ish + not-too-dark/light score: how usable a hue is as a vivid accent.
-function vividness(rgb: [number, number, number]): number {
-  const [r, g, b] = rgb
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
-  const sat = max === 0 ? 0 : (max - min) / max
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  // Penalize near-black and near-white; reward saturation.
-  const lumOk = lum > 0.18 && lum < 0.9 ? 1 : 0.25
-  return sat * lumOk
-}
-
-function lighten(rgb: [number, number, number], amt: number): string {
-  const [r, g, b] = rgb.map((c) => Math.round(c + (255 - c) * amt)) as [number, number, number]
-  return `rgb(${r}, ${g}, ${b})`
-}
-
 export function posterColors(style: StyleProfile | null): PosterColors {
   const palette = style?.palette
-  const accentRgb = parseHex(palette?.accent)
-  const primaryRgb = parseHex(palette?.primary)
+  const accentRgb = parseColor(palette?.accent)
+  const primaryRgb = parseColor(palette?.primary)
 
   // Pick the more vivid of accent/primary as the headline accent.
-  const candidates = [accentRgb, primaryRgb].filter(Boolean) as Array<[number, number, number]>
+  const candidates = [accentRgb, primaryRgb].filter(Boolean) as Array<RGB>
   let accent = DEFAULT_ACCENT
   let accentSecondary = DEFAULT_ACCENT2
   if (candidates.length) {

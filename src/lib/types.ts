@@ -45,6 +45,42 @@ export interface BrandAssets {
 
 export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism'
 
+// Programmatic design tokens read from the live site via a real headless browser
+// (computed styles, not regex guesses). Produced by the capture-service, then
+// normalized by normalizeDesignTokens(). All optional so partial/empty captures
+// still type-check. This is the brand-styling source of truth when present.
+export interface DesignTokens {
+  typography: {
+    headingFamily: string
+    bodyFamily: string
+    scale: number[] // representative font sizes, px, ascending
+    weights: number[] // font weights seen, ascending
+  }
+  colors: {
+    bg: string // page background
+    text: string // body text
+    primary: string // dominant brand / primary-action color
+    accent: string // vivid accent
+    palette: string[] // ranked distinct colors (hex)
+  }
+  radii: number[] // representative border-radius scale, px
+  shadows: string[] // a few representative box-shadow values
+  spacing: number[] // inferred spacing scale, px
+  button: {
+    bg: string
+    color: string
+    radius: number
+    paddingX: number
+    paddingY: number
+    weight: number
+    shadow?: string
+  } | null
+  fontLinks: string[] // web-font stylesheet URLs to <link> in the landing
+}
+
+// Lifecycle of the AI-generated landing page (UI hint).
+export type LandingStatus = 'generating' | 'ready' | 'failed'
+
 // Vision-detected calm zone for the AI-poster QR, as 0..1 fractions (top-left
 // origin) of the hero image. null → AiPoster falls back to the per-style ANCHORS.
 export interface QrZone {
@@ -130,6 +166,11 @@ export interface Campaign {
   hero_image_url: string | null
   hero_image_key: string | null
   qr_zone: QrZone | null
+  design_tokens: DesignTokens | null
+  screenshot_url: string | null
+  screenshot_key: string | null
+  landing_html: string | null
+  landing_status: LandingStatus | null
   status: CampaignStatus
   created_at: string
 }

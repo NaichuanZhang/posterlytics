@@ -5,6 +5,7 @@ import {
   visitorHash,
   readCookie,
   createAnonClient,
+  injectLandingRuntime,
 } from './_shared.ts';
 
 // `view` is the QR target. It:
@@ -55,7 +56,7 @@ export default async function (req: Request): Promise<Response> {
   const { data: row, error: selErr } = await client.database
     .from('placements')
     .select(
-      'code, campaigns(product_name, tagline, cta_text, style_profile, poster_copy, landing_content, brand_assets, hero_image_url)',
+      'code, campaigns(product_name, tagline, cta_text, style_profile, poster_copy, landing_content, brand_assets, hero_image_url, landing_html)',
     )
     .eq('code', code)
     .maybeSingle();
@@ -65,7 +66,15 @@ export default async function (req: Request): Promise<Response> {
   }
 
   const campaign = (row as { campaigns: CampaignContent }).campaigns;
-  const body = landingHtml(campaign, code, scanId, baseUrl);
+  // convert/scan-geo are sibling functions on the same functions host.
+  const fnHost = `https://${new URL(baseUrl).host.split('.')[0]}.functions.insforge.app`;
+
+  // Prefer the AI-generated, on-brand landing when present: inject the per-request
+  // tracked CTA + geo-beacon into its placeholders. Fall back to the legacy
+  // deterministic template for campaigns generated before this feature.
+  const body = campaign.landing_html
+    ? injectLandingRuntime(campaign.landing_html, code, scanId, fnHost)
+    : landingHtml(campaign, code, scanId, fnHost);
   return html(body, 200, setCookie);
 }
 
@@ -78,6 +87,7 @@ interface CampaignContent {
   landing_content: LandingContent | null;
   brand_assets: BrandAssets | null;
   hero_image_url: string | null;
+  landing_html: string | null;
 }
 interface StyleProfile {
   palette?: { primary?: string; bg?: string; text?: string; accent?: string };
@@ -151,7 +161,7 @@ function landingHtml(
   c: CampaignContent,
   code: string,
   scanId: string | null,
-  baseUrl: string,
+  fnHost: string,
 ): string {
   const sp = c.style_profile ?? {};
   const lc = c.landing_content ?? {};
@@ -167,8 +177,6 @@ function landingHtml(
   const headline = lc.headline || c.product_name;
   const what = lc.what_it_does || c.tagline || '';
   const ctaText = lc.cta || c.cta_text || 'Learn more';
-  // convert/scan-geo are sibling functions on the same functions host
-  const fnHost = `https://${new URL(baseUrl).host.split('.')[0]}.functions.insforge.app`;
 
   const features = (lc.features ?? []).map((f) => `<li>${esc(f)}</li>`).join('');
   const how = (lc.how_it_works ?? [])

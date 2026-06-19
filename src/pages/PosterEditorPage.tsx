@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
+import { LandingPreview } from '../components/LandingPreview'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { buildViewUrl } from '../lib/landingUrl'
 
@@ -84,6 +85,19 @@ export function PosterEditorPage() {
     }
   }
 
+  // Regenerate just the AI landing page from the captured design tokens +
+  // screenshot. Independent of the poster so either can be refreshed alone.
+  async function regenerateLanding() {
+    if (!campaign) return
+    setBusy('landing')
+    try {
+      await insforge.functions.invoke('landing', { body: { campaignId: campaign.id } })
+      await reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // Switch render mode. Going to 'image' with no AI image yet generates one first.
   async function switchMode(mode: 'template' | 'image') {
     if (!campaign || campaign.poster_mode === mode) return
@@ -133,14 +147,30 @@ export function PosterEditorPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 480px) 1fr', gap: 28, alignItems: 'start' }}>
-        {/* Poster preview */}
-        <div className="card" style={{ display: 'grid', placeItems: 'center', background: 'var(--panel-2)', padding: 16 }}>
-          {previewCode ? (
-            <Poster campaign={campaign} code={previewCode} />
-          ) : (
-            <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
-          )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 360px)', gap: 28, alignItems: 'start' }}>
+        {/* Previews: poster + generated landing, side by side */}
+        <div
+          className="card"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: 16,
+            background: 'var(--panel-2)',
+            padding: 16,
+          }}
+        >
+          <div style={{ display: 'grid', justifyItems: 'center', gap: 8 }}>
+            <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Poster</span>
+            {previewCode ? (
+              <Poster campaign={campaign} code={previewCode} width={340} />
+            ) : (
+              <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
+            )}
+          </div>
+          <div style={{ display: 'grid', justifyItems: 'center', gap: 8 }}>
+            <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Landing page</span>
+            <LandingPreview campaign={campaign} width={340} />
+          </div>
         </div>
 
         {/* Controls */}
@@ -186,6 +216,27 @@ export function PosterEditorPage() {
             <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>
               <button className="btn secondary sm" onClick={regenerate} disabled={!!busy}>
                 {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
+              </button>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 style={{ margin: '0 0 8px' }}>Landing page</h3>
+            <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
+              {campaign.landing_html
+                ? 'An on-brand landing page generated from your site’s real design. It’s what the QR resolves to.'
+                : 'Generate an on-brand landing page from your site’s captured design. It’s what the QR resolves to.'}
+            </p>
+            {campaign.landing_status === 'failed' && (
+              <p className="hint" style={{ marginTop: 6 }}>Last generation failed — try again.</p>
+            )}
+            <div className="row wrap" style={{ gap: 8 }}>
+              <button className="btn secondary sm" onClick={regenerateLanding} disabled={!!busy}>
+                {busy === 'landing'
+                  ? 'Generating…'
+                  : campaign.landing_html
+                    ? '↻ Regenerate landing'
+                    : 'Generate landing'}
               </button>
             </div>
           </div>
