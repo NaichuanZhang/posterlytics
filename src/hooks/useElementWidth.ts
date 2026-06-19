@@ -17,8 +17,14 @@ export function useElementWidth(): [(node: HTMLElement | null) => void, number] 
     })
     ro.observe(node)
     observerRef.current = ro
-    // Seed immediately so the first paint isn't 0.
-    setWidth(node.getBoundingClientRect().width)
+    // Seed immediately so the first paint isn't 0. Measure the CONTENT box (not
+    // getBoundingClientRect, which is the border box) so the seed matches what
+    // the ResizeObserver later reports — otherwise the first frame is too wide
+    // (border box includes padding) and the preview visibly shrinks to fit.
+    const cs = getComputedStyle(node)
+    const inner =
+      node.clientWidth - parseFloat(cs.paddingLeft || '0') - parseFloat(cs.paddingRight || '0')
+    if (inner > 0) setWidth(inner)
   }, [])
 
   useEffect(() => () => observerRef.current?.disconnect(), [])
