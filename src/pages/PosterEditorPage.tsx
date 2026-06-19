@@ -10,6 +10,7 @@ import { Poster } from '../components/Poster'
 import { LandingPreview } from '../components/LandingPreview'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { buildViewUrl } from '../lib/landingUrl'
+import { useElementWidth } from '../hooks/useElementWidth'
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -147,30 +148,32 @@ export function PosterEditorPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 360px)', gap: 28, alignItems: 'start' }}>
-        {/* Previews: poster + generated landing, side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 320px)', gap: 24, alignItems: 'start' }}>
+        {/* Previews: poster + generated landing, always side by side. Two equal
+            columns; each cell measures itself and scales its preview to fit. */}
         <div
           className="card"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gridTemplateColumns: '1fr 1fr',
             gap: 16,
             background: 'var(--panel-2)',
             padding: 16,
+            alignItems: 'start',
           }}
         >
-          <div style={{ display: 'grid', justifyItems: 'center', gap: 8 }}>
-            <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Poster</span>
-            {previewCode ? (
-              <Poster campaign={campaign} code={previewCode} width={340} />
-            ) : (
-              <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
-            )}
-          </div>
-          <div style={{ display: 'grid', justifyItems: 'center', gap: 8 }}>
-            <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Landing page</span>
-            <LandingPreview campaign={campaign} width={340} />
-          </div>
+          <PreviewCell label="Poster">
+            {(w) =>
+              previewCode ? (
+                <Poster campaign={campaign} code={previewCode} width={w} />
+              ) : (
+                <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
+              )
+            }
+          </PreviewCell>
+          <PreviewCell label="Landing page">
+            {(w) => <LandingPreview campaign={campaign} width={w} />}
+          </PreviewCell>
         </div>
 
         {/* Controls */}
@@ -310,6 +313,21 @@ export function PosterEditorPage() {
         </div>
       </div>
     </Layout>
+  )
+}
+
+// One titled preview column. Measures its own width and hands a fitted pixel
+// width to its child so the poster/landing scales to the cell at any window size
+// (never overflows, never collapses to a stacked single column).
+function PreviewCell({ label, children }: { label: string; children: (width: number) => React.ReactNode }) {
+  const [ref, width] = useElementWidth()
+  // Leave a hair of slack so the rounded preview never touches the cell edge.
+  const fitted = width > 0 ? Math.max(160, Math.floor(width) - 2) : 0
+  return (
+    <div ref={ref} style={{ display: 'grid', justifyItems: 'center', gap: 8, minWidth: 0 }}>
+      <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>{label}</span>
+      {fitted > 0 ? children(fitted) : null}
+    </div>
   )
 }
 
