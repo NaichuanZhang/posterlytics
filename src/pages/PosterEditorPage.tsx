@@ -149,16 +149,13 @@ export function PosterEditorPage() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 320px)', gap: 24, alignItems: 'start' }}>
-        {/* Previews: poster + generated landing, always side by side. Two equal
-            columns; each cell measures itself and scales its preview to fit. */}
+        {/* Previews: poster + generated landing as two separate cards, side by
+            side. Each cell measures itself and scales its preview to fit. */}
         <div
-          className="card"
           style={{
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: 16,
-            background: 'var(--panel-2)',
-            padding: 16,
             alignItems: 'start',
           }}
         >
@@ -316,15 +313,15 @@ export function PosterEditorPage() {
   )
 }
 
-// One titled preview column. Measures its own width and hands a fitted pixel
-// width to its child so the poster/landing scales to the cell at any window size
-// (never overflows, never collapses to a stacked single column).
+// One titled preview as its own card. Measures its own (content-box) width and
+// hands a fitted pixel width to its child so the poster/landing scales to the
+// card at any window size (never overflows, never collapses to a stacked column).
 function PreviewCell({ label, children }: { label: string; children: (width: number) => React.ReactNode }) {
   const [ref, width] = useElementWidth()
-  // Leave a hair of slack so the rounded preview never touches the cell edge.
+  // Leave a hair of slack so the rounded preview never touches the card edge.
   const fitted = width > 0 ? Math.max(160, Math.floor(width) - 2) : 0
   return (
-    <div ref={ref} style={{ display: 'grid', justifyItems: 'center', gap: 8, minWidth: 0 }}>
+    <div ref={ref} className="card" style={{ display: 'grid', justifyItems: 'center', gap: 8, minWidth: 0, background: 'var(--panel-2)', padding: 16 }}>
       <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>{label}</span>
       {fitted > 0 ? children(fitted) : null}
     </div>
