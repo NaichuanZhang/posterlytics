@@ -13,12 +13,18 @@ interface Props {
   imageSrcOverride?: string
 }
 
-// AI-image poster: the model-generated illustration shown full-bleed at native
-// 1080×1620 (2:3), with the REAL per-placement QR in a DEDICATED branded band
-// pinned to the bottom edge. The image model can't render a scannable QR, so we
-// composite ours — and rather than hunt for wherever the diffusion model left a
-// calm gap, hero.ts prompts the model to keep the bottom ~18% a plain footer
-// strip and we overlay a deterministic band exactly there (QR left, CTA right).
+// AI-image poster: the model-generated illustration in the TOP ~81.5% of the
+// native 1080×1620 (2:3) frame, with the REAL per-placement QR in a DEDICATED
+// branded band that owns the bottom ~18.5% as its OWN row (no overlap). The image
+// model can't render a scannable QR, so we composite ours.
+//
+// The band is a genuine letterbox row, not an overlay: the image is cropped to
+// the image row with `objectPosition:'top'` (sheds the BOTTOM of the art, where
+// stray CTA/footer pixels land), and the band sits in normal flow below it. This
+// makes the old "band seam clips drawn art" failure structurally impossible —
+// the band never sits on top of any artwork. hero.ts prompts the model to finish
+// all content by ~80% down and leave the bottom as empty margin so the crop line
+// never slices a headline.
 //
 // The QR card is ALWAYS white with dark modules, independent of brand palette,
 // so it stays scannable on any background. The band is dark (posterColors.ink)
@@ -26,9 +32,10 @@ interface Props {
 const NATIVE_W = 1080
 const NATIVE_H = 1620
 
-// Band geometry (native px). BAND_H ≈ 18.5% of NATIVE_H, matching the bottom
-// strip hero.ts reserves in the prompt so the band covers no real artwork.
+// Band geometry (native px). BAND_H ≈ 18.5% of NATIVE_H; the image row takes the
+// remaining height so the two stack without overlapping.
 const BAND_H = 300
+const IMG_H = NATIVE_H - BAND_H // 1320 — the cropped image row
 const BAND_PAD_X = 64
 const BAND_GAP = 44
 const QR_PX = 200
@@ -60,49 +67,51 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     <div
       ref={ref}
       style={{
-        position: 'relative',
         width: NATIVE_W,
         height: NATIVE_H,
         overflow: 'hidden',
         background: bandBg,
-        isolation: 'isolate',
+        display: 'flex',
+        flexDirection: 'column',
       }}
       data-poster-style={style}
     >
-      {img ? (
-        <img
-          src={img}
-          crossOrigin="anonymous"
-          alt={`${campaign.product_name} poster`}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'grid',
-            placeItems: 'center',
-            color: '#8b8479',
-            fontSize: 34,
-            textAlign: 'center',
-            padding: 80,
-          }}
-        >
-          AI poster is still generating…
-        </div>
-      )}
+      {/* Image row — the top ~81.5%. Cropped from the TOP (objectPosition:'top')
+          so the discarded slice is the bottom of the art, never the headline. */}
+      <div style={{ width: '100%', height: IMG_H, overflow: 'hidden', flex: '0 0 auto' }}>
+        {img ? (
+          <img
+            src={img}
+            crossOrigin="anonymous"
+            alt={`${campaign.product_name} poster`}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }}
+          />
+        ) : (
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'grid',
+              placeItems: 'center',
+              color: '#8b8479',
+              fontSize: 34,
+              textAlign: 'center',
+              padding: 80,
+            }}
+          >
+            AI poster is still generating…
+          </div>
+        )}
+      </div>
 
-      {/* Dedicated bottom band — the QR's deterministic home. QR card on the left
-          (always white for contrast), CTA copy on the right. */}
+      {/* Dedicated bottom band — its OWN row below the image, never overlapping
+          art. QR card on the left (always white for contrast), CTA copy right. */}
       {img && (
         <div
           style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
+            width: '100%',
             height: BAND_H,
+            flex: '0 0 auto',
             background: bandBg,
             borderTop: `${HAIRLINE}px solid ${bandAccent}`,
             boxShadow: '0 -24px 48px rgba(0,0,0,0.28)',
@@ -111,7 +120,6 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             padding: `0 ${BAND_PAD_X}px`,
             gap: BAND_GAP,
             boxSizing: 'border-box',
-            zIndex: 2,
           }}
         >
           {/* White QR card — light quiet-zone frame keeps the code scannable

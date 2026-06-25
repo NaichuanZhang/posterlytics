@@ -7,11 +7,13 @@ import {
   createUserClient,
 } from './_shared.ts';
 
-// `hero` renders the full gamified poster (2:3) as a single AI image, from the
+// `hero` renders the gamified poster (2:3) as a single AI image, from the
 // campaign's poster_spec + brand_essence (produced by analyze). The image model
-// gets TEXT ONLY, so the brand is described in words. We reserve the BOTTOM ~18%
-// as a plain footer strip (no drawn QR) and the SPA overlays a deterministic
-// branded QR band exactly there. Stored in the public assets bucket.
+// gets TEXT ONLY, so the brand is described in words. The SPA letterboxes this
+// image into the TOP ~81.5% and gives the QR its own branded band in the bottom
+// row, so we prompt the model to FINISH all content by ~80% down and leave the
+// bottom ~20% as empty margin (the crop line lands there, discarding nothing
+// important). Stored in the public assets bucket.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -190,11 +192,11 @@ ${leftLines || '     - Save time\n     - Do more'}
   and on the RIGHT a note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
 ${rightSteps || '     1. Scan\n     2. Sign up\n     3. Go'}
 
-- CRITICAL: keep the BOTTOM ~18% of the poster — a full-width horizontal strip pinned to the very bottom edge — as a
-  completely clean, plain, EMPTY kraft-paper footer with absolutely nothing in it: no cards, notes, text, icons, doodles,
-  QR code, barcode, pixel-grid, or decoration of any kind. A real branded footer bar holding the QR code is composited
-  over that strip afterward, so anything drawn there would be covered or clash. Keep ALL artwork, text, and the mascot
-  comfortably ABOVE this bottom strip.
+- CRITICAL FRAMING: FINISH all artwork, text, and the mascot by about 80% of the way down the poster. Leave the BOTTOM
+  ~20% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY kraft-paper margin
+  with absolutely nothing in it: no cards, notes, text, icons, doodles, QR code, barcode, pixel-grid, or decoration of any
+  kind. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is
+  discarded or clashes. Do NOT place the footer formula, any URL, or a closing tagline in that bottom strip.
 
 All hand-lettered text must be crisp, legible, correctly spelled, ENGLISH only, and limited to the quoted strings above.
 Quality: warm hand-drawn watercolor, cozy scrapbook journal aesthetic, kraft paper texture, torn paper edges, washi
@@ -272,14 +274,15 @@ ${featureLines || '     • Fast: built for speed (bolt icon)'}
   with a short title and one line of light-gray text on the dark background:
 ${reasonLines || '     • Trusted: by modern teams (check icon)'}
 
-- Lower dark zone (around 64-82% down): a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
+- Lower dark zone (around 60-78% down): a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
   (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". Center or left-align it within the
   dark zone — there is NO reserved QR area in this band, so the headline may use the full width.
 
-- CRITICAL: keep the BOTTOM ~18% of the poster — a full-width horizontal strip pinned to the very bottom edge — as a
-  completely clean, plain, EMPTY dark-charcoal footer with absolutely nothing in it: no cards, panels, frames, outlines,
-  text, icons, QR code, barcode, pixel-grid, or decoration. A real branded footer bar holding the QR code is composited
-  over that strip afterward. Keep ALL call-to-action text and artwork comfortably ABOVE this bottom strip.
+- CRITICAL FRAMING: FINISH all call-to-action text and artwork by about 80% of the way down the poster. Leave the BOTTOM
+  ~20% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY dark-charcoal margin
+  with absolutely nothing in it: no cards, panels, frames, outlines, text, icons, QR code, barcode, pixel-grid, or
+  decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is
+  discarded or clashes. Do NOT place any closing tagline or URL in that bottom strip.
 
 All rendered text must be crisp, correctly spelled and legible, and limited to the quoted strings above. One consistent
 thin-line icon style throughout. Frosted glass must read as translucent with soft shadows. High-end SaaS launch
