@@ -5,15 +5,13 @@ import {
   dataUrlToBlob,
   jsonResponse,
   createUserClient,
-  detectQrZone,
-  type QrZone,
 } from './_shared.ts';
 
-// `hero` renders the full gamified "cozy scrapbook" poster (9:16) as a single
-// AI image, from the campaign's poster_spec + brand_essence (produced by
-// analyze). The image model gets TEXT ONLY, so the brand is described in words.
-// A calm light zone is reserved lower-center; we forbid drawing any QR there and
-// overlay the real per-placement QR in the SPA. Stored in the public assets bucket.
+// `hero` renders the full gamified poster (2:3) as a single AI image, from the
+// campaign's poster_spec + brand_essence (produced by analyze). The image model
+// gets TEXT ONLY, so the brand is described in words. We reserve the BOTTOM ~18%
+// as a plain footer strip (no drawn QR) and the SPA overlays a deterministic
+// branded QR band exactly there. Stored in the public assets bucket.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -55,21 +53,6 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: String(e) }, 502);
   }
 
-  // Vision pass: locate the calm zone the diffusion model actually left, so the
-  // SPA can snap the QR to it instead of a fixed guess. Best-effort and non-fatal
-  // — on any failure we store null and the frontend falls back to its ANCHORS.
-  // The base64 dataUrl is sent directly (no upload-propagation race); the proxy
-  // accepts ~750KB data URLs (verified).
-  const styleHint = style === 'saas_glassmorphism'
-    ? 'lower-right area of the dark bottom call-to-action band'
-    : 'lower-center band, between the two torn-paper notes';
-  let qrZone: QrZone | null = null;
-  try {
-    qrZone = await detectQrZone(baseUrl, apiKey, dataUrl, styleHint);
-  } catch {
-    qrZone = null;
-  }
-
   let url: string;
   let key: string;
   try {
@@ -84,15 +67,15 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: String(e) }, 500);
   }
 
-  // Persist qr_zone alongside the image. Writing null on a failed/absent detection
-  // also clears any stale box from a prior regeneration → clean ANCHORS fallback.
+  // Persist the image. The QR sits in a deterministic SPA-rendered bottom band,
+  // so there's no qr_zone to detect or store; any legacy value is left untouched.
   const { error: upErr } = await client.database
     .from('campaigns')
-    .update({ hero_image_url: url, hero_image_key: key, qr_zone: qrZone })
+    .update({ hero_image_url: url, hero_image_key: key })
     .eq('id', campaign.id);
   if (upErr) return jsonResponse({ error: upErr.message }, 500);
 
-  return jsonResponse({ poster_image_url: url, qr_zone: qrZone });
+  return jsonResponse({ poster_image_url: url });
 }
 
 interface StatNode { icon: string; label: string; stars: number }
@@ -201,17 +184,17 @@ ${statLines || '   • Easy ★★★★★\n   • Fast ★★★★★'}
   washi-tape corners and a small hand-drawn icon:
 ${questLines || '   • Get started — in minutes (spark icon)'}
 
-- A lower conversion band: keep the CENTER as completely clean, plain, EMPTY kraft-paper background — a calm open
-  roughly-square area, about one third of the width, with absolutely nothing in it: no card, no panel, no frame, no
-  outline, no box, no sticker, NO QR code, no barcode, no pixel-grid, and no text. (Exactly ONE real QR sticker is
-  composited there afterward, so any drawn shape, code, or label there would clash — leave it bare.) To the LEFT of that
-  empty center area, a torn-paper note titled "${spec.conv_left?.heading ?? `Why ${product}`}":
+- A lower conversion band with two torn-paper notes side by side: on the LEFT a note titled
+  "${spec.conv_left?.heading ?? `Why ${product}`}":
 ${leftLines || '     - Save time\n     - Do more'}
-  and to the RIGHT, a torn-paper note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
+  and on the RIGHT a note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
 ${rightSteps || '     1. Scan\n     2. Sign up\n     3. Go'}
 
-- At the very bottom, centered, a formula-style tagline${spec.footer_formula ? ` reading "${spec.footer_formula}"` : ''} framed
-  by little doodles${spec.urls ? `, with the url "${spec.urls}" on a small pill` : ''}.
+- CRITICAL: keep the BOTTOM ~18% of the poster — a full-width horizontal strip pinned to the very bottom edge — as a
+  completely clean, plain, EMPTY kraft-paper footer with absolutely nothing in it: no cards, notes, text, icons, doodles,
+  QR code, barcode, pixel-grid, or decoration of any kind. A real branded footer bar holding the QR code is composited
+  over that strip afterward, so anything drawn there would be covered or clash. Keep ALL artwork, text, and the mascot
+  comfortably ABOVE this bottom strip.
 
 All hand-lettered text must be crisp, legible, correctly spelled, ENGLISH only, and limited to the quoted strings above.
 Quality: warm hand-drawn watercolor, cozy scrapbook journal aesthetic, kraft paper texture, torn paper edges, washi
@@ -289,14 +272,14 @@ ${featureLines || '     • Fast: built for speed (bolt icon)'}
   with a short title and one line of light-gray text on the dark background:
 ${reasonLines || '     • Trusted: by modern teams (check icon)'}
 
-- Lower dark zone (around 74-90% down): on the LEFT, a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
-  (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". The RIGHT third of this band must be
-  left as completely clean, plain, EMPTY dark background — a calm open roughly-square area with absolutely nothing in it:
-  no card, no panel, no frame, no outline, no box, no sticker, no QR code, no barcode, no pixel-grid, and no text. A real
-  QR sticker is composited there afterward, so any drawn shape or label there would clash. Keep the call-to-action text
-  on the left well clear of this empty right-side area so they never overlap.
+- Lower dark zone (around 64-82% down): a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
+  (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". Center or left-align it within the
+  dark zone — there is NO reserved QR area in this band, so the headline may use the full width.
 
-- Very bottom, centered, a short all-caps letter-spaced tagline${spec.footer_slogan ? ` reading "${spec.footer_slogan}"` : ''}${spec.urls ? `, with "${spec.urls}" on a small pill` : ''}, key words in ${primary}.
+- CRITICAL: keep the BOTTOM ~18% of the poster — a full-width horizontal strip pinned to the very bottom edge — as a
+  completely clean, plain, EMPTY dark-charcoal footer with absolutely nothing in it: no cards, panels, frames, outlines,
+  text, icons, QR code, barcode, pixel-grid, or decoration. A real branded footer bar holding the QR code is composited
+  over that strip afterward. Keep ALL call-to-action text and artwork comfortably ABOVE this bottom strip.
 
 All rendered text must be crisp, correctly spelled and legible, and limited to the quoted strings above. One consistent
 thin-line icon style throughout. Frosted glass must read as translucent with soft shadows. High-end SaaS launch
