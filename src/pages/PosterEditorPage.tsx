@@ -55,31 +55,59 @@ export function PosterEditorPage() {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // Spec card rows depend on the auto-selected template shape.
+  // Spec card rows depend on the active style. `designer` shows the AI-designed
+  // layout's composition/mood; the two templates show their structured spec.
   const isSaas = campaign.poster_style === 'saas_glassmorphism'
+  const isDesigner = campaign.poster_style === 'designer'
   const spec = campaign.poster_spec as Record<string, unknown> | null
-  const specRows: Array<{ label: string; value?: string }> = isSaas
+  const layout = campaign.poster_layout
+  const specRows: Array<{ label: string; value?: string }> = isDesigner
     ? [
-        { label: 'Headline', value: spec?.headline as string },
-        { label: 'Slogan', value: spec?.slogan as string },
-        { label: 'CTA', value: spec?.cta_main as string },
+        { label: 'Composition', value: layout?.composition },
+        { label: 'Mood', value: layout?.mood },
+        { label: 'Art style', value: layout?.art_style },
       ]
-    : [
-        { label: 'Hook', value: [spec?.hook_line1, spec?.hook_line2].filter(Boolean).join(' ') },
-        { label: 'Subtitle', value: spec?.subtitle as string },
-        { label: 'Mascot', value: spec?.mascot as string },
-      ]
+    : isSaas
+      ? [
+          { label: 'Headline', value: spec?.headline as string },
+          { label: 'Slogan', value: spec?.slogan as string },
+          { label: 'CTA', value: spec?.cta_main as string },
+        ]
+      : [
+          { label: 'Hook', value: [spec?.hook_line1, spec?.hook_line2].filter(Boolean).join(' ') },
+          { label: 'Subtitle', value: spec?.subtitle as string },
+          { label: 'Mascot', value: spec?.mascot as string },
+        ]
+  const styleLabel = isDesigner ? 'Designer' : isSaas ? 'SaaS Glassmorphism' : 'Cozy Scrapbook'
 
   async function regenerate() {
     if (!campaign) return
     setBusy('regen')
     try {
       // Re-extract the spec; the template re-renders from it client-side. If the
-      // active mode is the AI image, also re-paint the image.
+      // active mode is the AI image, also re-paint the image — and for the
+      // designer style, re-design the bespoke layout first so hero paints fresh.
       await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
       if (campaign.poster_mode === 'image') {
+        if (campaign.poster_style === 'designer') {
+          await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
+        }
         await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
       }
+      await reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Reroll just the bespoke layout (designer style): re-design then re-paint,
+  // without re-running analyze. Independent of the poster spec/landing.
+  async function regenerateLayout() {
+    if (!campaign) return
+    setBusy('layout')
+    try {
+      await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
+      await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
       await reload()
     } finally {
       setBusy(null)
@@ -180,10 +208,7 @@ export function PosterEditorPage() {
               Style auto-picked from your site. Regenerate for a fresh take.
             </p>
             <dl style={{ margin: 0, display: 'grid', gap: 8, fontSize: '0.9rem' }}>
-              <Row
-                label="Style"
-                value={isSaas ? 'SaaS Glassmorphism' : 'Cozy Scrapbook'}
-              />
+              <Row label="Style" value={styleLabel} />
               {specRows.map((r) => (
                 <Row key={r.label} label={r.label} value={r.value} />
               ))}
@@ -216,7 +241,15 @@ export function PosterEditorPage() {
               <button className="btn secondary sm" onClick={regenerate} disabled={!!busy}>
                 {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
               </button>
+              {isDesigner && campaign.poster_mode === 'image' && (
+                <button className="btn secondary sm" onClick={regenerateLayout} disabled={!!busy}>
+                  {busy === 'layout' ? 'Designing…' : '↻ Regenerate layout'}
+                </button>
+              )}
             </div>
+            {isDesigner && campaign.design_status === 'failed' && (
+              <p className="hint" style={{ marginTop: 6 }}>Layout design failed — try Regenerate layout.</p>
+            )}
           </div>
 
           <div className="card">

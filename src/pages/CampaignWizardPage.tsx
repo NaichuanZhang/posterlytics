@@ -31,8 +31,10 @@ export function CampaignWizardPage() {
   const [tagline, setTagline] = useState('')
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
-  // 'auto' lets the analyzer pick; otherwise force the template.
-  const [styleChoice, setStyleChoice] = useState<'auto' | 'saas_glassmorphism' | 'cozy_scrapbook'>('auto')
+  // 'auto' lets the analyzer pick; otherwise force the template. 'designer' adds
+  // an agentic layout-design step (the `designer` function) before the image.
+  const [styleChoice, setStyleChoice] =
+    useState<'auto' | 'saas_glassmorphism' | 'cozy_scrapbook' | 'designer'>('auto')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -76,13 +78,21 @@ export function CampaignWizardPage() {
     }
 
     // 3. In parallel: paint the AI poster variant AND generate the landing page.
-    // They write disjoint columns (hero_image_* / qr_zone vs landing_html), so
-    // running them concurrently is safe and keeps total wait down. Both are
-    // best-effort — failures are non-fatal and recoverable in the editor.
+    // They write disjoint columns (hero_image_* vs landing_html), so running them
+    // concurrently is safe and keeps total wait down. Both are best-effort —
+    // failures are non-fatal and recoverable in the editor. For the `designer`
+    // style, the layout agent must run BEFORE hero (hero paints from the layout),
+    // so the hero call is chained after `designer` rather than fired immediately.
     setPhase('generating')
     let imageOk = false
-    const heroCall = insforge.functions
-      .invoke('hero', { body: { campaignId } })
+    const heroChain =
+      styleChoice === 'designer'
+        ? insforge.functions
+            .invoke('designer', { body: { campaignId } })
+            .catch((err) => console.error(err))
+        : Promise.resolve()
+    const heroCall = heroChain
+      .then(() => insforge.functions.invoke('hero', { body: { campaignId } }))
       .then(({ error }) => {
         imageOk = !error
       })
@@ -232,6 +242,7 @@ export function CampaignWizardPage() {
                 { key: 'auto', label: 'Auto', hint: 'Pick for me' },
                 { key: 'saas_glassmorphism', label: 'SaaS', hint: 'Sleek / glassmorphism' },
                 { key: 'cozy_scrapbook', label: 'Cozy', hint: 'Warm / scrapbook' },
+                { key: 'designer', label: 'Designer', hint: 'AI-designed bespoke layout' },
               ] as const).map((opt) => (
                 <button
                   key={opt.key}
@@ -249,7 +260,9 @@ export function CampaignWizardPage() {
                 ? 'We choose the template that fits your brand.'
                 : styleChoice === 'saas_glassmorphism'
                   ? 'Premium split light/dark launch poster with a 3D device mockup.'
-                  : 'Warm hand-drawn scrapbook poster with a mascot and stat ring.'}
+                  : styleChoice === 'designer'
+                    ? 'An AI art director designs a bespoke layout for your brand, then paints it — not a fixed template.'
+                    : 'Warm hand-drawn scrapbook poster with a mascot and stat ring.'}
             </div>
           </div>
 

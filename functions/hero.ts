@@ -5,15 +5,19 @@ import {
   dataUrlToBlob,
   jsonResponse,
   createUserClient,
+  compileLayoutPrompt,
+  type PosterLayout,
 } from './_shared.ts';
 
-// `hero` renders the gamified poster (2:3) as a single AI image, from the
-// campaign's poster_spec + brand_essence (produced by analyze). The image model
-// gets TEXT ONLY, so the brand is described in words. The SPA letterboxes this
-// image into the TOP ~81.5% and gives the QR its own branded band in the bottom
-// row, so we prompt the model to FINISH all content by ~80% down and leave the
-// bottom ~20% as empty margin (the crop line lands there, discarding nothing
-// important). Stored in the public assets bucket.
+// `hero` renders the poster (2:3) as a single AI image. For the two hardcoded
+// styles it builds the prompt from poster_spec + brand_essence (produced by
+// analyze) via a fixed template prompt; for the `designer` style it compiles the
+// LLM-designed poster_layout (produced by the `designer` agent) into the prompt.
+// The image model gets TEXT ONLY, so the brand is described in words. The SPA
+// letterboxes this image into the TOP ~81.5% and gives the QR its own branded
+// band in the bottom row, so we prompt the model to FINISH all content by ~80%
+// down and leave the bottom ~20% as empty margin (the crop line lands there,
+// discarding nothing important). Stored in the public assets bucket.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -35,14 +39,17 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, poster_style, style_profile, poster_spec, brand_essence')
+    .select('id, product_name, tagline, poster_style, style_profile, poster_spec, brand_essence, poster_layout')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
-  const style = (campaign as Record<string, unknown>).poster_style === 'saas_glassmorphism'
+  const rawStyle = (campaign as Record<string, unknown>).poster_style;
+  const style = rawStyle === 'saas_glassmorphism'
     ? 'saas_glassmorphism'
-    : 'cozy_scrapbook';
+    : rawStyle === 'designer'
+      ? 'designer'
+      : 'cozy_scrapbook';
   const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style);
 
   // The image model emits a native 2:3 portrait regardless of aspect_ratio; we
@@ -120,8 +127,21 @@ function stars(n: number): string {
   return '★'.repeat(f) + '☆'.repeat(5 - f);
 }
 
-// Dispatch to the right template prompt based on the campaign's poster_style.
+// Dispatch to the right prompt based on the campaign's poster_style. For
+// `designer`, compile the LLM-designed poster_layout; if it's missing (designer
+// step failed / not yet run) fall back to the SaaS template so hero never
+// hard-fails.
 function buildPosterPrompt(c: Record<string, unknown>, style: string): string {
+  if (style === 'designer') {
+    const layout = c.poster_layout as PosterLayout | null;
+    if (layout && Array.isArray(layout.zones)) {
+      return compileLayoutPrompt(layout, {
+        product: String(c.product_name ?? 'the product'),
+        essence: String(c.brand_essence ?? ''),
+      });
+    }
+    return buildSaasPrompt(c);
+  }
   return style === 'saas_glassmorphism' ? buildSaasPrompt(c) : buildCozyPrompt(c);
 }
 

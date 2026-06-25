@@ -152,6 +152,128 @@ export async function detectQrZone(
   }
 }
 
+// =====================================================================
+// Designer mode: agentic poster layout (LLM-designed) → compiled image prompt.
+// `PosterLayout` is the structured spec the `designer` function produces; it's
+// mirrored in src/lib/types.ts (Deno bundle can't import across the SPA
+// boundary — same pattern as QrZone/DesignTokens). `normalizePosterLayout`
+// bounds/repairs model output; `compileLayoutPrompt` is the PURE seam that turns
+// the JSON into a text-to-image prompt reusing hero.ts's framing conventions.
+// =====================================================================
+
+export type LayoutBand = 'top' | 'upper' | 'mid' | 'lower';
+
+export interface PosterLayoutZone {
+  band: LayoutBand;
+  role: string; // what this zone is, e.g. "hero headline", "feature grid"
+  content: string; // the exact words/text to render in this zone (quoted verbatim)
+  emphasis?: 'low' | 'med' | 'high';
+  align?: 'left' | 'center' | 'right';
+}
+
+export interface PosterLayout {
+  composition: string; // e.g. "asymmetric, oversized hero top-left"
+  mood: string; // e.g. "editorial, calm, premium"
+  art_style: string; // visual medium/treatment, e.g. "flat vector + soft gradients"
+  palette_roles: { bg: string; surface?: string; text: string; primary: string; accent: string };
+  zones: PosterLayoutZone[]; // top→lower; must finish by ~80% (bottom reserved for the QR band)
+}
+
+const LAYOUT_BANDS: LayoutBand[] = ['top', 'upper', 'mid', 'lower'];
+
+// Bound + repair an LLM-produced layout into a safe PosterLayout. Pulls palette
+// defaults from the campaign style_profile when the model omits them. Pure.
+export function normalizePosterLayout(
+  raw: unknown,
+  palette: { bg?: string; text?: string; primary?: string; accent?: string } = {},
+): PosterLayout {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const pr = (o.palette_roles ?? {}) as Record<string, unknown>;
+  const str = (v: unknown, fallback = '') => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
+
+  const zonesRaw = Array.isArray(o.zones) ? o.zones : [];
+  const zones: PosterLayoutZone[] = zonesRaw
+    .slice(0, 8)
+    .map((z) => {
+      const x = (z ?? {}) as Record<string, unknown>;
+      const band = LAYOUT_BANDS.includes(x.band as LayoutBand) ? (x.band as LayoutBand) : 'mid';
+      const emphasis = ['low', 'med', 'high'].includes(x.emphasis as string)
+        ? (x.emphasis as 'low' | 'med' | 'high')
+        : undefined;
+      const align = ['left', 'center', 'right'].includes(x.align as string)
+        ? (x.align as 'left' | 'center' | 'right')
+        : undefined;
+      return {
+        band,
+        role: str(x.role).slice(0, 80),
+        content: str(x.content).slice(0, 280),
+        ...(emphasis ? { emphasis } : {}),
+        ...(align ? { align } : {}),
+      };
+    })
+    .filter((z) => z.role || z.content);
+
+  return {
+    composition: str(o.composition, 'balanced vertical flow, clear hierarchy top to bottom').slice(0, 240),
+    mood: str(o.mood, 'modern, clean, professional').slice(0, 120),
+    art_style: str(o.art_style, 'modern editorial graphic design, crisp vector shapes, soft shadows').slice(0, 200),
+    palette_roles: {
+      bg: str(pr.bg, palette.bg || '#ffffff'),
+      ...(str(pr.surface) ? { surface: str(pr.surface) } : {}),
+      text: str(pr.text, palette.text || '#111827'),
+      primary: str(pr.primary, palette.primary || '#1f2937'),
+      accent: str(pr.accent, palette.accent || '#10b981'),
+    },
+    zones,
+  };
+}
+
+// Compile a PosterLayout into a text-to-image prompt. PURE + deterministic — the
+// testable seam between the agentic layout and the image model. Reuses hero.ts's
+// proven conventions: 2:3 framing, brand-honoring, "render only these exact
+// quoted strings", the bottom ~20% empty-margin rule (so the SPA letterbox crop
+// + QR band stay clean), and an Avoid list.
+export function compileLayoutPrompt(
+  layout: PosterLayout,
+  ctx: { product: string; essence: string },
+): string {
+  const p = layout.palette_roles;
+  const bandLabel: Record<LayoutBand, string> = {
+    top: 'TOP strip (0-12% down)',
+    upper: 'UPPER area (12-42% down)',
+    mid: 'MIDDLE area (42-68% down)',
+    lower: 'LOWER area (68-80% down)',
+  };
+  // Stable top→lower order regardless of the order the model emitted zones in.
+  const ordered = [...layout.zones].sort((a, b) => LAYOUT_BANDS.indexOf(a.band) - LAYOUT_BANDS.indexOf(b.band));
+  const zoneLines = ordered
+    .map((z) => {
+      const emph = z.emphasis === 'high' ? ' (dominant, largest element)' : z.emphasis === 'low' ? ' (small, secondary)' : '';
+      const align = z.align ? `, ${z.align}-aligned` : '';
+      const text = z.content ? ` Render the exact text: "${z.content}".` : '';
+      return `- ${bandLabel[z.band]}${align}: ${z.role}${emph}.${text}`;
+    })
+    .join('\n');
+
+  return `Create a single PORTRAIT 2:3 product-promotion poster. Custom art-directed layout (NOT a generic template).
+Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
+
+Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; vivid accent ${p.accent}; ${p.surface ? `card/surface ${p.surface}; ` : ''}body text ${p.text}. Stay within this palette plus neutrals — no rogue colors.
+
+Honor this brand — infuse its palette, logo motif and vibe, do not invent an unrelated look:
+${ctx.essence || ctx.product}
+
+CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings listed below, and they must all be in ENGLISH. Do NOT print any of the layout/section descriptions, role names, position words, or instruction words as visible text — those are directions, not content.
+
+Arrange the poster top to bottom using these zones:
+${zoneLines || '- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
+
+CRITICAL FRAMING: FINISH all artwork and text by about 80% of the way down the poster. Leave the BOTTOM ~20% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background (color ${p.bg}) with absolutely nothing in it: no cards, panels, frames, text, icons, QR code, barcode, or decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is discarded or clashes.
+
+All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
+Avoid: garbled or misspelled text, any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
+}
+
 // Call the InsForge AI image proxy. Returns a base64 data URL.
 export async function aiImage(
   baseUrl: string,

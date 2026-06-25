@@ -40,8 +40,12 @@ export default async function (req: Request): Promise<Response> {
 
   // Optional forced template. 'auto' (or absent) lets the model pick; otherwise
   // we honor the explicit choice and override the model's pick in normalize().
+  // 'designer' is the agentic-layout mode — analyze still produces brand context
+  // + copy; the separate `designer` function designs the layout afterward.
   const forcedStyle =
-    body.posterStyle === 'saas_glassmorphism' || body.posterStyle === 'cozy_scrapbook'
+    body.posterStyle === 'saas_glassmorphism' ||
+    body.posterStyle === 'cozy_scrapbook' ||
+    body.posterStyle === 'designer'
       ? body.posterStyle
       : null;
 
@@ -151,7 +155,9 @@ export default async function (req: Request): Promise<Response> {
     '"poster_style" MUST be one of: "saas_glassmorphism" (premium split light/dark product-launch poster with a 3D ' +
     'device mockup — pick for developer tools, B2B/SaaS, data, fintech, infra, "serious/premium tech" brands), or ' +
     '"cozy_scrapbook" (warm hand-drawn gamified watercolor — pick for playful, consumer, lifestyle, creative, social, ' +
-    'or otherwise warm/friendly brands). Decide from the brand\'s tone and palette.\n' +
+    'or otherwise warm/friendly brands). Decide from the brand\'s tone and palette. (A third mode, "designer", exists ' +
+    'but is only chosen explicitly by the user — never auto-pick it; when it is in force a separate agent designs the ' +
+    'layout, so just produce faithful brand context and copy.)\n' +
     'Common schema: {' +
     '"poster_style":"saas_glassmorphism" | "cozy_scrapbook",' +
     '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
@@ -515,7 +521,7 @@ function normalize(
   raw: unknown,
   c: Record<string, string>,
   siteColors: string[] = [],
-  forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | null = null,
+  forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | 'designer' | null = null,
   tokens: DesignTokens | null = null,
 ): ParsedContent {
   const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
@@ -547,13 +553,17 @@ function normalize(
   const poster_style = forcedStyle
     ?? ((o.poster_style as unknown) === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook');
 
-  const poster_spec = poster_style === 'saas_glassmorphism'
-    ? normalizeSaasSpec(ps, product, tagline)
-    : normalizeCozySpec(ps, product, tagline);
+  // For `designer`, the bespoke layout is designed later by the `designer`
+  // function — analyze just produces brand context + copy. We still fill a spec
+  // (via the saas shape) so poster_copy and editor fallbacks have content; the
+  // cozy shape is only used for the explicit cozy style.
+  const poster_spec = poster_style === 'cozy_scrapbook'
+    ? normalizeCozySpec(ps, product, tagline)
+    : normalizeSaasSpec(ps, product, tagline);
 
   // poster_copy kept for backward-compat (landing page, optimizer agent, editor
   // fallbacks). Map from whichever spec shape we produced.
-  const posterCopy = poster_style === 'saas_glassmorphism'
+  const posterCopy = poster_style !== 'cozy_scrapbook'
     ? {
         hook: (poster_spec as ReturnType<typeof normalizeSaasSpec>).slogan,
         what_it_does: (poster_spec as ReturnType<typeof normalizeSaasSpec>).product_intro,

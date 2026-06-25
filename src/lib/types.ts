@@ -43,7 +43,32 @@ export interface BrandAssets {
   primary_image_url?: string
 }
 
-export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism'
+export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism' | 'designer'
+
+// Designer mode: an LLM-designed bespoke poster layout (produced by the
+// `designer` edge function) that `hero` compiles into the image prompt — instead
+// of one of the two hardcoded template prompts. Mirror of `PosterLayout` in
+// functions/_shared.ts (Deno bundle can't import across the boundary).
+export type LayoutBand = 'top' | 'upper' | 'mid' | 'lower'
+
+export interface PosterLayoutZone {
+  band: LayoutBand
+  role: string
+  content: string
+  emphasis?: 'low' | 'med' | 'high'
+  align?: 'left' | 'center' | 'right'
+}
+
+export interface PosterLayout {
+  composition: string
+  mood: string
+  art_style: string
+  palette_roles: { bg: string; surface?: string; text: string; primary: string; accent: string }
+  zones: PosterLayoutZone[]
+}
+
+// Lifecycle of the AI-designed poster layout (UI hint), same shape as LandingStatus.
+export type DesignStatus = 'generating' | 'ready' | 'failed'
 
 // Programmatic design tokens read from the live site via a real headless browser
 // (computed styles, not regex guesses). Produced by the capture-service, then
@@ -171,6 +196,8 @@ export interface Campaign {
   screenshot_key: string | null
   landing_html: string | null
   landing_status: LandingStatus | null
+  poster_layout: PosterLayout | null
+  design_status: DesignStatus | null
   status: CampaignStatus
   created_at: string
 }
