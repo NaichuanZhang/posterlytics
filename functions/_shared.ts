@@ -240,9 +240,9 @@ export function compileLayoutPrompt(
   const p = layout.palette_roles;
   const bandLabel: Record<LayoutBand, string> = {
     top: 'TOP strip (0-12% down)',
-    upper: 'UPPER area (12-42% down)',
-    mid: 'MIDDLE area (42-68% down)',
-    lower: 'LOWER area (68-80% down)',
+    upper: 'UPPER area (12-40% down)',
+    mid: 'MIDDLE area (40-60% down)',
+    lower: 'LOWER area (60-74% down)',
   };
   // Stable top→lower order regardless of the order the model emitted zones in.
   const ordered = [...layout.zones].sort((a, b) => LAYOUT_BANDS.indexOf(a.band) - LAYOUT_BANDS.indexOf(b.band));
@@ -258,6 +258,8 @@ export function compileLayoutPrompt(
   return `Create a single PORTRAIT 2:3 product-promotion poster. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
 
+This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, rounded clickable controls, tabs, or any UI chrome. Render every call-to-action as plain bold typographic text only — the real action is a scannable QR footer bar composited afterward, so a drawn button would be dead and redundant.
+
 Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; vivid accent ${p.accent}; ${p.surface ? `card/surface ${p.surface}; ` : ''}body text ${p.text}. Stay within this palette plus neutrals — no rogue colors.
 
 Honor this brand — infuse its palette, logo motif and vibe, do not invent an unrelated look:
@@ -268,10 +270,10 @@ CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted st
 Arrange the poster top to bottom using these zones:
 ${zoneLines || '- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
 
-CRITICAL FRAMING: FINISH all artwork and text by about 80% of the way down the poster. Leave the BOTTOM ~20% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background (color ${p.bg}) with absolutely nothing in it: no cards, panels, frames, text, icons, QR code, barcode, or decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is discarded or clashes.
+CRITICAL FRAMING: FINISH all artwork and text by about 74% of the way down the poster. Leave the BOTTOM ~26% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background (color ${p.bg}) with absolutely nothing in it: no cards, panels, frames, text, icons, buttons, QR code, barcode, or decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is discarded or clashes. Keep a comfortable empty gap of plain background between the last content and that bottom margin so the transition reads cleanly.
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
-Avoid: garbled or misspelled text, any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
+Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
 }
 
 // Call the InsForge AI image proxy. Returns a base64 data URL.

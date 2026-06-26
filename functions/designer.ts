@@ -80,8 +80,10 @@ export default async function (req: Request): Promise<Response> {
     'headline + key message), "mid" (product detail / features / device), "lower" (call to action). Keep every ' +
     'content string SHORT and legible. The palette_roles MUST use the real brand colors provided. Design a layout ' +
     'whose structure genuinely suits this brand and product. ' +
-    'CRITICAL: leave the BOTTOM ~20% of the poster empty — do NOT place any zone, text, or a "lower" CTA below ~80% ' +
-    'down; a tracked QR footer bar is composited there afterward. The "lower" CTA zone sits around 68-80% down, not at the very bottom.';
+    'This is a PRINTED POSTER IMAGE, not an app screen — the "lower" CTA zone is plain headline TEXT, never a button ' +
+    'or pill; the tracked QR footer bar is the real action. ' +
+    'CRITICAL: leave the BOTTOM ~26% of the poster empty — do NOT place any zone, text, or a "lower" CTA below ~74% ' +
+    'down; a tracked QR footer bar is composited there afterward. The "lower" CTA zone sits around 60-73% down, never below ~74%.';
 
   const user =
     `PRODUCT: ${product}\n` +

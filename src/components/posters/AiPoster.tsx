@@ -23,8 +23,9 @@ interface Props {
 // stray CTA/footer pixels land), and the band sits in normal flow below it. This
 // makes the old "band seam clips drawn art" failure structurally impossible —
 // the band never sits on top of any artwork. hero.ts prompts the model to finish
-// all content by ~80% down and leave the bottom as empty margin so the crop line
-// never slices a headline.
+// all content by ~74% down and leave the bottom ~26% as empty margin so a clean
+// strip of the poster's own background sits above the band (smooth transition,
+// the crop line never slices a headline or a drawn control).
 //
 // The QR card is ALWAYS white with dark modules, independent of brand palette,
 // so it stays scannable on any background. The band is dark (posterColors.ink)

@@ -75,15 +75,21 @@ test('compileLayoutPrompt embeds exact zone text, palette, 2:3 framing, and the 
   assert.ok(prompt.includes('"Start free today"'))
   assert.ok(prompt.includes('"Ship dashboards fast"'))
   assert.ok(prompt.includes('2:3'))
-  assert.ok(/BOTTOM ~20%/.test(prompt), 'must reserve the bottom 20% empty for the QR band')
+  assert.ok(/BOTTOM ~26%/.test(prompt), 'must reserve the bottom 26% empty for the QR band')
   assert.ok(prompt.includes('#3b82f6') && prompt.includes('#f97316'))
   assert.ok(prompt.includes('a crisp blue data brand'))
   // never asks the model to draw a QR/barcode
   assert.ok(/QR code or barcode drawn by you/i.test(prompt))
 })
 
+test('compileLayoutPrompt forbids painted buttons (printed poster, not a web UI)', () => {
+  const prompt = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: '' })
+  assert.ok(/do NOT draw buttons/i.test(prompt), 'must instruct the model not to draw buttons')
+  assert.ok(/painted buttons \/ pills \/ clickable UI controls/i.test(prompt), 'Avoid list must call out buttons')
+})
+
 test('compileLayoutPrompt tolerates an empty zone list with a sensible default', () => {
   const prompt = compileLayoutPrompt({ ...LAYOUT, zones: [] }, { product: 'Acme', essence: '' })
   assert.ok(prompt.includes('2:3'))
-  assert.ok(/BOTTOM ~20%/.test(prompt))
+  assert.ok(/BOTTOM ~26%/.test(prompt))
 })

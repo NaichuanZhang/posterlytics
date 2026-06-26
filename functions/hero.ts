@@ -212,19 +212,21 @@ ${leftLines || '     - Save time\n     - Do more'}
   and on the RIGHT a note titled "${spec.conv_right?.heading ?? 'Start in 3 Steps'}":
 ${rightSteps || '     1. Scan\n     2. Sign up\n     3. Go'}
 
-- CRITICAL FRAMING: FINISH all artwork, text, and the mascot by about 80% of the way down the poster. Leave the BOTTOM
-  ~20% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY kraft-paper margin
-  with absolutely nothing in it: no cards, notes, text, icons, doodles, QR code, barcode, pixel-grid, or decoration of any
-  kind. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is
-  discarded or clashes. Do NOT place the footer formula, any URL, or a closing tagline in that bottom strip.
+- CRITICAL FRAMING: FINISH all artwork, text, and the mascot by about 74% of the way down the poster. Leave the BOTTOM
+  ~26% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY kraft-paper margin
+  with absolutely nothing in it: no cards, notes, text, icons, doodles, buttons, QR code, barcode, pixel-grid, or
+  decoration of any kind. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything
+  drawn there is discarded or clashes. Keep a comfortable empty gap of plain kraft paper between the last content and
+  that bottom margin so the transition reads cleanly. Do NOT place the footer formula, any URL, or a closing tagline in
+  that bottom strip.
 
 All hand-lettered text must be crisp, legible, correctly spelled, ENGLISH only, and limited to the quoted strings above.
 Quality: warm hand-drawn watercolor, cozy scrapbook journal aesthetic, kraft paper texture, torn paper edges, washi
 tape, cute chibi mascot, gamified RPG UI with star-rating stats, soft pastel palette, doodle decorations, storybook
 illustration, high quality, 8k.
 Avoid: corporate / glassmorphism / SaaS look, neon or high-saturation colors, 3D renders or photoreal imagery, dark
-backgrounds, cluttered layout, unreadable or messy text, more than one QR code, any QR/barcode drawn by you, any
-non-English text, and monochrome output.`;
+backgrounds, cluttered layout, unreadable or messy text, painted buttons / pills / clickable UI controls (the QR footer
+bar is the call-to-action), more than one QR code, any QR/barcode drawn by you, any non-English text, and monochrome output.`;
 }
 
 // Compose the text-to-image prompt for the premium SaaS / glassmorphism
@@ -294,17 +296,21 @@ ${featureLines || '     • Fast: built for speed (bolt icon)'}
   with a short title and one line of light-gray text on the dark background:
 ${reasonLines || '     • Trusted: by modern teams (check icon)'}
 
-- Lower dark zone (around 60-78% down): a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
-  (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". Center or left-align it within the
-  dark zone — there is NO reserved QR area in this band, so the headline may use the full width.
+- Lower dark zone (around 56-72% down): a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
+  (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". Render it as plain bold TEXT —
+  do NOT draw a button or pill. Center or left-align it within the dark zone — there is NO reserved QR area in this band,
+  so the headline may use the full width.
 
-- CRITICAL FRAMING: FINISH all call-to-action text and artwork by about 80% of the way down the poster. Leave the BOTTOM
-  ~20% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY dark-charcoal margin
-  with absolutely nothing in it: no cards, panels, frames, outlines, text, icons, QR code, barcode, pixel-grid, or
-  decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is
-  discarded or clashes. Do NOT place any closing tagline or URL in that bottom strip.
+- CRITICAL FRAMING: FINISH all call-to-action text and artwork by about 74% of the way down the poster. Leave the BOTTOM
+  ~26% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY dark-charcoal margin
+  with absolutely nothing in it: no cards, panels, frames, outlines, text, icons, buttons, QR code, barcode, pixel-grid,
+  or decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there
+  is discarded or clashes. Keep a comfortable empty gap of plain dark background between the last content and that bottom
+  margin so the transition reads cleanly. Do NOT place any closing tagline or URL in that bottom strip.
 
 All rendered text must be crisp, correctly spelled and legible, and limited to the quoted strings above. One consistent
 thin-line icon style throughout. Frosted glass must read as translucent with soft shadows. High-end SaaS launch
-aesthetic, soft studio lighting, 8k, sharp, clean.`;
+aesthetic, soft studio lighting, 8k, sharp, clean.
+Avoid: painted buttons / pills / clickable UI controls (the QR footer bar is the call-to-action), any QR code or barcode
+drawn by you, garbled or misspelled text, and a busy/cluttered bottom edge.`;
 }
