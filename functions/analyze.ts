@@ -260,6 +260,8 @@ export default async function (req: Request): Promise<Response> {
     brand_assets,
     design_tokens,
     screenshot_url,
+    // The real prompt sent to the model — surfaced in the generation loading UI.
+    prompt: { system: sys, user },
   });
 }
 

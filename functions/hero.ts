@@ -84,7 +84,8 @@ export default async function (req: Request): Promise<Response> {
     .eq('id', campaign.id);
   if (upErr) return jsonResponse({ error: upErr.message }, 500);
 
-  return jsonResponse({ poster_image_url: url });
+  // Return the compiled text-to-image prompt for the generation loading UI.
+  return jsonResponse({ poster_image_url: url, prompt: { image: prompt } });
 }
 
 interface StatNode { icon: string; label: string; stars: number }

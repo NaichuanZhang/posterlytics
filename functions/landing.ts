@@ -54,6 +54,10 @@ export default async function (req: Request): Promise<Response> {
 
   const c = campaign as Record<string, unknown>;
 
+  // The brief is the dynamic part of the landing prompt; rebuild it here (pure)
+  // so the success response can surface it in the generation loading UI.
+  const briefForUi = buildBrief(c, (c.design_tokens ?? null) as DesignTokens | null);
+
   // Mark in-flight so the UI can show a spinner; best-effort.
   await client.database.from('campaigns').update({ landing_status: 'generating' }).eq('id', c.id);
 
@@ -78,7 +82,11 @@ export default async function (req: Request): Promise<Response> {
       .update({ landing_html: safe, landing_status: 'ready' })
       .eq('id', c.id);
     if (upErr) throw new Error(upErr.message);
-    return jsonResponse({ landing_status: 'ready', length: safe.length });
+    return jsonResponse({
+      landing_status: 'ready',
+      length: safe.length,
+      prompt: { system: DRAFT_SYS, user: briefForUi },
+    });
   } catch (e) {
     await client.database.from('campaigns').update({ landing_status: 'failed' }).eq('id', c.id).catch(() => {});
     return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 500);

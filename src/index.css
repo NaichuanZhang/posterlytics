@@ -349,6 +349,39 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
 .spinner { width: 30px; height: 30px; border: 3px solid var(--hairline); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s var(--ease) infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- Generation progress (poster loading screen) ---------- */
+
+.genprog { padding: 24px; }
+.genprog-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.genprog-title { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.genprog-sub { margin: 2px 0 0; font-size: 0.85rem; }
+.genprog-grid { display: grid; grid-template-columns: minmax(0, 280px) 1fr; gap: 24px; align-items: start; }
+@media (max-width: 720px) { .genprog-grid { grid-template-columns: 1fr; } }
+
+.genprog-shot { border: var(--line) solid var(--ink-line); border-radius: var(--r-md); overflow: hidden; background: var(--panel-2); box-shadow: var(--shadow-soft); position: sticky; top: 16px; }
+.genprog-shot img { display: block; width: 100%; height: auto; }
+.genprog-shot-empty { display: grid; place-items: center; min-height: 200px; font-size: 0.85rem; text-align: center; padding: 24px; }
+
+.genprog-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.genprog-step { border: var(--line) solid var(--hairline); border-radius: var(--r-md); padding: 12px 14px; background: var(--card); transition: border-color 0.2s var(--ease); }
+.genprog-step.is-running { border-color: var(--accent); }
+.genprog-step.is-pending { opacity: 0.6; }
+.genprog-step-head { display: flex; align-items: center; gap: 12px; }
+.genprog-step-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.genprog-step-label { font-weight: 700; font-size: 0.95rem; }
+.genprog-step-blurb { font-size: 0.82rem; }
+
+.genprog-dot { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 0.9rem; }
+.genprog-dot.is-done { background: var(--good); color: #fff; }
+.genprog-dot.is-error { background: var(--bad); color: #fff; }
+.genprog-dot.is-pending { background: var(--panel-2); color: var(--muted); }
+.genprog-dot.is-running { background: transparent; }
+
+.genprog-toggle { flex: 0 0 auto; background: none; border: none; color: var(--accent-ink); font-size: 0.8rem; font-weight: 600; cursor: pointer; padding: 2px 4px; }
+.genprog-toggle:hover { color: var(--accent); }
+
+.genprog-pre { margin: 10px 0 0; max-height: 220px; overflow: auto; background: var(--panel-2); border: var(--line) solid var(--hairline); border-radius: var(--r-sm); padding: 12px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.74rem; line-height: 1.5; color: var(--ink-soft); white-space: pre-wrap; word-break: break-word; }
+
 /* ---------- Auth (no sidebar) ---------- */
 
 .auth-wrap { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }

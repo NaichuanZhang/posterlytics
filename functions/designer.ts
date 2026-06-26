@@ -130,5 +130,6 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: upErr.message }, 500);
   }
 
-  return jsonResponse({ poster_layout: layout });
+  // Return the real layout-agent prompt for the generation loading UI.
+  return jsonResponse({ poster_layout: layout, prompt: { system: sys, user } });
 }

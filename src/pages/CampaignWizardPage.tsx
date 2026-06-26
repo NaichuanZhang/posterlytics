@@ -4,6 +4,7 @@ import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 import { Poster } from '../components/Poster'
+import { GenerationProgress, type AgentStep, type AgentPrompt } from '../components/GenerationProgress'
 import type { Campaign, PosterMode } from '../lib/types'
 
 type Phase = 'form' | 'creating' | 'analyzing' | 'generating' | 'choose' | 'saving' | 'error'
@@ -12,11 +13,20 @@ const PHASE_LABEL: Record<Phase, string> = {
   form: '',
   creating: 'Creating campaign…',
   analyzing: 'Reading your site — extracting brand, content & design…',
-  generating: 'Painting an AI poster + building your landing page — this takes ~25s…',
+  generating: 'Generating your poster + landing page…',
   choose: '',
   saving: 'Saving your choice…',
   error: '',
 }
+
+// The fixed copy for each pipeline step. `designer` only runs for the designer
+// style; it's filtered out of the seed otherwise.
+const STEP_DEFS: Array<{ key: AgentStep['key']; label: string; blurb: string }> = [
+  { key: 'analyze', label: 'Analyze', blurb: 'Reading your site — brand, palette, copy' },
+  { key: 'designer', label: 'Designer', blurb: 'Designing a bespoke poster layout' },
+  { key: 'hero', label: 'Poster', blurb: 'Painting the AI poster image' },
+  { key: 'landing', label: 'Landing page', blurb: 'Building an on-brand landing page' },
+]
 
 export function CampaignWizardPage() {
   const { user } = useAuth()
@@ -25,6 +35,14 @@ export function CampaignWizardPage() {
   const [error, setError] = useState<string | null>(null)
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [hasImage, setHasImage] = useState(false)
+  // Live "behind the scenes" state for the generation loading screen.
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null)
+  const [steps, setSteps] = useState<AgentStep[]>([])
+
+  // Immutable patch of one step by key (status / prompt updates as agents run).
+  function patchStep(key: AgentStep['key'], patch: Partial<AgentStep>) {
+    setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)))
+  }
 
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
@@ -66,44 +84,78 @@ export function CampaignWizardPage() {
     }
     const campaignId = (created as { id: string }).id
 
+    // Seed the live step list (drop the Designer step unless that style is chosen).
+    const isDesigner = styleChoice === 'designer'
+    setScreenshotUrl(null)
+    setSteps(
+      STEP_DEFS.filter((d) => d.key !== 'designer' || isDesigner).map((d) => ({
+        ...d,
+        status: 'pending' as const,
+      })),
+    )
+
+    // The pipeline runs SEQUENTIALLY so the loading screen can reveal each agent's
+    // real prompt the moment it returns: analyze → [designer] → hero → landing.
+    // Each step is best-effort — an error marks that row and the flow continues.
+    let imageOk = false
+
     // 2. Analyze: scrape + brand palette + auto-selected template + poster spec.
     setPhase('analyzing')
+    patchStep('analyze', { status: 'running' })
     try {
-      const { error: aErr } = await insforge.functions.invoke('analyze', {
+      const { data, error: aErr } = await insforge.functions.invoke('analyze', {
         body: { campaignId, posterStyle: styleChoice === 'auto' ? undefined : styleChoice },
       })
       if (aErr) throw new Error(aErr.message ?? 'Analysis failed')
+      const d = data as { screenshot_url?: string | null; prompt?: AgentPrompt } | null
+      if (d?.screenshot_url) setScreenshotUrl(d.screenshot_url)
+      patchStep('analyze', { status: 'done', prompt: d?.prompt })
     } catch (err) {
       console.error(err)
+      patchStep('analyze', { status: 'error' })
     }
 
-    // 3. In parallel: paint the AI poster variant AND generate the landing page.
-    // They write disjoint columns (hero_image_* vs landing_html), so running them
-    // concurrently is safe and keeps total wait down. Both are best-effort —
-    // failures are non-fatal and recoverable in the editor. For the `designer`
-    // style, the layout agent must run BEFORE hero (hero paints from the layout),
-    // so the hero call is chained after `designer` rather than fired immediately.
+    // 3. Generate the assets. For the designer style the layout agent runs BEFORE
+    // hero (hero paints from the layout); then the landing agent.
     setPhase('generating')
-    let imageOk = false
-    const heroChain =
-      styleChoice === 'designer'
-        ? insforge.functions
-            .invoke('designer', { body: { campaignId } })
-            .catch((err) => console.error(err))
-        : Promise.resolve()
-    const heroCall = heroChain
-      .then(() => insforge.functions.invoke('hero', { body: { campaignId } }))
-      .then(({ error }) => {
-        imageOk = !error
-      })
-      .catch((err) => {
+
+    if (isDesigner) {
+      patchStep('designer', { status: 'running' })
+      try {
+        const { data, error: dErr } = await insforge.functions.invoke('designer', { body: { campaignId } })
+        if (dErr) throw new Error(dErr.message ?? 'Layout design failed')
+        patchStep('designer', { status: 'done', prompt: (data as { prompt?: AgentPrompt } | null)?.prompt })
+      } catch (err) {
         console.error(err)
-        imageOk = false
+        patchStep('designer', { status: 'error' })
+      }
+    }
+
+    patchStep('hero', { status: 'running' })
+    try {
+      const { data, error: hErr } = await insforge.functions.invoke('hero', { body: { campaignId } })
+      imageOk = !hErr
+      patchStep('hero', {
+        status: hErr ? 'error' : 'done',
+        prompt: (data as { prompt?: AgentPrompt } | null)?.prompt,
       })
-    const landingCall = insforge.functions
-      .invoke('landing', { body: { campaignId } })
-      .catch((err) => console.error(err))
-    await Promise.all([heroCall, landingCall])
+    } catch (err) {
+      console.error(err)
+      imageOk = false
+      patchStep('hero', { status: 'error' })
+    }
+
+    patchStep('landing', { status: 'running' })
+    try {
+      const { data, error: lErr } = await insforge.functions.invoke('landing', { body: { campaignId } })
+      patchStep('landing', {
+        status: lErr ? 'error' : 'done',
+        prompt: (data as { prompt?: AgentPrompt } | null)?.prompt,
+      })
+    } catch (err) {
+      console.error(err)
+      patchStep('landing', { status: 'error' })
+    }
 
     // 4. Load the finished campaign and show the side-by-side picker.
     const { data: full } = await insforge.database
@@ -169,13 +221,13 @@ export function CampaignWizardPage() {
             </PickCard>
           </div>
         </div>
+      ) : working && steps.length > 0 ? (
+        <GenerationProgress headline={PHASE_LABEL[phase]} screenshotUrl={screenshotUrl} steps={steps} />
       ) : working ? (
         <div className="card center" style={{ padding: 56 }}>
           <div className="spinner" style={{ margin: '0 auto 20px' }} />
           <p style={{ fontSize: '1.05rem', fontWeight: 600 }}>{PHASE_LABEL[phase]}</p>
-          <p className="muted" style={{ marginTop: 6 }}>
-            {phase === 'generating' ? 'Hang tight — rendering both options.' : 'This takes ~10–25 seconds.'}
-          </p>
+          <p className="muted" style={{ marginTop: 6 }}>This takes ~10–25 seconds.</p>
         </div>
       ) : (
         <form className="card" onSubmit={handleSubmit}>
