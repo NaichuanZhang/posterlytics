@@ -39,7 +39,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, poster_style, style_profile, poster_spec, brand_essence, poster_layout')
+    .select('id, product_name, tagline, poster_style, style_profile, poster_spec, brand_essence, poster_layout, brand_assets')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -50,14 +50,19 @@ export default async function (req: Request): Promise<Response> {
     : rawStyle === 'designer'
       ? 'designer'
       : 'cozy_scrapbook';
-  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style);
+
+  // The real brand logo (if any) is passed to the image model as a reference so
+  // it can paint the actual logo into the poster's brand row.
+  const assets = ((campaign as Record<string, unknown>).brand_assets ?? {}) as { logo_url?: string };
+  const referenceImages = assets.logo_url ? [assets.logo_url] : [];
+  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, referenceImages.length > 0);
 
   // The image model emits a native 2:3 portrait regardless of aspect_ratio; we
   // request 2:3 explicitly. The cozy display container crops it 9:16, the SaaS
   // container shows the full 2:3 frame.
   let dataUrl: string;
   try {
-    dataUrl = await aiImage(baseUrl, apiKey, prompt, '2:3');
+    dataUrl = await aiImage(baseUrl, apiKey, prompt, '2:3', referenceImages);
   } catch (e) {
     return jsonResponse({ error: String(e) }, 502);
   }
@@ -132,29 +137,33 @@ function stars(n: number): string {
 // `designer`, compile the LLM-designed poster_layout; if it's missing (designer
 // step failed / not yet run) fall back to the SaaS template so hero never
 // hard-fails.
-function buildPosterPrompt(c: Record<string, unknown>, style: string): string {
+function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: boolean): string {
   if (style === 'designer') {
     const layout = c.poster_layout as PosterLayout | null;
     if (layout && Array.isArray(layout.zones)) {
       return compileLayoutPrompt(layout, {
         product: String(c.product_name ?? 'the product'),
         essence: String(c.brand_essence ?? ''),
+        hasLogo,
       });
     }
-    return buildSaasPrompt(c);
+    return buildSaasPrompt(c, hasLogo);
   }
-  return style === 'saas_glassmorphism' ? buildSaasPrompt(c) : buildCozyPrompt(c);
+  return style === 'saas_glassmorphism' ? buildSaasPrompt(c, hasLogo) : buildCozyPrompt(c, hasLogo);
 }
 
 // Compose the full text-to-image prompt for the cozy gamified poster, weaving in
 // the campaign's spec and the brand essence so it stays on-brand.
-function buildCozyPrompt(c: Record<string, unknown>): string {
+function buildCozyPrompt(c: Record<string, unknown>, hasLogo = false): string {
   const spec = (c.poster_spec ?? {}) as PosterSpec;
   const essence = String(c.brand_essence ?? '');
   const product = String(c.product_name ?? 'the product');
   const sp = (c.style_profile ?? {}) as { palette?: Record<string, string>; tone?: string };
   const primary = sp.palette?.primary || '#5aa469';
   const accent = sp.palette?.accent || '#e8633a';
+  const logoLine = hasLogo
+    ? '\nA reference image of the brand LOGO is provided — reproduce it faithfully (exact shape and colors) near the title/brand area; do not redraw or distort it.\n'
+    : '';
 
   const statLines = (spec.stat_nodes ?? [])
     .map((s) => `   • ${s.label} (${s.icon}) ${stars(s.stars)}`)
@@ -178,7 +187,7 @@ Lean the title and accents toward a warm vermilion orange-red and the brand colo
 soft and hand-painted. IF the brand is black-and-white / monochrome, DO NOT output a monochrome poster — add vivid
 decorative color (leaves, washi tape, borders, doodles) in a derived warm complementary accent (sage green, peach,
 dusty rose, or golden amber).
-
+${logoLine}
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings given below, and they must all be
 in ENGLISH. Do NOT print any of these layout/section descriptions, position words, or instruction words as visible
 text. Render no labels like "status bar", "hero headline", "subtitle", "mascot", "quest cards", "conversion row",
@@ -234,13 +243,16 @@ bar is the call-to-action), more than one QR code, any QR/barcode drawn by you, 
 // product-launch poster (2:3). Split light-upper / dark-lower, a 3D device on a
 // metallic pedestal, frosted floating cards, a feature matrix, a dark
 // "why choose" band, and a CTA band with a RESERVED blank panel for the QR.
-function buildSaasPrompt(c: Record<string, unknown>): string {
+function buildSaasPrompt(c: Record<string, unknown>, hasLogo = false): string {
   const spec = (c.poster_spec ?? {}) as SaasSpec;
   const essence = String(c.brand_essence ?? '');
   const product = String(c.product_name ?? 'the product');
   const sp = (c.style_profile ?? {}) as { palette?: Record<string, string> };
   const primary = sp.palette?.primary || '#6366f1';
   const accent = sp.palette?.accent || '#ec4899';
+  const logoLine = hasLogo
+    ? '\nA reference image of the brand LOGO is provided — reproduce it faithfully (exact shape and colors) as the logo mark in the top brand row; do not redraw or distort it.\n'
+    : '';
 
   const floatLines = (spec.float_cards ?? [])
     .map((f) => `     • ${f.title} — ${f.desc} (${f.icon} icon)`)
@@ -258,14 +270,14 @@ icons, generous whitespace, professional and trustworthy. Not cartoon, not child
 
 The composition is split into two clearly visible zones: the upper ~60% is a light zone (off-white to light-gray
 gradient); the lower ~40% is a dark zone (near-black charcoal #0E0E0E). The eye flows top to bottom: brand, then
-product, then reasons, then a call to action.
+product, then reasons, then a closing brand statement. (No "get started" CTA — the QR footer bar is the action.)
 
 Honor this brand — infuse its palette, logo motif and vibe, do not invent an unrelated look:
 ${essence || product}
 Use ${primary} as the brand primary (headline emphasis, highlights, data bars) and ${accent} as the accent / metallic
 glow. Stay within one brand color plus neutrals — no rogue colors. If the brand is mono black/white, add tasteful
 ${accent} accents and a metallic pedestal glow as the only vivid decoration.
-
+${logoLine}
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings given below. Do NOT print any of
 these layout/section descriptions, position words, or instruction words as visible text. Render no labels like "brand
 bar", "hero headline", "device", "feature matrix", "cta", "footer", or "empty background" — those are directions, not
@@ -297,10 +309,10 @@ ${featureLines || '     • Fast: built for speed (bolt icon)'}
   with a short title and one line of light-gray text on the dark background:
 ${reasonLines || '     • Trusted: by modern teams (check icon)'}
 
-- Lower dark zone (around 56-72% down): a large decisive call-to-action headline reading "${spec.cta_main ?? `Try ${product}`}"
-  (key words in ${primary}) with a smaller sub-line reading "${spec.cta_sub ?? ''}". Render it as plain bold TEXT —
-  do NOT draw a button or pill. Center or left-align it within the dark zone — there is NO reserved QR area in this band,
-  so the headline may use the full width.
+- Lower dark zone (around 56-72% down): a large closing brand statement / value prop reading "${spec.cta_main ?? `Built for modern teams`}"
+  (key words in ${primary}) with a smaller supporting sub-line reading "${spec.cta_sub ?? ''}". Render it as plain bold
+  TEXT — do NOT draw a button or pill, and do NOT phrase it as a "Get started"/"Sign up" call-to-action (the scannable
+  QR footer bar composited afterward IS the call-to-action). Center or left-align it within the dark zone, full width.
 
 - CRITICAL FRAMING: FINISH all call-to-action text and artwork by about 74% of the way down the poster. Leave the BOTTOM
   ~26% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY dark-charcoal margin

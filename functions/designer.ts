@@ -39,7 +39,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, landing_content, design_tokens')
+    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, landing_content, design_tokens, brand_assets')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -55,6 +55,9 @@ export default async function (req: Request): Promise<Response> {
   const tokens = (c.design_tokens ?? null) as DesignTokens | null;
   const copy = (c.poster_copy ?? {}) as Record<string, unknown>;
   const landing = (c.landing_content ?? {}) as Record<string, unknown>;
+  const assets = (c.brand_assets ?? {}) as { logo_url?: string; primary_image_url?: string; images?: Array<{ url: string }> };
+  const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
+  const hasLogo = !!assets.logo_url;
 
   // Palette hints: prefer the programmatic computed tokens, fall back to style_profile.
   const palHint = {
@@ -76,14 +79,20 @@ export default async function (req: Request): Promise<Response> {
     '"palette_roles":{"bg":"#hex","surface":"#hex (optional card color)","text":"#hex","primary":"#hex","accent":"#hex"},' +
     '"zones":[{"band":"top|upper|mid|lower","role":"what this zone is, e.g. brand row / hero headline / feature grid / CTA",' +
     '"content":"the EXACT short words to render in this zone (English, concise)","emphasis":"low|med|high","align":"left|center|right"}]}\n' +
-    'RULES: 4-6 zones, ordered top→lower. Use the band labels to place them: "top" (brand/logo row), "upper" (hero ' +
-    'headline + key message), "mid" (product detail / features / device), "lower" (call to action). Keep every ' +
-    'content string SHORT and legible. The palette_roles MUST use the real brand colors provided. Design a layout ' +
-    'whose structure genuinely suits this brand and product. ' +
-    'This is a PRINTED POSTER IMAGE, not an app screen — the "lower" CTA zone is plain headline TEXT, never a button ' +
-    'or pill; the tracked QR footer bar is the real action. ' +
-    'CRITICAL: leave the BOTTOM ~26% of the poster empty — do NOT place any zone, text, or a "lower" CTA below ~74% ' +
-    'down; a tracked QR footer bar is composited there afterward. The "lower" CTA zone sits around 60-73% down, never below ~74%.';
+    'RULES: design 5-7 zones, ordered top→lower, to make the poster INFORMATION-DENSE and editorial — fill the canvas ' +
+    'with substance (a brand row, a hero headline, a feature grid, a stats/proof row, product detail) rather than a few ' +
+    'sparse elements. Use the band labels to place them: "top" (brand/logo row), "upper" (hero headline + key message), ' +
+    '"mid" (features grid, stats, product detail — usually 2-3 zones here), "lower" (a final value prop or proof point). ' +
+    'Keep every content string SHORT and legible. The palette_roles MUST use the real brand colors provided. ' +
+    'This is a PRINTED POSTER IMAGE, not an app screen. ' +
+    'CRITICAL: do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere — the tracked QR ' +
+    'footer bar (composited afterward) IS the call-to-action, so a CTA zone would be redundant. Use the "lower" zone ' +
+    'for a closing value prop or proof point instead. ' +
+    (hasLogo
+      ? 'The brand has a real LOGO (a reference image is passed to the painter) — include a "top" brand-row zone whose role mentions the logo. '
+      : '') +
+    'Leave the BOTTOM ~26% of the poster empty — do NOT place any zone or text below ~74% down; the QR footer bar is ' +
+    'composited there. The lowest zone sits around 60-73% down, never below ~74%.';
 
   const user =
     `PRODUCT: ${product}\n` +
@@ -93,9 +102,11 @@ export default async function (req: Request): Promise<Response> {
     `TONE: ${sp.tone || 'modern'}\n` +
     `HEADLINE: ${String(landing.headline ?? copy.hook ?? product)}\n` +
     `WHAT IT DOES: ${String(landing.what_it_does ?? copy.what_it_does ?? tagline)}\n` +
-    `CTA: ${String(landing.cta ?? copy.cta ?? 'Get started')}\n` +
-    (features.length ? `FEATURES: ${features.join(' · ')}\n` : '') +
-    `\nDesign the poster layout JSON now.`;
+    (features.length ? `FEATURES (use for a feature grid): ${features.join(' · ')}\n` : '') +
+    `\nASSETS:\n` +
+    (hasLogo ? `LOGO: ${assets.logo_url} (the real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (none found — use the product name as the brand mark)\n') +
+    (heroImg ? `PRODUCT IMAGE: ${heroImg}\n` : '') +
+    `\nDesign the poster layout JSON now (no CTA zone — the QR footer is the action).`;
 
   let layout;
   try {

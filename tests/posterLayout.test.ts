@@ -88,6 +88,20 @@ test('compileLayoutPrompt forbids painted buttons (printed poster, not a web UI)
   assert.ok(/painted buttons \/ pills \/ clickable UI controls/i.test(prompt), 'Avoid list must call out buttons')
 })
 
+test('compileLayoutPrompt forbids a redundant CTA and asks for density', () => {
+  const prompt = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: '' })
+  assert.ok(/QR footer bar.*IS the call-to-action/i.test(prompt), 'QR footer is the CTA')
+  assert.ok(/do NOT render any "Get started"/i.test(prompt), 'must forbid a painted CTA line')
+  assert.ok(/INFORMATION-DENSE/i.test(prompt), 'must ask for a dense composition')
+})
+
+test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => {
+  const withLogo = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: '', hasLogo: true })
+  const noLogo = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: '', hasLogo: false })
+  assert.ok(/reference image of the brand LOGO/i.test(withLogo), 'logo line present when hasLogo')
+  assert.ok(!/reference image of the brand LOGO/i.test(noLogo), 'no logo line when no logo')
+})
+
 test('compileLayoutPrompt tolerates an empty zone list with a sensible default', () => {
   const prompt = compileLayoutPrompt({ ...LAYOUT, zones: [] }, { product: 'Acme', essence: '' })
   assert.ok(prompt.includes('2:3'))

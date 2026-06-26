@@ -235,7 +235,7 @@ export function normalizePosterLayout(
 // + QR band stay clean), and an Avoid list.
 export function compileLayoutPrompt(
   layout: PosterLayout,
-  ctx: { product: string; essence: string },
+  ctx: { product: string; essence: string; hasLogo?: boolean },
 ): string {
   const p = layout.palette_roles;
   const bandLabel: Record<LayoutBand, string> = {
@@ -255,11 +255,17 @@ export function compileLayoutPrompt(
     })
     .join('\n');
 
+  const logoLine = ctx.hasLogo
+    ? '\nA reference image of the brand LOGO is provided alongside this prompt — reproduce it FAITHFULLY (exact shape, proportions, and colors) in the top brand row. Do not redraw, restyle, or distort it.\n'
+    : '';
+
   return `Create a single PORTRAIT 2:3 product-promotion poster. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
 
-This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, rounded clickable controls, tabs, or any UI chrome. Render every call-to-action as plain bold typographic text only — the real action is a scannable QR footer bar composited afterward, so a drawn button would be dead and redundant.
+This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, rounded clickable controls, tabs, or any UI chrome. The scannable QR footer bar (composited afterward) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.
 
+Make the poster INFORMATION-DENSE and editorial: fill the composition with multiple supporting elements (a feature grid, a stat or proof row, product detail, icons) so it feels rich and considered — avoid large empty areas above the reserved bottom margin.
+${logoLine}
 Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; vivid accent ${p.accent}; ${p.surface ? `card/surface ${p.surface}; ` : ''}body text ${p.text}. Stay within this palette plus neutrals — no rogue colors.
 
 Honor this brand — infuse its palette, logo motif and vibe, do not invent an unrelated look:
@@ -273,16 +279,22 @@ ${zoneLines || '- UPPER area: a bold hero headline.\n- MIDDLE area: supporting p
 CRITICAL FRAMING: FINISH all artwork and text by about 74% of the way down the poster. Leave the BOTTOM ~26% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background (color ${p.bg}) with absolutely nothing in it: no cards, panels, frames, text, icons, buttons, QR code, barcode, or decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is discarded or clashes. Keep a comfortable empty gap of plain background between the last content and that bottom margin so the transition reads cleanly.
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
-Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
+Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
 }
 
-// Call the InsForge AI image proxy. Returns a base64 data URL.
+// Call the InsForge AI image proxy. Returns a base64 data URL. `referenceImages`
+// (optional) are URLs passed to the proxy's `images:[{url}]` field so an
+// image-capable model (gemini) can condition on them — used to paint the real
+// brand logo into the poster. Omitted entirely when empty (identical request to
+// text-only), so the feature degrades gracefully when no logo is available.
 export async function aiImage(
   baseUrl: string,
   apiKey: string,
   prompt: string,
   aspectRatio = '4:5',
+  referenceImages: string[] = [],
 ): Promise<string> {
+  const refs = referenceImages.filter(Boolean);
   const r = await fetch(`${baseUrl}/api/ai/image/generation`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -290,6 +302,7 @@ export async function aiImage(
       model: Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image',
       prompt,
       image_config: { aspect_ratio: aspectRatio },
+      ...(refs.length ? { images: refs.map((url) => ({ url })) } : {}),
     }),
   });
   if (!r.ok) throw new Error(`AI image failed: ${r.status} ${await r.text()}`);

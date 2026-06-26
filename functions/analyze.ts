@@ -330,13 +330,36 @@ function extractAssets(htmlText: string, base: string): {
     if (a && !/sprite|icon|pixel|tracking|1x1|logo/i.test(a) && !images.includes(a)) images.push(a);
   }
 
-  // Logo: explicit logo-ish img, else apple-touch-icon, else favicon.
+  // Logo: try several signals in priority order (first hit wins). Real sites tag
+  // logos in many ways, so cast a wide net before falling back to icons.
   let logo: string | null = null;
-  const logoImg = /<img[^>]+(?:class|alt|src)=["'][^"']*logo[^"']*["'][^>]*>/i.exec(htmlText)?.[0];
-  if (logoImg) {
-    const src = /src=["']([^"']+)["']/i.exec(logoImg)?.[1];
-    if (src) logo = abs(src, base);
+  // 1. schema.org JSON-LD "logo": "url" (very common, points at the canonical mark).
+  if (!logo) {
+    const ld = /"logo"\s*:\s*"([^"]+\.(?:png|jpe?g|webp|svg)(?:\?[^"]*)?)"/i.exec(htmlText)?.[1];
+    if (ld) logo = abs(ld, base);
   }
+  // 2. <link rel="...logo..."> or <meta property="og:logo">.
+  if (!logo) {
+    const linkLogo =
+      /<link[^>]+rel=["'][^"']*logo[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1] ||
+      /<meta[^>]+property=["']og:logo["'][^>]+content=["']([^"']+)["']/i.exec(htmlText)?.[1];
+    if (linkLogo) logo = abs(linkLogo, base);
+  }
+  // 3. An <img> whose class/id/alt/src mentions "logo" (now incl. id, and .svg).
+  if (!logo) {
+    const logoImg = /<img[^>]+(?:class|id|alt|src|data-[a-z-]+)=["'][^"']*logo[^"']*["'][^>]*>/i.exec(htmlText)?.[0];
+    if (logoImg) {
+      const src = /\bsrc=["']([^"']+)["']/i.exec(logoImg)?.[1];
+      if (src) logo = abs(src, base);
+    }
+  }
+  // 4. The first <img> inside the <header> (the masthead brand mark).
+  if (!logo) {
+    const header = /<header\b[\s\S]*?<\/header>/i.exec(htmlText)?.[0];
+    const headerImg = header ? /<img[^>]+\bsrc=["']([^"']+\.(?:png|jpe?g|webp|svg)(?:\?[^"']*)?)["']/i.exec(header)?.[1] : null;
+    if (headerImg) logo = abs(headerImg, base);
+  }
+  // 5. apple-touch-icon, then favicon.
   if (!logo) {
     const touch = /<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1];
     if (touch) logo = abs(touch, base);
