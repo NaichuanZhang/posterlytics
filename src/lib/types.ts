@@ -2,10 +2,6 @@
 
 export type CampaignStatus = 'draft' | 'analyzing' | 'published'
 
-// How the poster is rendered: deterministic HTML/CSS template, or an AI-generated
-// image (hero_image_url) with the real QR overlaid. Chosen by the user at creation.
-export type PosterMode = 'template' | 'image'
-
 export interface Palette {
   primary: string
   bg: string
@@ -186,7 +182,6 @@ export interface Campaign {
   brand_assets: BrandAssets | null
   brand_essence: string | null
   poster_style: PosterStyle
-  poster_mode: PosterMode
   poster_spec: PosterSpec | null
   hero_image_url: string | null
   hero_image_key: string | null

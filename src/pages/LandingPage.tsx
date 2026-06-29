@@ -27,8 +27,8 @@ export function LandingPage() {
           On-brand posters that prove <span className="ink-accent">which placement converts</span>.
         </h1>
         <p className="lede reveal">
-          Paste your product URL. Posterlytics reads your brand, generates two on-brand
-          posters to choose from, and mints a unique tracked QR for every place you post —
+          Paste your product URL. Posterlytics reads your brand, generates an on-brand
+          poster, and mints a unique tracked QR for every place you post —
           so you know the bulletin board out-pulled LinkedIn, not just that "someone clicked."
         </p>
         <div className="lp-cta-row reveal">
@@ -39,7 +39,7 @@ export function LandingPage() {
 
         <div className="lp-shot reveal">
           <div className="bar"><i /><i /><i /></div>
-          <img src="/shots/picker.png" alt="Pick your poster — a designed template and an AI illustration, side by side" loading="lazy" />
+          <img src="/shots/picker.png" alt="An on-brand AI-generated poster with a tracked QR" loading="lazy" />
         </div>
       </header>
 
@@ -55,12 +55,12 @@ export function LandingPage() {
             <div className="lp-feature reveal">
               <div className="ic">{ICONS.wand}</div>
               <h3>On-brand by default</h3>
-              <p>We mine your site's real colors, copy, and style, then auto-pick a template that fits — SaaS or cozy, your call.</p>
+              <p>We mine your site's real colors, copy, and style, then auto-pick a look that fits — SaaS, cozy, or a bespoke designer layout.</p>
             </div>
             <div className="lp-feature reveal">
               <div className="ic">{ICONS.layers}</div>
-              <h3>Two posters, you choose</h3>
-              <p>A crisp deterministic template and an AI illustration, generated from the same brand analysis. Pick the one you like.</p>
+              <h3>AI-generated, on-brand</h3>
+              <p>A polished poster painted from your brand analysis — your colors, copy, and style, with the real logo worked in.</p>
             </div>
             <div className="lp-feature reveal">
               <div className="ic">{ICONS.qr}</div>
@@ -122,8 +122,8 @@ export function LandingPage() {
             <h2>Four steps from URL to attribution</h2>
           </div>
           <div className="lp-steps">
-            <div className="lp-step reveal"><div className="n" /><h3>Paste your URL</h3><p>Add your product name, CTA, and destination. Pick Auto, SaaS, or Cozy.</p></div>
-            <div className="lp-step reveal"><div className="n" /><h3>Pick a poster</h3><p>We analyze your brand and render two posters — choose the look you want.</p></div>
+            <div className="lp-step reveal"><div className="n" /><h3>Paste your URL</h3><p>Add your product name, CTA, and destination. Pick Auto, SaaS, Cozy, or Designer.</p></div>
+            <div className="lp-step reveal"><div className="n" /><h3>Get your poster</h3><p>We analyze your brand and paint an on-brand poster — refine it anytime.</p></div>
             <div className="lp-step reveal"><div className="n" /><h3>Mint placements</h3><p>One tracked QR + link per channel. Export PNGs and post them anywhere.</p></div>
             <div className="lp-step reveal"><div className="n" /><h3>See what converts</h3><p>Publish, then watch scans, unique visitors, and conversions per placement.</p></div>
           </div>

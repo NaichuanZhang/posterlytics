@@ -1,8 +1,6 @@
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
-import type { Campaign, Placement, PosterStyle } from '../lib/types'
-import { SaasPoster } from './posters/SaasPoster'
-import { CozyPoster } from './posters/CozyPoster'
+import type { Campaign, Placement } from '../lib/types'
 import { AiPoster } from './posters/AiPoster'
 
 interface Props {
@@ -12,28 +10,24 @@ interface Props {
 }
 
 // Exports the poster — with THIS placement's QR embedded — as a PNG at the native
-// 1080×1620. The template renders deterministically as HTML/CSS off-screen at full
-// size; html-to-image captures it (the QR is a same-origin data-URL <img>, so no
-// canvas taint). No scaling — pixel-exact output.
+// 1080×1620. AiPoster renders off-screen at full size and html-to-image captures it
+// (the QR is a same-origin data-URL <img>, so no canvas taint). No scaling —
+// pixel-exact output.
 //
-// For AI-image posters the hero lives on cross-origin Storage, which would taint
-// the export canvas; we pre-fetch it to a same-origin data URL first and feed it to
-// AiPoster via imageSrcOverride (falling back to the hosted URL if the fetch fails).
+// The AI hero lives on cross-origin Storage, which would taint the export canvas;
+// we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
+// imageSrcOverride (falling back to the hosted URL if the fetch fails).
 export function PosterExportButton({ campaign, placement, label = 'Export PNG' }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
 
-  const style: PosterStyle =
-    campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
-  const isImage = campaign.poster_mode === 'image'
-
   async function handleExport() {
     if (busy) return
     setBusy(true)
     try {
-      // AI mode: pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
-      if (isImage && campaign.hero_image_url) {
+      // Pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
+      if (campaign.hero_image_url) {
         const data = await fetchAsDataUrl(campaign.hero_image_url)
         setImgDataUrl(data) // null on failure → AiPoster uses the hosted URL (today's behavior)
         // Let React commit the new src, then wait for the image to actually DECODE.
@@ -84,18 +78,12 @@ export function PosterExportButton({ campaign, placement, label = 'Export PNG' }
       </button>
       {/* Offscreen full-size render target bound to this placement's QR. */}
       <div style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }} aria-hidden>
-        {isImage ? (
-          <AiPoster
-            ref={offscreenRef}
-            campaign={campaign}
-            code={placement.code}
-            imageSrcOverride={imgDataUrl ?? undefined}
-          />
-        ) : style === 'saas_glassmorphism' ? (
-          <SaasPoster ref={offscreenRef} campaign={campaign} code={placement.code} />
-        ) : (
-          <CozyPoster ref={offscreenRef} campaign={campaign} code={placement.code} />
-        )}
+        <AiPoster
+          ref={offscreenRef}
+          campaign={campaign}
+          code={placement.code}
+          imageSrcOverride={imgDataUrl ?? undefined}
+        />
       </div>
     </>
   )

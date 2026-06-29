@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { insforge } from '../lib/insforge'
 import { useCampaign } from '../hooks/useCampaign'
 import { usePlacements } from '../hooks/usePlacements'
@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
+import { LayoutPreview } from '../components/LayoutPreview'
 import { LandingPreview } from '../components/LandingPreview'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { buildViewUrl } from '../lib/landingUrl'
@@ -14,12 +15,14 @@ import { useElementWidth } from '../hooks/useElementWidth'
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { user } = useAuth()
-  const { campaign, loading, reload } = useCampaign(id)
+  const { campaign, loading, reload, remove } = useCampaign(id)
   const { placements, ensureDefault } = usePlacements(id, user?.id)
   const [busy, setBusy] = useState<string | null>(null)
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   // A campaign should always have at least one placement so the poster's QR
   // encodes a real, trackable code (not a dead preview). Create one if missing.
@@ -84,16 +87,13 @@ export function PosterEditorPage() {
     if (!campaign) return
     setBusy('regen')
     try {
-      // Re-extract the spec; the template re-renders from it client-side. If the
-      // active mode is the AI image, also re-paint the image — and for the
-      // designer style, re-design the bespoke layout first so hero paints fresh.
+      // Re-extract the brand spec, then re-paint the AI poster. For the designer
+      // style, re-design the bespoke layout first so hero paints from it fresh.
       await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
-      if (campaign.poster_mode === 'image') {
-        if (campaign.poster_style === 'designer') {
-          await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
-        }
-        await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+      if (campaign.poster_style === 'designer') {
+        await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
       }
+      await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
       await reload()
     } finally {
       setBusy(null)
@@ -127,27 +127,27 @@ export function PosterEditorPage() {
     }
   }
 
-  // Switch render mode. Going to 'image' with no AI image yet generates one first.
-  async function switchMode(mode: 'template' | 'image') {
-    if (!campaign || campaign.poster_mode === mode) return
-    setBusy('mode')
-    try {
-      if (mode === 'image' && !campaign.hero_image_url) {
-        await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
-      }
-      await insforge.database.from('campaigns').update({ poster_mode: mode }).eq('id', campaign.id)
-      await reload()
-    } finally {
-      setBusy(null)
-    }
-  }
-
   async function setStatus(status: 'published' | 'draft') {
     if (!campaign) return
     setBusy(status)
     await insforge.database.from('campaigns').update({ status }).eq('id', campaign.id)
     await reload()
     setBusy(null)
+  }
+
+  // Permanently delete the campaign (cascades placements/scans/conversions and
+  // cleans up its storage assets), then return to the dashboard.
+  async function deleteCampaign() {
+    if (!campaign) return
+    setBusy('delete')
+    try {
+      await remove()
+      navigate('/')
+    } catch (e) {
+      window.alert(`Couldn't delete the campaign: ${e instanceof Error ? e.message : String(e)}`)
+      setConfirmingDelete(false)
+      setBusy(null)
+    }
   }
 
   return (
@@ -188,7 +188,12 @@ export function PosterEditorPage() {
         <section className="ed-canvas">
           <PreviewCell label="Poster">
             {(w) =>
-              previewCode ? (
+              // Designer style with a layout but no painted image yet (fresh design,
+              // mid-regenerate, or a failed paint): show the bespoke layout wireframe
+              // instead of AiPoster's "still generating…" placeholder.
+              isDesigner && campaign.poster_layout && !campaign.hero_image_url ? (
+                <LayoutPreview layout={campaign.poster_layout} width={w} />
+              ) : previewCode ? (
                 <Poster campaign={campaign} code={previewCode} width={w} />
               ) : (
                 <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
@@ -215,33 +220,14 @@ export function PosterEditorPage() {
               <Row label="Tone" value={campaign.style_profile?.tone} />
             </dl>
 
-            {/* Render-mode toggle: deterministic template vs AI illustration. */}
-            <div className="row" style={{ marginTop: 14, gap: 0, border: '1px solid var(--border, rgba(0,0,0,0.12))', borderRadius: 10, overflow: 'hidden', width: 'fit-content' }}>
-              <button
-                className={`btn sm ${campaign.poster_mode !== 'image' ? '' : 'ghost'}`}
-                style={{ borderRadius: 0 }}
-                onClick={() => switchMode('template')}
-                disabled={!!busy || campaign.poster_mode !== 'image'}
-              >
-                Template
-              </button>
-              <button
-                className={`btn sm ${campaign.poster_mode === 'image' ? '' : 'ghost'}`}
-                style={{ borderRadius: 0 }}
-                onClick={() => switchMode('image')}
-                disabled={!!busy || campaign.poster_mode === 'image'}
-              >
-                {busy === 'mode' ? 'Switching…' : 'AI image'}
-              </button>
-            </div>
-            {campaign.poster_mode === 'image' && !campaign.hero_image_url && (
-              <p className="hint" style={{ marginTop: 6 }}>AI image not generated yet — Regenerate to paint it.</p>
+            {!campaign.hero_image_url && (
+              <p className="hint" style={{ marginTop: 6 }}>AI poster not generated yet — Regenerate to paint it.</p>
             )}
             <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>
               <button className="btn secondary sm" onClick={regenerate} disabled={!!busy}>
                 {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
               </button>
-              {isDesigner && campaign.poster_mode === 'image' && (
+              {isDesigner && (
                 <button className="btn secondary sm" onClick={regenerateLayout} disabled={!!busy}>
                   {busy === 'layout' ? 'Designing…' : '↻ Regenerate layout'}
                 </button>
@@ -338,6 +324,29 @@ export function PosterEditorPage() {
                 {busy === 'published' ? 'Publishing…' : 'Publish campaign'}
               </button>
             )}
+
+            {/* Danger zone: permanently delete the campaign (two-step confirm). */}
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: 'var(--line) solid var(--hairline)' }}>
+              {confirmingDelete ? (
+                <>
+                  <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 10px' }}>
+                    Delete permanently? Its placements, scans, and conversions are removed too — this can’t be undone.
+                  </p>
+                  <div className="row wrap" style={{ gap: 8 }}>
+                    <button className="btn danger sm" onClick={deleteCampaign} disabled={!!busy}>
+                      {busy === 'delete' ? 'Deleting…' : 'Confirm delete'}
+                    </button>
+                    <button className="btn ghost sm" onClick={() => setConfirmingDelete(false)} disabled={!!busy}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button className="btn danger sm" onClick={() => setConfirmingDelete(true)} disabled={!!busy}>
+                  Delete campaign
+                </button>
+              )}
+            </div>
           </div>
         </aside>
       </div>

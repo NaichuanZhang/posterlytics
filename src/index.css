@@ -362,6 +362,7 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
 .genprog-shot img { display: block; width: 100%; height: auto; }
 .genprog-shot-empty { display: grid; place-items: center; min-height: 200px; font-size: 0.85rem; text-align: center; padding: 24px; }
 
+.genprog-layout { margin-top: 24px; padding-top: 24px; border-top: var(--line) solid var(--hairline); display: flex; flex-direction: column; align-items: center; text-align: center; }
 .genprog-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .genprog-step { border: var(--line) solid var(--hairline); border-radius: var(--r-md); padding: 12px 14px; background: var(--card); transition: border-color 0.2s var(--ease); }
 .genprog-step.is-running { border-color: var(--accent); }

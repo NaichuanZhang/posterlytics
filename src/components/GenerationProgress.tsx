@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import type { PosterLayout } from '../lib/types'
+import { LayoutPreview } from './LayoutPreview'
 
 // One prompt shown in the loading UI. `image` is the single text-to-image prompt
 // (hero); `system`/`user` are the chat messages (analyze / designer / landing).
@@ -24,12 +26,15 @@ interface Props {
   headline: string
   screenshotUrl: string | null
   steps: AgentStep[]
+  // Designer style only: the bespoke layout, shown as a wireframe preview once the
+  // Designer step finishes (while hero paints). Null/absent → no preview panel.
+  layout?: PosterLayout | null
 }
 
 // The poster-generation loading screen: shows the captured site screenshot and a
 // live step list (analyze → designer → hero → landing), revealing each agent's
 // real prompt as it finishes. Purely presentational — the wizard owns the state.
-export function GenerationProgress({ headline, screenshotUrl, steps }: Props) {
+export function GenerationProgress({ headline, screenshotUrl, steps, layout }: Props) {
   return (
     <div className="card genprog">
       <div className="genprog-head">
@@ -55,6 +60,15 @@ export function GenerationProgress({ headline, screenshotUrl, steps }: Props) {
           ))}
         </ol>
       </div>
+
+      {layout && (
+        <div className="genprog-layout">
+          <p className="muted genprog-sub" style={{ marginBottom: 12 }}>
+            Bespoke layout designed — painting it into the poster now.
+          </p>
+          <LayoutPreview layout={layout} width={300} />
+        </div>
+      )}
     </div>
   )
 }
