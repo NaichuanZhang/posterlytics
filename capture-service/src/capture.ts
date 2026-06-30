@@ -5,6 +5,7 @@
 
 import { chromium, type Browser } from 'playwright';
 import { buildRawTokens } from './buildRawTokens.js';
+import { dismissPopups } from './dismissPopups.js';
 import type { BrowserCollection, CaptureResponse, RawTokens } from './types.js';
 
 const NAV_TIMEOUT_MS = 15_000;
@@ -46,6 +47,11 @@ export async function captureUrl(rawUrl: string): Promise<CaptureResponse> {
     }
     // Give late CSS/fonts a beat to settle.
     await page.waitForTimeout(600);
+
+    // Dismiss cookie banners / consent + newsletter modals / age gates BEFORE
+    // sampling tokens and screenshotting, so both come out clean. Best-effort:
+    // any failure leaves the page as-is and capture proceeds.
+    await dismissPopups(page, VIEWPORT).catch(() => {});
 
     const collection = (await page.evaluate(collectInBrowser)) as BrowserCollection;
     const finalUrl = page.url();
