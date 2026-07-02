@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { insforge } from '../lib/insforge'
 import { useCampaign } from '../hooks/useCampaign'
 import { usePlacements } from '../hooks/usePlacements'
+import { useAgentTraces } from '../hooks/useAgentTraces'
 import { useAuth } from '../auth/AuthProvider'
+import type { AgentTrace } from '../lib/types'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
@@ -19,6 +21,7 @@ export function PosterEditorPage() {
   const { user } = useAuth()
   const { campaign, loading, reload, remove } = useCampaign(id)
   const { placements, ensureDefault } = usePlacements(id, user?.id)
+  const { traces } = useAgentTraces(id)
   const [busy, setBusy] = useState<string | null>(null)
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -348,6 +351,22 @@ export function PosterEditorPage() {
               )}
             </div>
           </div>
+
+          {/* Debug / error details — only shown when the pipeline recorded a
+              failure or silent degrade for this campaign (agent_traces). */}
+          {traces.length > 0 && (
+            <div className="card">
+              <h3 style={{ margin: '0 0 8px' }}>Debug · error details</h3>
+              <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
+                {traces.length} event{traces.length === 1 ? '' : 's'} recorded while generating. Expand for the request & response.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {traces.map((t) => (
+                  <TraceRow key={t.id} trace={t} />
+                ))}
+              </div>
+            </div>
+          )}
         </aside>
       </div>
     </Layout>
@@ -374,6 +393,42 @@ function Row({ label, value }: { label: string; value?: string | null }) {
     <div className="row between" style={{ gap: 12, alignItems: 'flex-start' }}>
       <dt className="muted" style={{ flex: '0 0 84px' }}>{label}</dt>
       <dd style={{ margin: 0, textAlign: 'right', flex: 1 }}>{value || '—'}</dd>
+    </div>
+  )
+}
+
+// One collapsible failure/degrade trace: step + status badge + short detail, with
+// an expandable panel showing the full request/response payloads.
+function TraceRow({ trace }: { trace: AgentTrace }) {
+  const [open, setOpen] = useState(false)
+  const failed = trace.status === 'failed'
+  const payload = { request: trace.request, response: trace.response }
+  const hasPayload = !!(trace.request || trace.response)
+  return (
+    <div className={`genprog-step is-${failed ? 'error' : 'pending'}`}>
+      <div className="genprog-step-head">
+        <span
+          className="badge"
+          style={{
+            background: failed ? 'var(--bad)' : 'var(--muted, #9a8f80)',
+            color: '#fff',
+            fontSize: '0.7rem',
+            textTransform: 'uppercase',
+          }}
+        >
+          {trace.status}
+        </span>
+        <div className="genprog-step-meta">
+          <span className="genprog-step-label">{trace.step}</span>
+          <span className="muted genprog-step-blurb">{trace.detail || '—'}</span>
+        </div>
+        {hasPayload && (
+          <button type="button" className="genprog-toggle" onClick={() => setOpen((v) => !v)}>
+            {open ? 'Hide ▴' : 'Details ▾'}
+          </button>
+        )}
+      </div>
+      {open && hasPayload && <pre className="genprog-pre">{JSON.stringify(payload, null, 2)}</pre>}
     </div>
   )
 }

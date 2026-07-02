@@ -42,6 +42,8 @@ export function CampaignWizardPage() {
     setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)))
   }
 
+  const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
   const [tagline, setTagline] = useState('')
@@ -110,7 +112,7 @@ export function CampaignWizardPage() {
       patchStep('analyze', { status: 'done', prompt: d?.prompt })
     } catch (err) {
       console.error(err)
-      patchStep('analyze', { status: 'error' })
+      patchStep('analyze', { status: 'error', error: errMsg(err) })
     }
 
     // 3. Generate the assets. For the designer style the layout agent runs BEFORE
@@ -127,7 +129,7 @@ export function CampaignWizardPage() {
         patchStep('designer', { status: 'done', prompt: dd?.prompt })
       } catch (err) {
         console.error(err)
-        patchStep('designer', { status: 'error' })
+        patchStep('designer', { status: 'error', error: errMsg(err) })
       }
     }
 
@@ -136,11 +138,12 @@ export function CampaignWizardPage() {
       const { data, error: hErr } = await insforge.functions.invoke('hero', { body: { campaignId } })
       patchStep('hero', {
         status: hErr ? 'error' : 'done',
+        error: hErr ? (hErr.message ?? 'Poster generation failed') : undefined,
         prompt: (data as { prompt?: AgentPrompt } | null)?.prompt,
       })
     } catch (err) {
       console.error(err)
-      patchStep('hero', { status: 'error' })
+      patchStep('hero', { status: 'error', error: errMsg(err) })
     }
 
     patchStep('landing', { status: 'running' })
@@ -148,11 +151,12 @@ export function CampaignWizardPage() {
       const { data, error: lErr } = await insforge.functions.invoke('landing', { body: { campaignId } })
       patchStep('landing', {
         status: lErr ? 'error' : 'done',
+        error: lErr ? (lErr.message ?? 'Landing generation failed') : undefined,
         prompt: (data as { prompt?: AgentPrompt } | null)?.prompt,
       })
     } catch (err) {
       console.error(err)
-      patchStep('landing', { status: 'error' })
+      patchStep('landing', { status: 'error', error: errMsg(err) })
     }
 
     // 4. Done — go straight to the editor, which loads the finished campaign.

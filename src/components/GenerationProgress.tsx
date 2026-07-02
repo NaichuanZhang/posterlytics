@@ -20,6 +20,7 @@ export interface AgentStep {
   blurb: string
   status: StepStatus
   prompt?: AgentPrompt
+  error?: string // set when status === 'error' — the invoke error message
 }
 
 interface Props {
@@ -93,6 +94,11 @@ function StepRow({ step }: { step: AgentStep }) {
           </button>
         )}
       </div>
+      {step.status === 'error' && step.error && (
+        <p className="genprog-error" style={{ color: 'var(--bad)', fontSize: '0.8rem', margin: '8px 0 0' }}>
+          {step.error}
+        </p>
+      )}
       {showPrompt && <pre className="genprog-pre">{text}</pre>}
     </li>
   )

@@ -329,6 +329,73 @@ export function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// =====================================================================
+// Agentic failure traces (persist request/response when a step fails/degrades)
+// =====================================================================
+
+// Clamp any value to a bounded, JSON-safe shape so a trace row never bloats.
+// Strings longer than `cap` are truncated with a "…[+N chars]" marker; objects
+// are walked and each string field clamped; the whole thing is size-guarded by
+// re-clamping the serialized form. Pure — unit-tested.
+export function truncateForTrace(value: unknown, cap = 12_000): unknown {
+  const clampStr = (s: string): string =>
+    s.length > cap ? `${s.slice(0, cap)}…[+${s.length - cap} chars]` : s;
+
+  const walk = (v: unknown, depth: number): unknown => {
+    if (v === null || v === undefined) return v ?? null;
+    if (typeof v === 'string') return clampStr(v);
+    if (typeof v === 'number' || typeof v === 'boolean') return v;
+    if (depth >= 6) return clampStr(String(v));
+    if (Array.isArray(v)) return v.slice(0, 50).map((x) => walk(x, depth + 1));
+    if (typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        out[k] = walk(val, depth + 1);
+      }
+      return out;
+    }
+    return clampStr(String(v));
+  };
+
+  return walk(value, 0);
+}
+
+export type TraceStep = 'analyze' | 'designer' | 'hero' | 'landing' | 'capture';
+export type TraceStatus = 'failed' | 'degraded';
+
+// Best-effort insert of one agent_traces row. Owner RLS (the auth-scoped client
+// already carries the caller's bearer token). SWALLOWS its own errors — a failed
+// trace-write must never mask the real error or throw into the pipeline.
+export async function logTrace(
+  // deno-lint-ignore no-explicit-any
+  client: any,
+  entry: {
+    campaignId: string;
+    userId: string;
+    step: TraceStep;
+    status: TraceStatus;
+    detail?: string;
+    request?: unknown;
+    response?: unknown;
+  },
+): Promise<void> {
+  try {
+    await client.database.from('agent_traces').insert([
+      {
+        campaign_id: entry.campaignId,
+        user_id: entry.userId,
+        step: entry.step,
+        status: entry.status,
+        detail: entry.detail ?? null,
+        request: entry.request === undefined ? null : truncateForTrace(entry.request),
+        response: entry.response === undefined ? null : truncateForTrace(entry.response),
+      },
+    ]);
+  } catch {
+    // Never let observability break the pipeline.
+  }
+}
+
 // Extract the first balanced JSON object from a string (handles models that
 // wrap JSON in prose or ```json fences).
 export function extractJson(text: string): unknown {

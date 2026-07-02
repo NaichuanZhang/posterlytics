@@ -6,6 +6,7 @@ import {
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
+  logTrace,
   type PosterLayout,
 } from './_shared.ts';
 
@@ -28,6 +29,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const userId = userData.user.id;
 
   let body: { campaignId?: string };
   try {
@@ -64,6 +66,15 @@ export default async function (req: Request): Promise<Response> {
   try {
     dataUrl = await aiImage(baseUrl, apiKey, prompt, '2:3', referenceImages);
   } catch (e) {
+    await logTrace(client, {
+      campaignId: campaign.id,
+      userId,
+      step: 'hero',
+      status: 'failed',
+      detail: 'AI image generation failed',
+      request: { model: Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image', image: prompt },
+      response: { error: e instanceof Error ? e.message : String(e) },
+    });
     return jsonResponse({ error: String(e) }, 502);
   }
 
@@ -74,10 +85,30 @@ export default async function (req: Request): Promise<Response> {
     const { data, error } = await client.storage
       .from('assets')
       .upload(`poster/${campaign.id}/${crypto.randomUUID()}.png`, blob);
-    if (error || !data) return jsonResponse({ error: error?.message ?? 'upload failed' }, 500);
+    if (error || !data) {
+      await logTrace(client, {
+        campaignId: campaign.id,
+        userId,
+        step: 'hero',
+        status: 'failed',
+        detail: 'poster image upload failed',
+        request: { image: prompt },
+        response: { error: error?.message ?? 'upload failed' },
+      });
+      return jsonResponse({ error: error?.message ?? 'upload failed' }, 500);
+    }
     url = data.url;
     key = data.key;
   } catch (e) {
+    await logTrace(client, {
+      campaignId: campaign.id,
+      userId,
+      step: 'hero',
+      status: 'failed',
+      detail: 'poster image upload threw',
+      request: { image: prompt },
+      response: { error: e instanceof Error ? e.message : String(e) },
+    });
     return jsonResponse({ error: String(e) }, 500);
   }
 
@@ -87,7 +118,17 @@ export default async function (req: Request): Promise<Response> {
     .from('campaigns')
     .update({ hero_image_url: url, hero_image_key: key })
     .eq('id', campaign.id);
-  if (upErr) return jsonResponse({ error: upErr.message }, 500);
+  if (upErr) {
+    await logTrace(client, {
+      campaignId: campaign.id,
+      userId,
+      step: 'hero',
+      status: 'failed',
+      detail: 'campaign persist failed after image generation',
+      response: { error: upErr.message },
+    });
+    return jsonResponse({ error: upErr.message }, 500);
+  }
 
   // Return the compiled text-to-image prompt for the generation loading UI.
   return jsonResponse({ poster_image_url: url, prompt: { image: prompt } });

@@ -81,7 +81,21 @@ export function isBlockingOverlay(box: OverlayBox): boolean {
 // Orchestrator: click known controls, then strict-remove leftover blockers and
 // unlock scroll. Returns the number of force-removed nodes (for logging). Never
 // throws.
+// Hard ceiling on the whole dismissal so it can NEVER dominate the capture —
+// button-heavy sites (news, e-commerce) otherwise made the per-element Playwright
+// round-trips run 20s+. Everything inside is one-shot in-page evaluate work, so
+// this budget is generous.
+const DISMISS_BUDGET_MS = 4000;
+
 export async function dismissPopups(page: Page, viewport: Viewport): Promise<number> {
+  try {
+    return await withTimeout(runDismiss(page, viewport), DISMISS_BUDGET_MS, 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function runDismiss(page: Page, viewport: Viewport): Promise<number> {
   // 1. Click recognized controls (the clean way — the site's own handler fires).
   try {
     await clickConsentControls(page);
@@ -116,15 +130,56 @@ export async function dismissPopups(page: Page, viewport: Viewport): Promise<num
   return removed;
 }
 
-// Click pass — try a bounded set of locators for consent/close controls. Each
-// click is short-timed and swallowed; at most a few fire.
-async function clickConsentControls(page: Page): Promise<void> {
-  const MAX_CLICKS = 3;
-  const CLICK_TIMEOUT = 800;
-  let clicks = 0;
+// Resolve `p`, or `fallback` if it doesn't settle within `ms` (loser is abandoned).
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
 
-  // 1. Well-known explicit selectors first (fast, high-precision).
-  const knownSelectors = [
+// Click pass — ONE in-page evaluate that finds and clicks up to a few consent/
+// close controls. Doing the label scan + click inside the page (rather than via
+// per-element Playwright round-trips) keeps this O(1) network round-trips even on
+// pages with hundreds of buttons. `el.click()` still dispatches a real click, so
+// the site's own consent handler fires. Returns the number clicked.
+async function clickConsentControls(page: Page): Promise<number> {
+  try {
+    return (await page.evaluate(clickConsentInPage, { labels: [...CONSENT_LABELS], maxClicks: 3 })) as number;
+  } catch {
+    return 0;
+  }
+}
+
+// Runs INSIDE the page. Plain DOM only — no imports; the consent-label list is
+// passed in (mirror of isConsentLabel's allowlist). Clicks known-selector controls
+// first, then buttons/links whose visible label matches the allowlist.
+function clickConsentInPage(cfg: { labels: string[]; maxClicks: number }): number {
+  const allow = new Set(cfg.labels);
+  const MAX_LABEL_LEN = 24;
+  const isConsent = (raw: string): boolean => {
+    const t = (raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!t || t.length > MAX_LABEL_LEN) return false;
+    return allow.has(t) || t === '✕' || t === '×' || t === 'x';
+  };
+  const visible = (el: Element): boolean => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+
+  let clicks = 0;
+  const clickIt = (el: Element | null): void => {
+    if (!el || clicks >= cfg.maxClicks || !visible(el)) return;
+    try {
+      (el as HTMLElement).click();
+      clicks++;
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // 1. Well-known explicit selectors (fast, high-precision).
+  const known = [
     '#onetrust-accept-btn-handler',
     '.cc-allow',
     '[aria-label*="accept" i]',
@@ -133,41 +188,23 @@ async function clickConsentControls(page: Page): Promise<void> {
     '[class*="consent" i] button',
     '[id*="cookie" i] button',
   ];
-  for (const sel of knownSelectors) {
-    if (clicks >= MAX_CLICKS) break;
-    try {
-      const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 200 })) {
-        await loc.click({ timeout: CLICK_TIMEOUT, force: true });
-        clicks++;
-        await page.waitForTimeout(150);
-      }
-    } catch {
-      /* best-effort */
+  for (const sel of known) {
+    if (clicks >= cfg.maxClicks) break;
+    clickIt(document.querySelector(sel));
+  }
+
+  // 2. Buttons/links whose visible label reads as consent/close. Cap the scan so a
+  // giant DOM can't blow up cost.
+  if (clicks < cfg.maxClicks) {
+    const controls = Array.from(document.querySelectorAll('button, [role="button"], a')).slice(0, 400);
+    for (const el of controls) {
+      if (clicks >= cfg.maxClicks) break;
+      const label = (el.getAttribute('aria-label') || el.textContent || '').trim();
+      if (isConsent(label)) clickIt(el);
     }
   }
 
-  // 2. Buttons/links whose accessible name reads as consent/close.
-  if (clicks < MAX_CLICKS) {
-    try {
-      const candidates = await page.getByRole('button').all();
-      for (const loc of candidates) {
-        if (clicks >= MAX_CLICKS) break;
-        try {
-          const name = ((await loc.textContent({ timeout: 200 })) || '').trim();
-          if (!isConsentLabel(name)) continue;
-          if (!(await loc.isVisible({ timeout: 200 }))) continue;
-          await loc.click({ timeout: CLICK_TIMEOUT, force: true });
-          clicks++;
-          await page.waitForTimeout(150);
-        } catch {
-          /* best-effort */
-        }
-      }
-    } catch {
-      /* best-effort */
-    }
-  }
+  return clicks;
 }
 
 // ---------------------------------------------------------------------------

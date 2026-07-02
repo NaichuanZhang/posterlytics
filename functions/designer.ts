@@ -6,6 +6,7 @@ import {
   jsonResponse,
   createUserClient,
   normalizePosterLayout,
+  logTrace,
   type DesignTokens,
 } from './_shared.ts';
 
@@ -28,6 +29,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const userId = userData.user.id;
 
   let body: { campaignId?: string };
   try {
@@ -128,6 +130,15 @@ export default async function (req: Request): Promise<Response> {
         .from('campaigns')
         .update({ design_status: 'failed' })
         .eq('id', campaign.id);
+      await logTrace(client, {
+        campaignId: campaign.id,
+        userId,
+        step: 'designer',
+        status: 'failed',
+        detail: 'layout design AI chat failed twice',
+        request: { model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o', system: sys, user },
+        response: { error: e instanceof Error ? e.message : String(e) },
+      });
       return jsonResponse({ error: `layout design failed: ${String(e)}` }, 502);
     }
   }
@@ -138,6 +149,14 @@ export default async function (req: Request): Promise<Response> {
     .eq('id', campaign.id);
   if (upErr) {
     await client.database.from('campaigns').update({ design_status: 'failed' }).eq('id', campaign.id);
+    await logTrace(client, {
+      campaignId: campaign.id,
+      userId,
+      step: 'designer',
+      status: 'failed',
+      detail: 'campaign persist failed after layout design',
+      response: { error: upErr.message },
+    });
     return jsonResponse({ error: upErr.message }, 500);
   }
 

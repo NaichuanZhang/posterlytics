@@ -9,6 +9,7 @@ import {
   dataUrlToBlob,
   parseColor,
   toHex,
+  logTrace,
   type DesignTokens,
 } from './_shared.ts';
 
@@ -29,6 +30,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const userId = userData.user.id;
 
   let body: { campaignId?: string; posterStyle?: string };
   try {
@@ -90,6 +92,18 @@ export default async function (req: Request): Promise<Response> {
   // back to the regex-mined colors below. (Capture happens here so its palette
   // can seed the model and its tokens are persisted.)
   const capture = await captureSite(productUrl);
+  if (!capture) {
+    // Silent degrade: the capture-service was unconfigured/unreachable/slow, so we
+    // lose real computed tokens + the screenshot and fall back to regex colors.
+    await logTrace(client, {
+      campaignId: campaign.id,
+      userId,
+      step: 'capture',
+      status: 'degraded',
+      detail: 'capture-service returned null — fell back to regex-mined colors, no design_tokens/screenshot',
+      request: { url: productUrl },
+    });
+  }
   const design_tokens: DesignTokens | null = capture?.tokens ?? null;
   // Prefer the programmatic palette (computed, role-aware) over regex mining;
   // fall back to regex colors when capture is unavailable.
@@ -224,7 +238,18 @@ export default async function (req: Request): Promise<Response> {
         { role: 'user', content: user },
       ], { maxTokens: 2200 });
       parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
-    } catch {
+    } catch (e) {
+      // Both AI-chat attempts failed → hardcoded fallback content. The poster still
+      // renders, but it's off-brand; record why so it's not invisible.
+      await logTrace(client, {
+        campaignId: campaign.id,
+        userId,
+        step: 'analyze',
+        status: 'degraded',
+        detail: 'AI chat failed twice — used hardcoded fallback content',
+        request: { model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o', system: sys, user },
+        response: { error: e instanceof Error ? e.message : String(e) },
+      });
       parsed = fallbackContent(campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
     }
   }
@@ -248,7 +273,17 @@ export default async function (req: Request): Promise<Response> {
       status: 'draft',
     })
     .eq('id', campaign.id);
-  if (upErr) return jsonResponse({ error: upErr.message }, 500);
+  if (upErr) {
+    await logTrace(client, {
+      campaignId: campaign.id,
+      userId,
+      step: 'analyze',
+      status: 'failed',
+      detail: 'campaign persist failed after analyze',
+      response: { error: upErr.message },
+    });
+    return jsonResponse({ error: upErr.message }, 500);
+  }
 
   return jsonResponse({
     poster_style: parsed.poster_style,

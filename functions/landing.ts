@@ -6,6 +6,7 @@ import {
   jsonResponse,
   createUserClient,
   sanitizeLandingHtml,
+  logTrace,
   CTA_PLACEHOLDER,
   BEACON_PLACEHOLDER,
   type DesignTokens,
@@ -34,6 +35,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const userId = userData.user.id;
 
   let body: { campaignId?: string };
   try {
@@ -62,14 +64,25 @@ export default async function (req: Request): Promise<Response> {
   await client.database.from('campaigns').update({ landing_status: 'generating' }).eq('id', c.id);
 
   let html: string | null = null;
+  let agentError: string | null = null;
   try {
     html = await runAgent(baseUrl, apiKey, c);
-  } catch {
+  } catch (e) {
     html = null;
+    agentError = e instanceof Error ? e.message : String(e);
   }
 
   if (!html) {
     await client.database.from('campaigns').update({ landing_status: 'failed' }).eq('id', c.id);
+    await logTrace(client, {
+      campaignId: c.id as string,
+      userId,
+      step: 'landing',
+      status: 'failed',
+      detail: agentError ? 'landing agent threw' : 'landing agent produced no usable HTML (draft failed)',
+      request: { model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o', system: DRAFT_SYS, user: briefForUi },
+      response: { error: agentError ?? 'runAgent returned null' },
+    });
     return jsonResponse({ error: 'landing generation failed' }, 502);
   }
 
@@ -89,6 +102,14 @@ export default async function (req: Request): Promise<Response> {
     });
   } catch (e) {
     await client.database.from('campaigns').update({ landing_status: 'failed' }).eq('id', c.id).catch(() => {});
+    await logTrace(client, {
+      campaignId: c.id as string,
+      userId,
+      step: 'landing',
+      status: 'failed',
+      detail: 'landing sanitize/persist failed',
+      response: { error: e instanceof Error ? e.message : String(e) },
+    });
     return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 }

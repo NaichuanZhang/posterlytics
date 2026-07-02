@@ -206,6 +206,23 @@ export interface Placement {
   created_at: string
 }
 
+// A recorded failure/degrade event from the generation pipeline (agent_traces
+// table, db/15). Written best-effort by the edge functions; owner-read only.
+export type AgentTraceStep = 'analyze' | 'designer' | 'hero' | 'landing' | 'capture'
+export type AgentTraceStatus = 'failed' | 'degraded'
+
+export interface AgentTrace {
+  id: string
+  campaign_id: string
+  user_id: string
+  step: AgentTraceStep
+  status: AgentTraceStatus
+  detail: string | null
+  request: Record<string, unknown> | null
+  response: Record<string, unknown> | null
+  created_at: string
+}
+
 export interface PlacementStat {
   placement_id: string
   label: string
