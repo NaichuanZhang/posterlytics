@@ -37,6 +37,10 @@ const NATIVE_H = 1620
 // remaining height so the two stack without overlapping.
 const BAND_H = 300
 const IMG_H = NATIVE_H - BAND_H // 1320 — the cropped image row
+// Vertical fade scrim over the bottom of the image row: content the model painted
+// near the crop line dissolves into the band color instead of being hard-sliced
+// (models often ignore the "leave the bottom empty" prompt). ≈ band height.
+const SCRIM_H = 300
 const BAND_PAD_X = 64
 const BAND_GAP = 44
 const QR_PX = 200
@@ -79,14 +83,29 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     >
       {/* Image row — the top ~81.5%. Cropped from the TOP (objectPosition:'top')
           so the discarded slice is the bottom of the art, never the headline. */}
-      <div style={{ width: '100%', height: IMG_H, overflow: 'hidden', flex: '0 0 auto' }}>
+      <div style={{ width: '100%', height: IMG_H, overflow: 'hidden', flex: '0 0 auto', position: 'relative' }}>
         {img ? (
-          <img
-            src={img}
-            crossOrigin="anonymous"
-            alt={`${campaign.product_name} poster`}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }}
-          />
+          <>
+            <img
+              src={img}
+              crossOrigin="anonymous"
+              alt={`${campaign.product_name} poster`}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }}
+            />
+            {/* Fade the bottom of the image into the band color so any content the
+                model painted near the crop line dissolves in — no hard chop. */}
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: SCRIM_H,
+                pointerEvents: 'none',
+                background: `linear-gradient(to bottom, ${hexToRgba(bandBg, 0)}, ${hexToRgba(bandBg, 1)})`,
+              }}
+            />
+          </>
         ) : (
           <div
             style={{
@@ -160,3 +179,15 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     </div>
   )
 })
+
+// Build an rgba() string from a #rrggbb (or #rgb) hex at the given alpha. Used for
+// the fade scrim so it dissolves to exactly the band color (not a gray "transparent"
+// keyword halo) and tracks bandBg if it ever changes. Falls back to black on a
+// non-hex value.
+function hexToRgba(hex: string, alpha: number): string {
+  let h = (hex || '').trim().replace('#', '')
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('')
+  const n = parseInt(h, 16)
+  if (h.length !== 6 || Number.isNaN(n)) return `rgba(0, 0, 0, ${alpha})`
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
