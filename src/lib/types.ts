@@ -164,9 +164,61 @@ export interface SaasPosterSpec {
   urls: string
 }
 
-// poster_spec is one of these, discriminated by Campaign.poster_style. Kept as a
-// loose union (both shapes are optional-friendly) so older rows still type-check.
-export type PosterSpec = CozyPosterSpec | SaasPosterSpec
+// Which kind of thing a campaign promotes. Mirrors the `scenario` column
+// (db/16). 'product' is the original flow; 'event' is a Luma event. No exhaustive
+// switch depends on this being closed — future scenarios extend it without a
+// migration (the column has no CHECK).
+export type CampaignScenario = 'product' | 'event'
+
+// The scraped/entered details for an 'event' scenario campaign (the `event_details`
+// JSONB, db/16). NULL for product campaigns. Every field is optional so a partial
+// Luma scrape round-trips — e.g. a "Register to See Address" event exposes a city
+// but no street. Times are ISO-8601 strings carrying the event's own tz offset
+// (e.g. "2026-07-04T18:30:00-07:00"); render the event's LOCAL time, don't convert
+// to the viewer's zone.
+export interface EventDetails {
+  event_name?: string
+  starts_at?: string // ISO-8601 with tz offset
+  ends_at?: string // ISO-8601 with tz offset
+  tz_offset?: string // e.g. "-07:00"
+  tz_label?: string // e.g. "PDT" (best-effort; may be absent)
+  location_name?: string
+  location_address?: string
+  location_city?: string
+  location_region?: string
+  location_country?: string
+  attendance_mode?: 'offline' | 'online'
+  online_platform?: string
+  address_hidden?: boolean // true for "Register to See Address" events
+  host_name?: string
+  host_url?: string
+  host_logo_url?: string
+  hosts?: string[]
+  price_label?: string // e.g. "Free" / "$20"
+  register_url?: string // the luma.com/<slug> RSVP page
+  cover_image_url?: string // Flow A (Phase 2) — the 1:1 Luma cover
+  cover_image_key?: string
+}
+
+// Event promo-poster zones (poster_spec when Campaign.scenario === 'event').
+// Logistics lines (date/time/location) are authoritative from EventDetails and
+// composited as real text by AiPoster — never AI-painted — so they stay legible
+// and accurate.
+export interface EventPosterSpec {
+  title: string
+  date_line: string
+  time_line: string
+  location_line: string
+  host_line: string
+  rsvp_label: string // <=4 words, e.g. "Scan to RSVP"
+  price_line?: string
+  urls: string
+}
+
+// poster_spec is one of these, discriminated by Campaign.poster_style (product
+// scenario) or Campaign.scenario (event). Kept as a loose union (every shape is
+// optional-friendly) so older rows still type-check.
+export type PosterSpec = CozyPosterSpec | SaasPosterSpec | EventPosterSpec
 
 export interface Campaign {
   id: string
@@ -193,6 +245,11 @@ export interface Campaign {
   landing_status: LandingStatus | null
   poster_layout: PosterLayout | null
   design_status: DesignStatus | null
+  // Which scenario this campaign promotes (db/16). Defaults to 'product' for every
+  // existing row. For 'event', product_url/product_name/destination_url are
+  // repurposed (event URL / title / Luma RSVP target) and event_details is set.
+  scenario: CampaignScenario
+  event_details: EventDetails | null
   status: CampaignStatus
   created_at: string
 }

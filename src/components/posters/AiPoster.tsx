@@ -2,6 +2,7 @@ import { forwardRef } from 'react'
 import type { Campaign, PosterStyle } from '../../lib/types'
 import { buildViewUrl } from '../../lib/landingUrl'
 import { posterColors } from '../../lib/posterColors'
+import { POSTER_2x3, type OutputFormat } from '../../lib/outputFormats'
 import { QrCode } from '../QrCode'
 
 interface Props {
@@ -11,6 +12,10 @@ interface Props {
   // pre-fetches the cross-origin hero to a data URL and passes it here so the
   // export canvas is never tainted by CORS. Falls back to hero_image_url.
   imageSrcOverride?: string
+  // Which output size/layout to render. Defaults to the 2:3 poster, so existing
+  // callers (preview + PNG export) are unchanged. Future sizes (1:1 Luma cover,
+  // 9:16 story) pass a different format from the OUTPUT_FORMATS registry.
+  format?: OutputFormat
 }
 
 // AI-image poster: the model-generated illustration in the TOP ~81.5% of the
@@ -30,13 +35,11 @@ interface Props {
 // The QR card is ALWAYS white with dark modules, independent of brand palette,
 // so it stays scannable on any background. The band is dark (posterColors.ink)
 // with a thin vivid brand-accent hairline on top for identity.
-const NATIVE_W = 1080
-const NATIVE_H = 1620
-
-// Band geometry (native px). BAND_H ≈ 18.5% of NATIVE_H; the image row takes the
-// remaining height so the two stack without overlapping.
+// Band geometry (native px). BAND_H ≈ 18.5% of the 2:3 poster height; the image
+// row takes the remaining height so the two stack without overlapping. NATIVE_W/H
+// now come from the OutputFormat (defaulting to POSTER_2x3 = 1080×1620), so the
+// 2:3 poster renders identically to before.
 const BAND_H = 300
-const IMG_H = NATIVE_H - BAND_H // 1320 — the cropped image row
 // Vertical fade scrim over the bottom of the image row: content the model painted
 // near the crop line dissolves into the band color instead of being hard-sliced
 // (models often ignore the "leave the bottom empty" prompt). ≈ band height.
@@ -51,9 +54,15 @@ const CTA_TITLE_PX = 52
 const CTA_SUB_PX = 30
 
 export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
-  { campaign, code, imageSrcOverride },
+  { campaign, code, imageSrcOverride, format = POSTER_2x3 },
   ref,
 ) {
+  // Native size comes from the chosen output format; the QR band takes a fixed
+  // bottom strip and the image row takes the rest. For POSTER_2x3 this is exactly
+  // 1080×1620 with a 1320px image row — unchanged from before.
+  const NATIVE_W = format.w
+  const NATIVE_H = format.h
+  const IMG_H = NATIVE_H - BAND_H
   const img = imageSrcOverride ?? campaign.hero_image_url
   const style: PosterStyle = campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
   const spec = campaign.poster_spec as { qr_label?: string } | null
