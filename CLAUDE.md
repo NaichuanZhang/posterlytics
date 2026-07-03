@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Posterlytics turns a product URL into an on-brand advertising poster, mints a **unique tracked QR/link per placement**, and reports **which placement drove conversions** (not just clicks). Per-placement attribution is the core value: same product → N unique codes → every scan/conversion logged. See `README.md` for the product walkthrough and screenshots.
 
+**Project management:** the [Posterlytics Notion hub](https://www.notion.so/alexhomebase/Posterlytics-38412ea3d4678044b95ae6a93cad0159) is the central PM page — the product roadmap (a Backlog / In-Progress / Done sprint board), status snapshot, and backlog all live there.
+
 ## Commands
 
 ```bash
