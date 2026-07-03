@@ -48,7 +48,8 @@ Scans, unique visitors, conversions, and conversion rate — per placement.
    Storage), and uses gpt-4o to produce:
    - `poster_style` + `poster_spec` — the auto-selected template (cozy scrapbook
      or SaaS glassmorphism) and its structured content
-   - `landing_content` — the full story (features, how-it-works, why-use-it)
+   - `landing_content` — structured product copy (features, how-it-works,
+     why-use-it) used to enrich the poster text
    - `style_profile` — the brand's palette / fonts / tone
 4. **Two posters** — both rendered from that spec:
    - **Template** — deterministic HTML/CSS at 1080×1620, on-brand accent color,
@@ -58,19 +59,19 @@ Scans, unique visitors, conversions, and conversion rate — per placement.
    The user picks one (`poster_mode`); either is exportable to PNG per placement
    (`html-to-image`).
 5. **Placements** — each mints a unique short code → unique QR/link.
-6. **Publish** — activates the hosted landing page.
-7. **Scan** → `view` logs the scan (device from UA, first-party visitor cookie,
-   browser-side geo beacon) and serves the rich landing → CTA hits `convert`,
-   which logs a conversion and 302s to the real product page.
+6. **Publish** — activates the tracked QR links.
+7. **Scan** → `view` logs the scan (device from UA, first-party visitor cookie)
+   **and** the conversion in one step, then 302s straight to the real product
+   page. A scan *is* the conversion — there's no intermediate landing page.
 8. **Dashboard** — per-placement scans / unique visitors / conversions / rate.
 
 ## Architecture
 
 - **Frontend**: Vite + React + TypeScript SPA (`src/`). Auth-gated dashboard.
 - **Backend**: InsForge (Postgres + RLS, Storage, Auth, edge functions).
-- **Edge functions** (`functions/`, Deno): `view`, `convert`, `scan-geo`,
-  `analyze`, `hero`. Source imports `_shared.ts`; `functions/build.mjs` inlines
-  it into one deployable file per function (Subhosting uploads a single file).
+- **Edge functions** (`functions/`, Deno): `view` (the tracked QR redirect),
+  `analyze`, `designer`, `hero`. Source imports `_shared.ts`; `functions/build.mjs`
+  inlines it into one deployable file per function (Subhosting uploads a single file).
 - **AI**: InsForge AI proxy (`/api/ai/chat/completion`, `/api/ai/image/generation`)
   with the project key — no separate OpenRouter key needed.
 - **Schema**: `db/*.sql` applied via `npx @insforge/cli db import`. Owner-only
@@ -90,7 +91,7 @@ npm run build        # type-check + bundle
 ```bash
 node functions/build.mjs                 # build all → functions/dist/<slug>.ts
 npx @insforge/cli functions deploy view --file ./functions/dist/view.ts
-# repeat for convert, scan-geo, analyze, hero
+# repeat for analyze, designer, hero
 ```
 
 ### Database

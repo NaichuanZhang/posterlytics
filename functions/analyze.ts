@@ -320,8 +320,8 @@ export default async function (req: Request): Promise<Response> {
   }
 
   // 4. Persist. design_tokens/screenshot are written even when the AI step used a
-  // fallback. landing_html is intentionally NOT touched here — the landing agent
-  // owns it (a stale landing for the old style is cleared by re-running landing).
+  // fallback. landing_content feeds the poster copy (designer.ts); the QR itself
+  // resolves to a pure tracked redirect, so there's no hosted landing page.
   const { error: upErr } = await client.database
     .from('campaigns')
     .update({

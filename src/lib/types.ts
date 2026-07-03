@@ -63,7 +63,7 @@ export interface PosterLayout {
   zones: PosterLayoutZone[]
 }
 
-// Lifecycle of the AI-designed poster layout (UI hint), same shape as LandingStatus.
+// Lifecycle of the AI-designed poster layout (UI hint).
 export type DesignStatus = 'generating' | 'ready' | 'failed'
 
 // Programmatic design tokens read from the live site via a real headless browser
@@ -98,9 +98,6 @@ export interface DesignTokens {
   } | null
   fontLinks: string[] // web-font stylesheet URLs to <link> in the landing
 }
-
-// Lifecycle of the AI-generated landing page (UI hint).
-export type LandingStatus = 'generating' | 'ready' | 'failed'
 
 // Vision-detected calm zone for the AI-poster QR, as 0..1 fractions (top-left
 // origin) of the hero image. null → AiPoster falls back to the per-style ANCHORS.
@@ -241,8 +238,6 @@ export interface Campaign {
   design_tokens: DesignTokens | null
   screenshot_url: string | null
   screenshot_key: string | null
-  landing_html: string | null
-  landing_status: LandingStatus | null
   poster_layout: PosterLayout | null
   design_status: DesignStatus | null
   // Which scenario this campaign promotes (db/16). Defaults to 'product' for every

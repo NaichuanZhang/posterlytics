@@ -13,7 +13,7 @@ export function env(key: string): string {
   return v;
 }
 
-// Anon-role InsForge client (public functions: view, convert, scan-geo).
+// Anon-role InsForge client (the public `view` function).
 // Sees only published campaigns/placements and the anon-granted RPCs.
 export function createAnonClient() {
   return createClient({
@@ -840,98 +840,4 @@ export async function captureSite(
   } catch {
     return null;
   }
-}
-
-// =====================================================================
-// Generated-landing safety + runtime injection (pure)
-//
-// The landing agent authors full HTML but is FORBIDDEN to ship JavaScript. We
-// enforce that here, then inject the two pieces that MUST be per-request and
-// can't be baked into stored HTML: the tracked CTA href and the scan geo-beacon.
-// This is the programmatic seam guaranteeing tracking integrity regardless of
-// what the model wrote.
-// =====================================================================
-
-export const CTA_PLACEHOLDER = '{{CTA_HREF}}';
-export const BEACON_PLACEHOLDER = '{{SCAN_BEACON}}';
-
-// Strip every script/handler the model may have emitted; guarantee the two
-// runtime placeholders exist. Returns HTML that is inert until injection.
-export function sanitizeLandingHtml(html: string): string {
-  let out = String(html ?? '');
-
-  // Defense in depth: remove anything executable the model produced. Only our
-  // injected beacon is ever allowed to run.
-  out = out.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '');
-  out = out.replace(/<script\b[^>]*>/gi, ''); // stray unclosed <script>
-  // Inline event handlers: on...="..." / on...='...' / on...=value
-  out = out.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');
-  out = out.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
-  out = out.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
-  // Neutralize dangerous URL schemes (javascript:, data: — a data:text/html href
-  // executes JS on click) in any URL-bearing attribute. action/formaction also
-  // matter: <form action="https://evil"> would exfiltrate inputs.
-  const badScheme = '(?:\\s*(?:javascript|data|vbscript):)';
-  out = out.replace(new RegExp(`(href|src|action|formaction)\\s*=\\s*"${badScheme}[^"]*"`, 'gi'), '$1="#"');
-  out = out.replace(new RegExp(`(href|src|action|formaction)\\s*=\\s*'${badScheme}[^']*'`, 'gi'), "$1='#'");
-  out = out.replace(new RegExp(`(href|src|action|formaction)\\s*=\\s*${badScheme}[^\\s>]*`, 'gi'), '$1="#"');
-  // Strip CSS @import from inline <style> blocks — it loads attacker-controlled
-  // external CSS on every view (a silent visitor beacon / exfiltration vector).
-  out = out.replace(
-    /(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi,
-    (_m, open: string, body: string, close: string) => open + body.replace(/@import\b[^;]*;?/gi, '') + close,
-  );
-
-  // Guarantee a tracked CTA placeholder. If the model omitted it, append a
-  // fallback CTA bar before </body> so the link is never dead.
-  if (!out.includes(CTA_PLACEHOLDER)) {
-    const fallbackCta =
-      `<div style="position:sticky;bottom:14px;margin:44px auto 0;max-width:680px;padding:0 20px">` +
-      `<a href="${CTA_PLACEHOLDER}" style="display:block;text-align:center;background:#111;color:#fff;` +
-      `text-decoration:none;font-weight:700;padding:16px;border-radius:14px">Learn more</a></div>`;
-    out = insertBeforeBodyClose(out, fallbackCta);
-  }
-
-  // Guarantee a beacon placeholder slot (rendered inert in preview, real in view).
-  if (!out.includes(BEACON_PLACEHOLDER)) {
-    out = insertBeforeBodyClose(out, `<!--${BEACON_PLACEHOLDER}-->`);
-  }
-
-  return out;
-}
-
-// Build the per-request geo-beacon script (mirrors the one in view.ts). When
-// scanId is null (e.g. preview), returns '' so nothing fires.
-export function beaconScript(scanId: string | null, fnHost: string): string {
-  if (!scanId) return '';
-  return (
-    `<script>(function(){var scanId=${JSON.stringify(scanId)};if(!scanId)return;` +
-    `fetch('https://ipapi.co/json/').then(function(r){return r.json()}).then(function(g){` +
-    `if(!g||!g.country)return;` +
-    `fetch(${JSON.stringify(fnHost)}+'/scan-geo',{method:'POST',headers:{'Content-Type':'application/json'},` +
-    `body:JSON.stringify({scan_id:scanId,country:g.country_name||g.country,city:g.city||null})}).catch(function(){});` +
-    `}).catch(function(){});})();</script>`
-  );
-}
-
-// Replace the placeholders with the live tracked CTA + beacon. The BEACON
-// placeholder may appear bare or wrapped in an HTML comment (from sanitize).
-export function injectLandingRuntime(
-  html: string,
-  code: string,
-  scanId: string | null,
-  fnHost: string,
-): string {
-  const ctaHref = `${fnHost}/convert?code=${encodeURIComponent(code)}`;
-  let out = String(html ?? '').split(CTA_PLACEHOLDER).join(ctaHref);
-  const beacon = beaconScript(scanId, fnHost);
-  out = out.split(`<!--${BEACON_PLACEHOLDER}-->`).join(beacon);
-  out = out.split(BEACON_PLACEHOLDER).join(beacon);
-  return out;
-}
-
-function insertBeforeBodyClose(html: string, snippet: string): string {
-  const idx = html.toLowerCase().lastIndexOf('</body>');
-  if (idx === -1) return html + snippet;
-  return html.slice(0, idx) + snippet + html.slice(idx);
 }

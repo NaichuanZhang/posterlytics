@@ -3,7 +3,7 @@ import type { PosterLayout } from '../lib/types'
 import { LayoutPreview } from './LayoutPreview'
 
 // One prompt shown in the loading UI. `image` is the single text-to-image prompt
-// (hero); `system`/`user` are the chat messages (analyze / designer / landing).
+// (hero); `system`/`user` are the chat messages (analyze / designer).
 export interface AgentPrompt {
   system?: string
   user?: string
@@ -12,7 +12,7 @@ export interface AgentPrompt {
 
 export type StepStatus = 'pending' | 'running' | 'done' | 'error'
 
-export type AgentStepKey = 'analyze' | 'designer' | 'hero' | 'landing'
+export type AgentStepKey = 'analyze' | 'designer' | 'hero'
 
 export interface AgentStep {
   key: AgentStepKey
@@ -33,7 +33,7 @@ interface Props {
 }
 
 // The poster-generation loading screen: shows the captured site screenshot and a
-// live step list (analyze → designer → hero → landing), revealing each agent's
+// live step list (analyze → designer → hero), revealing each agent's
 // real prompt as it finishes. Purely presentational — the wizard owns the state.
 export function GenerationProgress({ headline, screenshotUrl, steps, layout }: Props) {
   return (

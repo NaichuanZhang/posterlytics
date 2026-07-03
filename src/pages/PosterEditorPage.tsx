@@ -10,7 +10,6 @@ import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
 import { LayoutPreview } from '../components/LayoutPreview'
-import { LandingPreview } from '../components/LandingPreview'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { buildViewUrl } from '../lib/landingUrl'
 import { useElementWidth } from '../hooks/useElementWidth'
@@ -117,19 +116,6 @@ export function PosterEditorPage() {
     }
   }
 
-  // Regenerate just the AI landing page from the captured design tokens +
-  // screenshot. Independent of the poster so either can be refreshed alone.
-  async function regenerateLanding() {
-    if (!campaign) return
-    setBusy('landing')
-    try {
-      await insforge.functions.invoke('landing', { body: { campaignId: campaign.id } })
-      await reload()
-    } finally {
-      setBusy(null)
-    }
-  }
-
   async function setStatus(status: 'published' | 'draft') {
     if (!campaign) return
     setBusy(status)
@@ -186,8 +172,8 @@ export function PosterEditorPage() {
           </div>
         )}
 
-        {/* Canvas: poster + landing previews. DOM-before the rail so mobile stacks
-            previews on top. Each PreviewCell measures its own cell and scales. */}
+        {/* Canvas: the poster preview. DOM-before the rail so mobile stacks it on
+            top. The PreviewCell measures its own cell and scales. */}
         <section className="ed-canvas">
           <PreviewCell label="Poster">
             {(w) =>
@@ -202,9 +188,6 @@ export function PosterEditorPage() {
                 <p className="muted" style={{ padding: 24, textAlign: 'center' }}>Preparing your placement…</p>
               )
             }
-          </PreviewCell>
-          <PreviewCell label="Landing page">
-            {(w) => <LandingPreview campaign={campaign} width={w} />}
           </PreviewCell>
         </section>
 
@@ -239,27 +222,6 @@ export function PosterEditorPage() {
             {isDesigner && campaign.design_status === 'failed' && (
               <p className="hint" style={{ marginTop: 6 }}>Layout design failed — try Regenerate layout.</p>
             )}
-          </div>
-
-          <div className="card">
-            <h3 style={{ margin: '0 0 8px' }}>Landing page</h3>
-            <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
-              {campaign.landing_html
-                ? 'An on-brand landing page generated from your site’s real design. It’s what the QR resolves to.'
-                : 'Generate an on-brand landing page from your site’s captured design. It’s what the QR resolves to.'}
-            </p>
-            {campaign.landing_status === 'failed' && (
-              <p className="hint" style={{ marginTop: 6 }}>Last generation failed — try again.</p>
-            )}
-            <div className="row wrap" style={{ gap: 8 }}>
-              <button className="btn secondary sm" onClick={regenerateLanding} disabled={!!busy}>
-                {busy === 'landing'
-                  ? 'Generating…'
-                  : campaign.landing_html
-                    ? '↻ Regenerate landing'
-                    : 'Generate landing'}
-              </button>
-            </div>
           </div>
 
           <div className="card">
@@ -315,8 +277,8 @@ export function PosterEditorPage() {
             <h3 style={{ margin: '0 0 8px' }}>{published ? 'Live' : 'Publish'}</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
               {published
-                ? 'Your landing page is live. QR scans are being tracked.'
-                : 'Publish to activate the hosted landing page and start tracking scans.'}
+                ? 'Live. Every QR scan is tracked and redirected to your product.'
+                : 'Publish to make the QR live — scans redirect to your product and are tracked.'}
             </p>
             {published ? (
               <button className="btn danger sm" onClick={() => setStatus('draft')} disabled={!!busy}>

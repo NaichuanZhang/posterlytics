@@ -13,7 +13,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   form: '',
   creating: 'Creating campaign…',
   analyzing: 'Reading your site — extracting brand, content & design…',
-  generating: 'Generating your poster + landing page…',
+  generating: 'Generating your poster…',
   error: '',
 }
 
@@ -23,7 +23,6 @@ const STEP_DEFS: Array<{ key: AgentStep['key']; label: string; blurb: string }> 
   { key: 'analyze', label: 'Analyze', blurb: 'Reading your site — brand, palette, copy' },
   { key: 'designer', label: 'Designer', blurb: 'Designing a bespoke poster layout' },
   { key: 'hero', label: 'Poster', blurb: 'Painting the AI poster image' },
-  { key: 'landing', label: 'Landing page', blurb: 'Building an on-brand landing page' },
 ]
 
 export function CampaignWizardPage() {
@@ -112,7 +111,7 @@ export function CampaignWizardPage() {
     )
 
     // The pipeline runs SEQUENTIALLY so the loading screen can reveal each agent's
-    // real prompt the moment it returns: analyze → [designer] → hero → landing.
+    // real prompt the moment it returns: analyze → [designer] → hero.
     // Each step is best-effort — an error marks that row and the flow continues.
 
     // 2. Analyze: scrape + brand palette + auto-selected style + poster spec.
@@ -160,19 +159,6 @@ export function CampaignWizardPage() {
     } catch (err) {
       console.error(err)
       patchStep('hero', { status: 'error', error: errMsg(err) })
-    }
-
-    patchStep('landing', { status: 'running' })
-    try {
-      const { data, error: lErr } = await insforge.functions.invoke('landing', { body: { campaignId } })
-      patchStep('landing', {
-        status: lErr ? 'error' : 'done',
-        error: lErr ? (lErr.message ?? 'Landing generation failed') : undefined,
-        prompt: (data as { prompt?: AgentPrompt } | null)?.prompt,
-      })
-    } catch (err) {
-      console.error(err)
-      patchStep('landing', { status: 'error', error: errMsg(err) })
     }
 
     // 4. Done — go straight to the editor, which loads the finished campaign.

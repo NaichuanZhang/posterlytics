@@ -70,7 +70,7 @@ export function LandingPage() {
             <div className="lp-feature reveal">
               <div className="ic">{ICONS.chart}</div>
               <h3>Conversions, not just clicks</h3>
-              <p>We host the landing page, log the scan, then the unique visitor and the conversion on the way to your product.</p>
+              <p>Each scan is logged and attributed, then redirected straight to your product — the scan is the conversion, tied to its exact placement.</p>
             </div>
           </div>
         </div>
@@ -105,7 +105,7 @@ export function LandingPage() {
             <ul>
               <li><span className="tick">✓</span> Unique, scannable QR composited at a fixed, reliable spot</li>
               <li><span className="tick">✓</span> Copy the tracked link or export a print-ready PNG</li>
-              <li><span className="tick">✓</span> Publish to activate the hosted landing + tracking</li>
+              <li><span className="tick">✓</span> Publish to activate the tracked QR links</li>
             </ul>
           </div>
           <div className="lp-split-media reveal">
