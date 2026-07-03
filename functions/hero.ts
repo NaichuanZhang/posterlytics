@@ -41,17 +41,21 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, poster_style, style_profile, poster_spec, brand_essence, poster_layout, brand_assets')
+    .select('id, product_name, tagline, poster_style, style_profile, poster_spec, brand_essence, poster_layout, brand_assets, scenario, event_details')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
+  // Event campaigns get their own promo-poster prompt regardless of poster_style.
+  const isEvent = (campaign as Record<string, unknown>).scenario === 'event';
   const rawStyle = (campaign as Record<string, unknown>).poster_style;
-  const style = rawStyle === 'saas_glassmorphism'
-    ? 'saas_glassmorphism'
-    : rawStyle === 'designer'
-      ? 'designer'
-      : 'cozy_scrapbook';
+  const style = isEvent
+    ? 'event'
+    : rawStyle === 'saas_glassmorphism'
+      ? 'saas_glassmorphism'
+      : rawStyle === 'designer'
+        ? 'designer'
+        : 'cozy_scrapbook';
 
   // The real brand logo (if any) is passed to the image model as a reference so
   // it can paint the actual logo into the poster's brand row.
@@ -179,6 +183,7 @@ function stars(n: number): string {
 // step failed / not yet run) fall back to the SaaS template so hero never
 // hard-fails.
 function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: boolean): string {
+  if (style === 'event') return buildEventPrompt(c, hasLogo);
   if (style === 'designer') {
     const layout = c.poster_layout as PosterLayout | null;
     if (layout && Array.isArray(layout.zones)) {
@@ -191,6 +196,59 @@ function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: b
     return buildSaasPrompt(c, hasLogo);
   }
   return style === 'saas_glassmorphism' ? buildSaasPrompt(c, hasLogo) : buildCozyPrompt(c, hasLogo);
+}
+
+// Compose the text-to-image prompt for an EVENT promo poster (2:3). The exact
+// date/time/location are rendered as REAL text by the SPA (AiPoster band), NOT by
+// the image model — so this prompt paints only the ATMOSPHERE + event title + host,
+// and (like every style) leaves the bottom ~26% empty for the composited band.
+function buildEventPrompt(c: Record<string, unknown>, hasLogo = false): string {
+  const spec = (c.poster_spec ?? {}) as {
+    title?: string; hook?: string; blurb?: string; host_line?: string;
+  } & Record<string, unknown>;
+  const essence = String(c.brand_essence ?? '');
+  const title = String((spec.title as string) || c.product_name || 'the event');
+  const hook = String((c.poster_spec as { hook?: string })?.hook ?? '');
+  const hostLine = String(spec.host_line ?? '');
+  const sp = (c.style_profile ?? {}) as { palette?: Record<string, string> };
+  const primary = sp.palette?.primary || '#1f2937';
+  const accent = sp.palette?.accent || '#e8633a';
+  const logoLine = hasLogo
+    ? '\nA reference image of the host/brand LOGO is provided — reproduce it faithfully (exact shape and colors) in the top brand area; do not redraw or distort it.\n'
+    : '';
+
+  return `Create a single PORTRAIT 2:3 EVENT PROMOTION poster — an inviting, high-energy real-world event flyer
+(the kind pinned to a bulletin board or shared as a story). Bold, editorial, atmospheric. NOT a product/SaaS mockup,
+NOT a web UI.
+
+Honor this event's identity — infuse its palette, mood, and motif; do not invent an unrelated corporate look:
+${essence || title}
+Use ${primary} as the dominant color and ${accent} as the vivid accent (headline emphasis, shapes, glow). Stay within
+this palette plus neutrals. If the brand is monochrome, add tasteful ${accent} accents as the only vivid color.
+${logoLine}
+CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings below, all in ENGLISH. Do NOT
+print any layout/section descriptions, position words, or instruction words as visible text.
+
+Arrange it top to bottom:
+
+- Upper area: the EVENT TITLE as an oversized, bold, celebratory display headline reading "${title}" — the dominant
+  visual element, with expressive typography and decorative accents around it.
+${hook ? `- Just below the title, a short punchy hook line reading "${hook}".` : ''}
+${hostLine ? `- A small host/presenter line reading "${hostLine}".` : ''}
+- Middle: rich atmospheric illustration evoking the event's theme and energy (people gathering, venue mood, motifs from
+  the brand essence) — make it feel exciting and specific, not generic clip-art.
+
+- CRITICAL FRAMING: FINISH all artwork and text by about 74% of the way down. Leave the BOTTOM ~26% — a full-width
+  horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background with nothing in it: no
+  text, cards, icons, buttons, QR code, barcode, date, time, address, or decoration. That bottom margin is cropped and
+  replaced by a branded footer bar (with the real date/time/location + a scannable QR) afterward, so anything drawn
+  there is discarded or clashes. Do NOT paint any date, time, address, or QR code yourself — those are added later as
+  crisp real text.
+
+All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above.
+High quality, sharp, 8k, atmospheric event-poster art direction.
+Avoid: product/app UI mockups, painted buttons/pills, any QR/barcode drawn by you, any painted date/time/address,
+garbled or misspelled text, non-English text, and a busy/cluttered bottom edge.`;
 }
 
 // Compose the full text-to-image prompt for the cozy gamified poster, weaving in

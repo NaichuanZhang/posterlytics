@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import type { Campaign, PosterStyle } from '../../lib/types'
+import type { Campaign, PosterStyle, EventPosterSpec } from '../../lib/types'
 import { buildViewUrl } from '../../lib/landingUrl'
 import { posterColors } from '../../lib/posterColors'
 import { POSTER_2x3, type OutputFormat } from '../../lib/outputFormats'
@@ -65,8 +65,21 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   const IMG_H = NATIVE_H - BAND_H
   const img = imageSrcOverride ?? campaign.hero_image_url
   const style: PosterStyle = campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
+  const isEvent = campaign.scenario === 'event'
+  // For events the poster_spec is an EventPosterSpec; its logistics lines were
+  // computed deterministically by analyze (formatEventLines) so they're accurate.
+  const evSpec = isEvent ? (campaign.poster_spec as Partial<EventPosterSpec> | null) : null
   const spec = campaign.poster_spec as { qr_label?: string } | null
-  const caption = spec?.qr_label || 'Scan to start'
+  const caption = isEvent ? evSpec?.rsvp_label || 'Scan to RSVP' : spec?.qr_label || 'Scan to start'
+  // Event logistics rendered as REAL text (never AI-painted): "Sat, Jul 4" /
+  // "6:30 PM PDT" / "The Grand Hall · San Francisco". Filtered so blank lines drop.
+  const eventLines = isEvent
+    ? [
+        [evSpec?.date_line, evSpec?.time_line].filter(Boolean).join('  ·  '),
+        evSpec?.location_line,
+        evSpec?.host_line,
+      ].filter((s): s is string => !!s && s.trim().length > 0)
+    : []
 
   // Dark, neutral band with a vivid brand accent hairline. The accent is derived
   // by posterColors (handles monochrome brands by falling back to a tasteful
@@ -166,11 +179,13 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             <QrCode value={buildViewUrl(code)} size={QR_PX} dark="#0b0c0b" light="#ffffff" />
           </div>
 
-          {/* CTA copy. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+          {/* Band copy. For events: RSVP label + the real date/time/location/host
+              lines (accurate, composited — never AI-painted). For products: the
+              CTA caption + a "point your camera" nudge. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isEvent ? 6 : 8, minWidth: 0 }}>
             <span
               style={{
-                fontSize: CTA_TITLE_PX,
+                fontSize: isEvent ? 40 : CTA_TITLE_PX,
                 fontWeight: 800,
                 lineHeight: 1.05,
                 letterSpacing: '-0.01em',
@@ -179,9 +194,25 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             >
               {caption}
             </span>
-            <span style={{ fontSize: CTA_SUB_PX, fontWeight: 500, lineHeight: 1.2, color: bandTextDim }}>
-              Point your camera here
-            </span>
+            {isEvent ? (
+              eventLines.map((line, i) => (
+                <span
+                  key={i}
+                  style={{
+                    fontSize: i === 0 ? 30 : 26,
+                    fontWeight: i === 0 ? 700 : 500,
+                    lineHeight: 1.25,
+                    color: i === 0 ? bandText : bandTextDim,
+                  }}
+                >
+                  {line}
+                </span>
+              ))
+            ) : (
+              <span style={{ fontSize: CTA_SUB_PX, fontWeight: 500, lineHeight: 1.2, color: bandTextDim }}>
+                Point your camera here
+              </span>
+            )}
           </div>
         </div>
       )}

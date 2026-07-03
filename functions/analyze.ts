@@ -10,7 +10,10 @@ import {
   parseColor,
   toHex,
   logTrace,
+  extractEventDetails,
+  formatEventLines,
   type DesignTokens,
+  type EventDetails,
 } from './_shared.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
@@ -32,13 +35,17 @@ export default async function (req: Request): Promise<Response> {
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
   const userId = userData.user.id;
 
-  let body: { campaignId?: string; posterStyle?: string };
+  let body: { campaignId?: string; posterStyle?: string; scenario?: string };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'bad json' }, 400);
   }
   if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
+
+  // Which scenario this campaign promotes. 'event' branches the extraction +
+  // prompt + spec; anything else is the original product flow.
+  const scenario = body.scenario === 'event' ? 'event' : 'product';
 
   // Optional forced template. 'auto' (or absent) lets the model pick; otherwise
   // we honor the explicit choice and override the model's pick in normalize().
@@ -80,6 +87,12 @@ export default async function (req: Request): Promise<Response> {
   } catch {
     scrapeHtml = '';
   }
+
+  // 1b. For the event scenario, parse the Luma page's schema.org/Event JSON-LD
+  // into structured event_details (deterministic — no LLM). Date/time/location
+  // here are AUTHORITATIVE; the poster renders them as real text, never AI-painted.
+  const event_details: EventDetails | null =
+    scenario === 'event' ? extractEventDetails(scrapeHtml) : null;
 
   // 2. Extract real assets + meta from the HTML.
   const assets = extractAssets(scrapeHtml, productUrl);
@@ -162,6 +175,58 @@ export default async function (req: Request): Promise<Response> {
   // the gamified template zones, brand_essence is a word-portrait that lets the
   // image model (which gets text only) infuse the real brand.
   const visibleText = stripToText(scrapeHtml).slice(0, 8000);
+
+  // The event scenario uses its own prompt + spec normalizer (poster_spec becomes
+  // an EventPosterSpec). Everything else — capture tokens, palette override,
+  // asset re-hosting, persistence — is shared with the product path.
+  if (scenario === 'event') {
+    const parsedEv = await analyzeEvent({
+      baseUrl, apiKey, campaign: campaign as Record<string, string>,
+      eventDetails: event_details ?? {}, siteColors, tokens: design_tokens,
+      visibleText, client, userId,
+    });
+    const { error: upErrEv } = await client.database
+      .from('campaigns')
+      .update({
+        scenario: 'event',
+        event_details,
+        poster_style: 'designer', // events use a bespoke event layout, not saas/cozy
+        style_profile: parsedEv.style_profile,
+        poster_copy: parsedEv.poster_copy,
+        landing_content: parsedEv.landing_content,
+        brand_essence: parsedEv.brand_essence,
+        poster_spec: parsedEv.poster_spec,
+        brand_assets,
+        design_tokens,
+        screenshot_url,
+        screenshot_key,
+        status: 'draft',
+      })
+      .eq('id', campaign.id);
+    if (upErrEv) {
+      await logTrace(client, {
+        campaignId: campaign.id, userId, step: 'analyze', status: 'failed',
+        detail: 'campaign persist failed after event analyze',
+        response: { error: upErrEv.message },
+      });
+      return jsonResponse({ error: upErrEv.message }, 500);
+    }
+    return jsonResponse({
+      scenario: 'event',
+      event_details,
+      poster_style: 'designer',
+      style_profile: parsedEv.style_profile,
+      poster_copy: parsedEv.poster_copy,
+      landing_content: parsedEv.landing_content,
+      brand_essence: parsedEv.brand_essence,
+      poster_spec: parsedEv.poster_spec,
+      brand_assets,
+      design_tokens,
+      screenshot_url,
+      prompt: parsedEv.prompt,
+    });
+  }
+
   const sys =
     'You are a senior product marketer, brand designer, and gamification copywriter. Given a product website and ' +
     'its GTM inputs, produce a faithful style profile, landing copy, a brand word-portrait, choose the best poster ' +
@@ -260,6 +325,8 @@ export default async function (req: Request): Promise<Response> {
   const { error: upErr } = await client.database
     .from('campaigns')
     .update({
+      scenario: 'product',
+      event_details: null, // clear any stale event data if a campaign switched to product
       poster_style: parsed.poster_style,
       style_profile: parsed.style_profile,
       poster_copy: parsed.poster_copy,
@@ -675,6 +742,152 @@ function fallbackContent(
   tokens: DesignTokens | null = null,
 ): ParsedContent {
   return normalize({}, c, siteColors, forcedStyle, tokens);
+}
+
+// =====================================================================
+// Event scenario: analyze a Luma event into an EventPosterSpec + landing copy.
+// Logistics (date/time/location/host) are DETERMINISTIC from event_details
+// (formatEventLines) — the model only writes the promo hook/blurb/RSVP label, so
+// the poster can never show a wrong date. Palette/fonts reuse the shared capture.
+// =====================================================================
+async function analyzeEvent(args: {
+  baseUrl: string;
+  apiKey: string;
+  campaign: Record<string, string>;
+  eventDetails: EventDetails;
+  siteColors: string[];
+  tokens: DesignTokens | null;
+  visibleText: string;
+  // deno-lint-ignore no-explicit-any
+  client: any;
+  userId: string;
+}): Promise<ParsedContent & { prompt: { system: string; user: string } }> {
+  const { baseUrl, apiKey, campaign, eventDetails, siteColors, tokens, visibleText, client, userId } = args;
+  const lines = formatEventLines(eventDetails);
+  const title = eventDetails.event_name || campaign.product_name || 'the event';
+  const rsvpUrl = campaign.destination_url || campaign.product_url || '';
+
+  const sys =
+    'You are a senior event marketer and brand designer. Given a Luma event page and its ' +
+    'already-extracted logistics, write concise, compelling promo copy and a faithful style profile. ' +
+    'Output STRICT JSON only — no prose, no code fences.\n' +
+    'CRITICAL: the event date, time, and location are provided to you and are AUTHORITATIVE — do NOT ' +
+    'invent, alter, or restate them differently; the poster renders those provided strings directly.\n' +
+    'JSON shape: {' +
+    '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
+    '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
+    '"brand_essence":"one vivid sentence describing the event\'s visual identity for an illustrator: mood, ' +
+    'motif, signature colors (name the hex), and overall feel",' +
+    '"landing_content":{"headline":"compelling event headline","what_it_does":"1-2 sentence event pitch",' +
+    '"how_it_works":["3-4 what-to-expect / agenda bullets"],"why_use_it":["3 reasons to attend"],' +
+    '"features":["3-5 highlights: speakers, activities, perks"],"cta":"RSVP button text"},' +
+    '"poster_spec":{"hook":"<=6 words, a punchy reason to attend","blurb":"one short line: who it\'s for + the draw",' +
+    '"rsvp_label":"<=4 words, e.g. Scan to RSVP"}}\n' +
+    'Use the REAL brand colors mined from the page for the palette. Keep all copy SHORT and legible.';
+  const user =
+    `EVENT TITLE: ${title}\n` +
+    `DATE (authoritative): ${lines.date_line || '(unknown)'}\n` +
+    `TIME (authoritative): ${lines.time_line || '(unknown)'}\n` +
+    `LOCATION (authoritative): ${lines.location_line || '(unknown)'}\n` +
+    `HOST: ${lines.host_line || eventDetails.host_name || '(unknown)'}\n` +
+    `PRICE: ${eventDetails.price_label ?? '(unknown)'}\n` +
+    `CTA HINT: ${campaign.cta_text ?? 'Scan to RSVP'}\n` +
+    `REAL BRAND COLORS mined from the page (use for palette): ${siteColors.length ? siteColors.join(', ') : '(none — infer tasteful defaults)'}\n\n` +
+    `EVENT PAGE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the fields above)'}`;
+
+  let ev: Record<string, unknown> = {};
+  try {
+    const raw = await aiChat(baseUrl, apiKey, [
+      { role: 'system', content: sys },
+      { role: 'user', content: user },
+    ], { maxTokens: 1600 });
+    ev = extractJson(raw) as Record<string, unknown>;
+  } catch (e) {
+    await logTrace(client, {
+      campaignId: campaign.id, userId, step: 'analyze', status: 'degraded',
+      detail: 'event AI chat failed — used deterministic logistics + minimal fallback copy',
+      request: { system: sys, user },
+      response: { error: e instanceof Error ? e.message : String(e) },
+    });
+    ev = {};
+  }
+
+  return normalizeEvent(ev, campaign, eventDetails, lines, siteColors, tokens, rsvpUrl, { system: sys, user });
+}
+
+// Assemble an EventPosterSpec + landing copy from the model output, forcing the
+// deterministic logistics lines in and defaulting everything the model omitted.
+function normalizeEvent(
+  raw: Record<string, unknown>,
+  c: Record<string, string>,
+  ev: EventDetails,
+  lines: { date_line: string; time_line: string; location_line: string; host_line: string },
+  siteColors: string[],
+  tokens: DesignTokens | null,
+  rsvpUrl: string,
+  prompt: { system: string; user: string },
+): ParsedContent & { prompt: { system: string; user: string } } {
+  const sp = (raw.style_profile ?? {}) as Record<string, unknown>;
+  const lc = (raw.landing_content ?? {}) as Record<string, unknown>;
+  const ps = (raw.poster_spec ?? {}) as Record<string, unknown>;
+  const title = ev.event_name || c.product_name || 'Event';
+
+  const modelPalette = (sp.palette ?? {}) as Record<string, string>;
+  const topSiteColor = siteColors.find(isVivid);
+  const accent =
+    (isVivid(tokens?.colors.accent) ? tokens!.colors.accent : null) ??
+    topSiteColor ??
+    (isVivid(modelPalette.accent) ? modelPalette.accent : '#e8633a');
+  const primary = tokens?.colors.primary || modelPalette.primary || '#1f2937';
+
+  const rsvpLabel = (ps.rsvp_label as string) || c.cta_text || 'Scan to RSVP';
+  const poster_spec = {
+    title,
+    date_line: lines.date_line,
+    time_line: lines.time_line,
+    location_line: lines.location_line,
+    host_line: lines.host_line,
+    rsvp_label: rsvpLabel,
+    ...(ev.price_label ? { price_line: ev.price_label } : {}),
+    urls: rsvpUrl,
+  };
+
+  const hook = (ps.hook as string) || (lc.headline as string) || `You're invited: ${title}`;
+
+  return {
+    poster_style: 'designer',
+    style_profile: {
+      palette: {
+        primary,
+        bg: tokens?.colors.bg || modelPalette.bg || '#ffffff',
+        text: tokens?.colors.text || modelPalette.text || '#111827',
+        accent,
+      },
+      fonts: {
+        heading: fontStack(tokens?.typography.headingFamily) ?? (sp.fonts as Record<string, string>)?.heading ?? 'system-ui, sans-serif',
+        body: fontStack(tokens?.typography.bodyFamily) ?? (sp.fonts as Record<string, string>)?.body ?? 'system-ui, sans-serif',
+      },
+      tone: (sp.tone as string) ?? 'inviting',
+      layout_hint: (sp.layout_hint as string) ?? '',
+    },
+    poster_copy: {
+      hook,
+      what_it_does: (ps.blurb as string) || (lc.what_it_does as string) || '',
+      features: asArray(lc.features).slice(0, 3),
+      cta: rsvpLabel,
+    },
+    landing_content: {
+      headline: (lc.headline as string) || title,
+      what_it_does: (lc.what_it_does as string) || (ps.blurb as string) || '',
+      how_it_works: asArray(lc.how_it_works).slice(0, 4),
+      why_use_it: asArray(lc.why_use_it).slice(0, 4),
+      features: asArray(lc.features).slice(0, 6),
+      cta: (lc.cta as string) || rsvpLabel,
+    },
+    brand_essence: String(raw.brand_essence ?? `${title}: a warm, inviting event`).slice(0, 400),
+    poster_spec: poster_spec as unknown,
+    prompt,
+  };
 }
 
 // Turn a bare captured family ("Inter") into a CSS stack with a sane generic

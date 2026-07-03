@@ -408,6 +408,251 @@ export function extractJson(text: string): unknown {
 }
 
 // =====================================================================
+// Event scenario: Luma event scraping + logistics formatting (PURE)
+//
+// A Luma event page is server-rendered with a schema.org/Event JSON-LD block
+// (startDate/endDate ISO w/ tz offset, location Place, organizer[], image) plus
+// OG tags. `extractEventDetails` parses that deterministically (NO LLM) so the
+// poster's date/time/location are accurate — the image model never authors them.
+// `formatEventLines` turns EventDetails into the exact human strings the poster
+// renders. Both are pure + unit-tested. `EventDetails` mirrors src/lib/types.ts.
+// =====================================================================
+
+export interface EventDetails {
+  event_name?: string;
+  starts_at?: string; // ISO-8601 with tz offset
+  ends_at?: string;
+  tz_offset?: string; // e.g. "-07:00"
+  tz_label?: string;
+  location_name?: string;
+  location_address?: string;
+  location_city?: string;
+  location_region?: string;
+  location_country?: string;
+  attendance_mode?: 'offline' | 'online';
+  online_platform?: string;
+  address_hidden?: boolean;
+  host_name?: string;
+  host_url?: string;
+  host_logo_url?: string;
+  hosts?: string[];
+  price_label?: string;
+  register_url?: string;
+  cover_image_url?: string;
+  cover_image_key?: string;
+}
+
+// Event promo-poster zones (poster_spec when scenario === 'event'). Mirrors
+// src/lib/types.ts EventPosterSpec.
+export interface EventPosterSpec {
+  title: string;
+  date_line: string;
+  time_line: string;
+  location_line: string;
+  host_line: string;
+  rsvp_label: string;
+  price_line?: string;
+  urls: string;
+}
+
+// Pull the tz offset ("-07:00" / "+05:30" / "Z"→"+00:00") out of an ISO datetime.
+function tzOffsetOf(iso: string): string | undefined {
+  const m = /([+-]\d{2}:?\d{2})$|Z$/.exec(iso.trim());
+  if (!m) return undefined;
+  if (m[0] === 'Z') return '+00:00';
+  const raw = m[1];
+  return raw.includes(':') ? raw : `${raw.slice(0, 3)}:${raw.slice(3)}`;
+}
+
+// Parse a schema.org/Event JSON-LD block + OG tags out of a Luma event page's
+// HTML into EventDetails. Deterministic and defensive: any missing/blocked field
+// simply stays undefined (e.g. "Register to See Address" events expose only a
+// city). Returns a best-effort object; callers merge in an og:title fallback.
+export function extractEventDetails(html: string): EventDetails {
+  const out: EventDetails = {};
+  if (!html) return out;
+
+  // 1. Find and parse each <script type="application/ld+json"> block; keep the
+  //    first that is (or contains) an Event.
+  const ld = findEventJsonLd(html);
+  if (ld) {
+    const name = strOf(ld.name);
+    if (name) out.event_name = name;
+    const start = strOf(ld.startDate);
+    if (start) { out.starts_at = start; out.tz_offset = tzOffsetOf(start); }
+    const end = strOf(ld.endDate);
+    if (end) out.ends_at = end;
+
+    const mode = strOf(ld.eventAttendanceMode).toLowerCase();
+    if (mode.includes('online')) out.attendance_mode = 'online';
+    else if (mode.includes('offline')) out.attendance_mode = 'offline';
+
+    // location: a Place ({name,address}) or a VirtualLocation ({url}).
+    const loc = ld.location;
+    const locObj = Array.isArray(loc) ? loc[0] : loc;
+    if (locObj && typeof locObj === 'object') {
+      const l = locObj as Record<string, unknown>;
+      const lname = strOf(l.name);
+      if (lname) out.location_name = lname;
+      if (strOf(l.url) && !out.location_name) out.online_platform = strOf(l.url);
+      const addr = l.address;
+      if (addr && typeof addr === 'object') {
+        const a = addr as Record<string, unknown>;
+        const street = strOf(a.streetAddress);
+        if (street) out.location_address = street;
+        const city = strOf(a.addressLocality);
+        if (city) out.location_city = city;
+        const region = strOf(a.addressRegion);
+        if (region) out.location_region = region;
+        const country = strOf(a.addressCountry);
+        if (country) out.location_country = country;
+      } else if (typeof addr === 'string' && addr.trim()) {
+        // Luma sometimes emits a bare address string; "Register to See Address"
+        // means the real street is withheld.
+        if (/register to see/i.test(addr)) out.address_hidden = true;
+        else out.location_address = addr.trim();
+      }
+    }
+
+    // organizer: an Organization and/or Person entries.
+    const orgs = Array.isArray(ld.organizer) ? ld.organizer : ld.organizer ? [ld.organizer] : [];
+    const names: string[] = [];
+    for (const o of orgs) {
+      if (o && typeof o === 'object') {
+        const oo = o as Record<string, unknown>;
+        const n = strOf(oo.name);
+        if (n) names.push(n);
+        if (!out.host_url && strOf(oo.url)) out.host_url = strOf(oo.url);
+        if (!out.host_logo_url && strOf(oo.image)) out.host_logo_url = strOf(oo.image);
+      }
+    }
+    if (names.length) { out.host_name = names[0]; out.hosts = names; }
+
+    const img = strOf(Array.isArray(ld.image) ? ld.image[0] : ld.image);
+    if (img) out.cover_image_url = img;
+
+    // offers.price → a "Free"/"$N" label.
+    const offer = Array.isArray(ld.offers) ? ld.offers[0] : ld.offers;
+    if (offer && typeof offer === 'object') {
+      const price = strOf((offer as Record<string, unknown>).price);
+      if (price === '0' || price === '0.00') out.price_label = 'Free';
+      else if (price) out.price_label = price;
+    }
+  }
+
+  // 2. OG-tag fallbacks for anything JSON-LD didn't provide.
+  if (!out.event_name) {
+    const ogT = metaContent(html, 'og:title');
+    if (ogT) out.event_name = ogT.replace(/\s*·\s*Luma\s*$/i, '').trim();
+  }
+  if (!out.cover_image_url) {
+    const ogImg = metaContent(html, 'og:image');
+    if (ogImg) out.cover_image_url = ogImg;
+  }
+  return out;
+}
+
+// Find the first Event (or @graph member that is an Event) among all JSON-LD
+// blocks. Returns the raw object or null.
+function findEventJsonLd(html: string): Record<string, unknown> | null {
+  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(m[1].trim()); } catch { continue; }
+    const found = pickEvent(parsed);
+    if (found) return found;
+  }
+  return null;
+}
+
+function pickEvent(node: unknown): Record<string, unknown> | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const n of node) { const f = pickEvent(n); if (f) return f; }
+    return null;
+  }
+  const o = node as Record<string, unknown>;
+  const t = o['@type'];
+  const typeStr = Array.isArray(t) ? t.join(' ') : String(t ?? '');
+  if (/event/i.test(typeStr)) return o;
+  if (Array.isArray(o['@graph'])) return pickEvent(o['@graph']);
+  return null;
+}
+
+function strOf(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+// Read a <meta property|name="key" content="..."> value (either attribute order).
+function metaContent(html: string, key: string): string | null {
+  const k = key.replace(/[:]/g, '\\:');
+  return (
+    new RegExp(`<meta[^>]+(?:property|name)=["']${k}["'][^>]+content=["']([^"']+)["']`, 'i').exec(html)?.[1] ||
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${k}["']`, 'i').exec(html)?.[1] ||
+    null
+  );
+}
+
+// Format EventDetails into the human strings the poster renders. PURE + tz-aware:
+// renders the event's LOCAL time from its own offset (never the viewer's zone).
+// Any missing field yields an empty string so callers can omit that line.
+export function formatEventLines(ev: EventDetails): {
+  date_line: string;
+  time_line: string;
+  location_line: string;
+  host_line: string;
+} {
+  const start = ev.starts_at ? parseIsoParts(ev.starts_at) : null;
+  const end = ev.ends_at ? parseIsoParts(ev.ends_at) : null;
+
+  const date_line = start
+    ? `${WEEKDAYS[start.weekday]}, ${MONTHS[start.month - 1]} ${start.day}`
+    : '';
+
+  const tz = ev.tz_label ? ` ${ev.tz_label}` : ev.tz_offset && ev.tz_offset !== '+00:00' ? ` GMT${ev.tz_offset}` : '';
+  const time_line = start
+    ? `${clock(start.hour, start.minute)}${end ? `–${clock(end.hour, end.minute)}` : ''}${tz}`
+    : '';
+
+  let location_line = '';
+  if (ev.attendance_mode === 'online' && !ev.location_name) {
+    location_line = ev.online_platform ? 'Online' : 'Online';
+  } else {
+    const parts = [ev.location_name, ev.location_city].filter((s): s is string => !!s && s.trim().length > 0);
+    location_line = parts.join(' · ');
+    if (!location_line && ev.address_hidden && ev.location_city) location_line = ev.location_city;
+  }
+
+  const host_line = ev.host_name ? `Hosted by ${ev.host_name}` : '';
+  return { date_line, time_line, location_line, host_line };
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Parse an ISO datetime into its LOCAL calendar parts (as written, honoring the
+// embedded offset — not converted to UTC or the runtime's zone). We read the
+// wall-clock fields directly from the string and compute the weekday from the
+// offset-adjusted UTC instant so it matches the event's own local day.
+function parseIsoParts(iso: string): { year: number; month: number; day: number; hour: number; minute: number; weekday: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso.trim());
+  if (!m) return null;
+  const year = +m[1], month = +m[2], day = +m[3], hour = +m[4], minute = +m[5];
+  // Weekday from the event's local wall-clock date (offset already baked into the
+  // written Y-M-D), via a UTC construction to avoid the runtime tz shifting it.
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return { year, month, day, hour, minute, weekday };
+}
+
+// 24h → "6:30 PM" / "10 AM" (drops ":00").
+function clock(hour: number, minute: number): string {
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return minute === 0 ? `${h12} ${ampm}` : `${h12}:${String(minute).padStart(2, '0')} ${ampm}`;
+}
+
+// =====================================================================
 // Programmatic design tokens (capture-service → normalized DesignTokens)
 // Canonical copy of src/lib/{colorUtils,designTokens}.ts. The Deno bundle
 // can't import across the SPA boundary, so this is mirrored (same pattern as

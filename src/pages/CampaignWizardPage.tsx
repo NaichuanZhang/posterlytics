@@ -4,7 +4,8 @@ import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
 import { Layout } from '../components/Layout'
 import { GenerationProgress, type AgentStep, type AgentPrompt } from '../components/GenerationProgress'
-import type { PosterLayout } from '../lib/types'
+import type { CampaignScenario, PosterLayout } from '../lib/types'
+import { SCENARIO_ORDER, getScenario } from '../scenarios/registry'
 
 type Phase = 'form' | 'creating' | 'analyzing' | 'generating' | 'error'
 
@@ -44,11 +45,20 @@ export function CampaignWizardPage() {
 
   const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+  // Which scenario we're creating. 'product' is the original flow; 'event' scrapes
+  // a Luma event page. The scenario registry drives labels/placeholders/hints.
+  const [scenario, setScenario] = useState<CampaignScenario>('product')
+  const scenarioCfg = getScenario(scenario)
+  const isEvent = scenario === 'event'
+
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
   const [tagline, setTagline] = useState('')
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
+
+  // Helper: the label/placeholder/hint for a field key in the active scenario.
+  const fieldCfg = (key: string) => scenarioCfg.fields.find((f) => f.key === key)
   // 'auto' lets the analyzer pick; otherwise force the template. 'designer' adds
   // an agentic layout-design step (the `designer` function) before the image.
   const [styleChoice, setStyleChoice] =
@@ -59,18 +69,22 @@ export function CampaignWizardPage() {
     if (!user) return
     setError(null)
 
-    // 1. Create the campaign row.
+    // 1. Create the campaign row. For events the QR sends people to the Luma event
+    // page, so destination_url defaults to the event URL when left blank.
     setPhase('creating')
+    const url = productUrl.trim()
+    const dest = destinationUrl.trim() || (isEvent ? url : '')
     const { data: created, error: createErr } = await insforge.database
       .from('campaigns')
       .insert([
         {
           user_id: user.id,
-          product_url: productUrl.trim(),
+          scenario,
+          product_url: url,
           product_name: productName.trim(),
           tagline: tagline.trim() || null,
-          cta_text: ctaText.trim() || 'Learn more',
-          destination_url: destinationUrl.trim(),
+          cta_text: ctaText.trim() || (isEvent ? 'Scan to RSVP' : 'Learn more'),
+          destination_url: dest,
           status: 'draft',
         },
       ])
@@ -85,7 +99,9 @@ export function CampaignWizardPage() {
     const campaignId = (created as { id: string }).id
 
     // Seed the live step list (drop the Designer step unless that style is chosen).
-    const isDesigner = styleChoice === 'designer'
+    // Events use a bespoke event prompt in hero (not the product layout agent), so
+    // the Designer step never runs for them.
+    const isDesigner = !isEvent && styleChoice === 'designer'
     setScreenshotUrl(null)
     setLayout(null)
     setSteps(
@@ -104,7 +120,7 @@ export function CampaignWizardPage() {
     patchStep('analyze', { status: 'running' })
     try {
       const { data, error: aErr } = await insforge.functions.invoke('analyze', {
-        body: { campaignId, posterStyle: styleChoice === 'auto' ? undefined : styleChoice },
+        body: { campaignId, scenario, posterStyle: styleChoice === 'auto' ? undefined : styleChoice },
       })
       if (aErr) throw new Error(aErr.message ?? 'Analysis failed')
       const d = data as { screenshot_url?: string | null; prompt?: AgentPrompt } | null
@@ -169,8 +185,12 @@ export function CampaignWizardPage() {
     <Layout>
       <div className="hero-card">
         <span className="eyebrow">Paste a link, get an on-brand poster</span>
-        <h1>Tell us about your product</h1>
-        <p>We scrape your site for brand style, imagery, and copy — then generate an on-brand poster with a tracked QR for every placement.</p>
+        <h1>{isEvent ? 'Tell us about your event' : 'Tell us about your product'}</h1>
+        <p>
+          {isEvent
+            ? 'Paste your Luma event link — we read the date, time, location, and host, then generate an on-brand promo poster with a tracked QR for every placement.'
+            : 'We scrape your site for brand style, imagery, and copy — then generate an on-brand poster with a tracked QR for every placement.'}
+        </p>
       </div>
 
       {working && steps.length > 0 ? (
@@ -183,27 +203,48 @@ export function CampaignWizardPage() {
         </div>
       ) : (
         <form className="card" onSubmit={handleSubmit}>
+          <div className="field">
+            <label>What are you promoting?</label>
+            <div className="row wrap" style={{ gap: 8 }}>
+              {SCENARIO_ORDER.map((id) => {
+                const cfg = getScenario(id)
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`btn sm ${scenario === id ? '' : 'ghost'}`}
+                    onClick={() => setScenario(id)}
+                    title={cfg.hint}
+                  >
+                    {cfg.label}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="hint">{scenarioCfg.hint}</div>
+          </div>
           <div className="field field-num">
-            <label data-num="1">Product website URL <span className="req">required</span></label>
+            <label data-num="1">{fieldCfg('product_url')?.label ?? 'Product website URL'} <span className="req">required</span></label>
             <input
               className="input"
               type="url"
               required
-              placeholder="https://yourproduct.com"
+              placeholder={fieldCfg('product_url')?.placeholder ?? 'https://yourproduct.com'}
               value={productUrl}
               onChange={(e) => setProductUrl(e.target.value)}
             />
-            <div className="hint">We scrape this for your brand style, logo, imagery, and product story.</div>
+            <div className="hint">{fieldCfg('product_url')?.hint ?? 'We scrape this for your brand style, logo, imagery, and product story.'}</div>
           </div>
           <div className="field field-num">
-            <label data-num="2">Product name <span className="req">required</span></label>
+            <label data-num="2">{fieldCfg('product_name')?.label ?? 'Product name'} <span className="req">required</span></label>
             <input
               className="input"
               required
-              placeholder="Acme Analytics"
+              placeholder={fieldCfg('product_name')?.placeholder ?? 'Acme Analytics'}
               value={productName}
               onChange={(e) => setProductName(e.target.value)}
             />
+            {isEvent && <div className="hint">{fieldCfg('product_name')?.hint ?? ''}</div>}
           </div>
           <div className="field field-num">
             <label data-num="3">Tagline <span className="hint" style={{ display: 'inline', marginLeft: 4 }}>(optional)</span></label>
@@ -220,25 +261,34 @@ export function CampaignWizardPage() {
               <input
                 className="input"
                 required
-                placeholder="Start free trial"
+                placeholder={isEvent ? 'Scan to RSVP' : 'Start free trial'}
                 value={ctaText}
                 onChange={(e) => setCtaText(e.target.value)}
               />
             </div>
             <div className="field field-num" style={{ flex: '2 1 280px' }}>
-              <label data-num="5">Destination URL <span className="req">required</span></label>
+              <label data-num="5">
+                Destination URL {isEvent ? <span className="hint" style={{ display: 'inline', marginLeft: 4 }}>(optional)</span> : <span className="req">required</span>}
+              </label>
               <input
                 className="input"
                 type="url"
-                required
-                placeholder="https://yourproduct.com/signup"
+                required={!isEvent}
+                placeholder={isEvent ? 'Defaults to your Luma event link' : 'https://yourproduct.com/signup'}
                 value={destinationUrl}
                 onChange={(e) => setDestinationUrl(e.target.value)}
               />
-              <div className="hint">Where the QR ultimately sends people (after we log the conversion).</div>
+              <div className="hint">
+                {isEvent
+                  ? 'Where the QR sends people to RSVP (after we log the scan). Defaults to your Luma event link.'
+                  : 'Where the QR ultimately sends people (after we log the conversion).'}
+              </div>
             </div>
           </div>
 
+          {/* Product poster style — events use a bespoke event prompt, so this is
+              product-only. */}
+          {!isEvent && (
           <div className="field field-num">
             <label data-num="6">Poster style</label>
             <div className="row wrap" style={{ gap: 8 }}>
@@ -269,12 +319,13 @@ export function CampaignWizardPage() {
                     : 'Warm hand-drawn scrapbook poster with a mascot and stat ring.'}
             </div>
           </div>
+          )}
 
           {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
           <div className="row" style={{ marginTop: 6 }}>
             <button className="btn" type="submit">
-              Generate posters <span className="btn-icon">→</span>
+              {isEvent ? 'Generate event poster' : 'Generate posters'} <span className="btn-icon">→</span>
             </button>
             <button type="button" className="btn ghost" onClick={() => navigate('/')}>
               Cancel
