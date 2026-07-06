@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
@@ -55,6 +55,70 @@ export function CampaignWizardPage() {
   const [tagline, setTagline] = useState('')
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
+
+  // Event pre-fill: when the Luma URL blurs (event mode), hit the anon
+  // `event-preview` function to parse the page and pre-fill "Event name" +
+  // surface the detected logistics for confirmation — closing the gap where the
+  // event fields are marked source:'scrape' but nothing populated them until the
+  // later analyze run. Best-effort: any failure degrades silently to manual entry.
+  const [eventPreview, setEventPreview] = useState<{
+    date_line: string; time_line: string; location_line: string; host_line: string
+  } | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  // Monotonic request id — a slower response for an older request must not clobber
+  // a newer one (blur A, blur B; A resolves last).
+  const previewReqRef = useRef(0)
+  // Always mirrors the URL field's CURRENT value, so a resolved response can check
+  // the field hasn't changed under it (user edited without re-blurring).
+  const latestUrlRef = useRef('')
+  // The last URL we got a DEFINITIVE answer for — skip re-fetching it. Only set on
+  // a real response (found or not), never on a transient failure, so failures stay
+  // retryable on a later blur.
+  const prefilledUrlRef = useRef('')
+
+  async function previewEvent() {
+    if (!isEvent) return
+    const url = productUrl.trim()
+    if (!url || url === prefilledUrlRef.current) return
+    const reqId = ++previewReqRef.current
+    setPreviewing(true)
+    try {
+      const { data, error: pErr } = await insforge.functions.invoke('event-preview', { body: { url } })
+      if (pErr) throw new Error(pErr.message ?? 'preview failed')
+      // Drop the result if a newer request started OR the URL field has since
+      // changed (stale response must not clobber a now-different form).
+      if (reqId !== previewReqRef.current || url !== latestUrlRef.current.trim()) return
+      const d = data as {
+        found?: boolean; event_name?: string
+        date_line?: string; time_line?: string; location_line?: string; host_line?: string
+      } | null
+      // A definitive answer arrived for this URL — lock it against re-fetch.
+      prefilledUrlRef.current = url
+      if (d?.found) {
+        // Fill the name only if it's still empty AT APPLY TIME (functional update
+        // reads the current value — never clobber a name typed while in flight).
+        if (d.event_name) setProductName((prev) => (prev.trim() ? prev : d.event_name!))
+        setEventPreview({
+          date_line: d.date_line ?? '',
+          time_line: d.time_line ?? '',
+          location_line: d.location_line ?? '',
+          host_line: d.host_line ?? '',
+        })
+      } else {
+        setEventPreview(null)
+      }
+    } catch {
+      // Silent fallback to manual entry — the URL may be blocked, private, or
+      // unparseable. Expected best-effort failure: don't log, and leave the URL
+      // unlocked so a later blur can retry it. Only clear the preview if this is
+      // still the latest request AND the field hasn't changed under us (a stale
+      // failure must not wipe a newer URL's state).
+      if (reqId === previewReqRef.current && url === latestUrlRef.current.trim()) setEventPreview(null)
+    } finally {
+      // Only the latest request owns the spinner.
+      if (reqId === previewReqRef.current) setPreviewing(false)
+    }
+  }
 
   // Helper: the label/placeholder/hint for a field key in the active scenario.
   const fieldCfg = (key: string) => scenarioCfg.fields.find((f) => f.key === key)
@@ -217,9 +281,14 @@ export function CampaignWizardPage() {
               required
               placeholder={fieldCfg('product_url')?.placeholder ?? 'https://yourproduct.com'}
               value={productUrl}
-              onChange={(e) => setProductUrl(e.target.value)}
+              onChange={(e) => { latestUrlRef.current = e.target.value; setProductUrl(e.target.value) }}
+              onBlur={isEvent ? previewEvent : undefined}
             />
-            <div className="hint">{fieldCfg('product_url')?.hint ?? 'We scrape this for your brand style, logo, imagery, and product story.'}</div>
+            <div className="hint">
+              {previewing
+                ? 'Reading the Luma page…'
+                : fieldCfg('product_url')?.hint ?? 'We scrape this for your brand style, logo, imagery, and product story.'}
+            </div>
           </div>
           <div className="field field-num">
             <label data-num="2">{fieldCfg('product_name')?.label ?? 'Product name'} <span className="req">required</span></label>
@@ -232,6 +301,39 @@ export function CampaignWizardPage() {
             />
             {isEvent && <div className="hint">{fieldCfg('product_name')?.hint ?? ''}</div>}
           </div>
+
+          {/* Detected event logistics — shown after the Luma page is parsed so the
+              user can confirm what the poster will render (all authoritative from
+              the scrape; edit the manual fallbacks if anything's off). */}
+          {isEvent && eventPreview && (eventPreview.date_line || eventPreview.location_line || eventPreview.host_line) && (
+            <div className="card" style={{ padding: 14, marginBottom: 16, background: 'var(--surface, #faf8f5)' }}>
+              <p className="muted" style={{ fontSize: '0.8rem', fontWeight: 600, margin: '0 0 8px' }}>
+                Detected from the Luma page
+              </p>
+              <dl style={{ margin: 0, display: 'grid', gap: 6, fontSize: '0.9rem' }}>
+                {eventPreview.date_line && (
+                  <div className="row between" style={{ gap: 12 }}>
+                    <dt className="muted" style={{ flex: '0 0 72px' }}>Date</dt>
+                    <dd style={{ margin: 0, textAlign: 'right', flex: 1 }}>
+                      {[eventPreview.date_line, eventPreview.time_line].filter(Boolean).join(' · ')}
+                    </dd>
+                  </div>
+                )}
+                {eventPreview.location_line && (
+                  <div className="row between" style={{ gap: 12 }}>
+                    <dt className="muted" style={{ flex: '0 0 72px' }}>Location</dt>
+                    <dd style={{ margin: 0, textAlign: 'right', flex: 1 }}>{eventPreview.location_line}</dd>
+                  </div>
+                )}
+                {eventPreview.host_line && (
+                  <div className="row between" style={{ gap: 12 }}>
+                    <dt className="muted" style={{ flex: '0 0 72px' }}>Host</dt>
+                    <dd style={{ margin: 0, textAlign: 'right', flex: 1 }}>{eventPreview.host_line}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          )}
           <div className="field field-num">
             <label data-num="3">Tagline <span className="hint" style={{ display: 'inline', marginLeft: 4 }}>(optional)</span></label>
             <input
