@@ -43,10 +43,6 @@ export default async function (req: Request): Promise<Response> {
   }
   if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
 
-  // Which scenario this campaign promotes. 'event' branches the extraction +
-  // prompt + spec; anything else is the original product flow.
-  const scenario = body.scenario === 'event' ? 'event' : 'product';
-
   // Optional forced template. 'auto' (or absent) lets the model pick; otherwise
   // we honor the explicit choice and override the model's pick in normalize().
   // 'designer' is the agentic-layout mode — analyze still produces brand context
@@ -61,10 +57,24 @@ export default async function (req: Request): Promise<Response> {
   // Load the campaign (owner RLS guarantees it's the caller's).
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_url, product_name, tagline, cta_text')
+    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
+
+  // Which scenario this campaign promotes. 'event' branches the extraction +
+  // prompt + spec; anything else is the original product flow. An explicit
+  // body.scenario wins (the wizard sends it on the first analyze); otherwise we
+  // read the PERSISTED scenario so that a re-analyze/regenerate of an existing
+  // event campaign — which sends only { campaignId } — never silently reverts to
+  // the product path. Brand-new/product campaigns fall back to 'product'.
+  const persistedScenario = (campaign as { scenario?: string | null }).scenario;
+  const scenario =
+    body.scenario === 'event' || body.scenario === 'product'
+      ? body.scenario
+      : persistedScenario === 'event'
+        ? 'event'
+        : 'product';
 
   await client.database.from('campaigns').update({ status: 'analyzing' }).eq('id', campaign.id);
 
