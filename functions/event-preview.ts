@@ -3,6 +3,8 @@ import {
   jsonResponse,
   extractEventDetails,
   formatEventLines,
+  isLumaHost,
+  fetchLumaHtml,
 } from './_shared.ts';
 
 // `event-preview` — a tiny ANON helper for the campaign wizard. Given a Luma
@@ -44,52 +46,10 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: 'unsupported host' }, 422);
   }
 
-  // Fetch the event page (5s budget). Any failure degrades to an empty preview
-  // so the client silently falls back to manual entry — never a hard error.
-  //
-  // SSRF hardening: we handle redirects MANUALLY rather than 'follow', because a
-  // Luma open-redirect (or any 3xx) could otherwise bounce the server-side fetch
-  // to an internal/arbitrary host after the initial allowlist check passed. We
-  // re-validate every hop's Location against the same Luma allowlist and cap the
-  // number of hops.
-  let html = '';
-  const ctl = new AbortController();
-  const to = setTimeout(() => ctl.abort(), 5000);
-  try {
-    let current = target;
-    let hops = 0;
-    while (hops < 4) {
-      const r = await fetch(current.href, {
-        signal: ctl.signal,
-        redirect: 'manual',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-        },
-      });
-      // A redirect: validate the next hop against the allowlist before following.
-      if (r.status >= 300 && r.status < 400) {
-        const loc = r.headers.get('location');
-        if (!loc) break;
-        let next: URL;
-        try {
-          next = new URL(loc, current);
-        } catch {
-          break;
-        }
-        if (next.protocol !== 'https:' || !isLumaHost(next.hostname)) break; // refuse off-allowlist redirect
-        current = next;
-        hops++;
-        continue;
-      }
-      if (r.ok) html = await readCapped(r, MAX_HTML_BYTES);
-      break;
-    }
-  } catch {
-    html = '';
-  } finally {
-    clearTimeout(to);
-  }
+  // Fetch the event page (SSRF-safe, bounded — see fetchLumaHtml). Any failure
+  // yields '' → an empty preview, and the client silently falls back to manual
+  // entry — never a hard error.
+  const html = await fetchLumaHtml(target);
 
   const ev = extractEventDetails(html);
   const lines = formatEventLines(ev);
@@ -104,53 +64,4 @@ export default async function (req: Request): Promise<Response> {
     host_line: lines.host_line,
     price_label: ev.price_label ?? '',
   });
-}
-
-// Cap the HTML we read so an unexpectedly huge (or hostile) allowed page can't
-// exhaust edge memory/time. The event JSON-LD + OG tags live in the <head>, well
-// within this bound. 2 MiB is generous for a Luma page.
-const MAX_HTML_BYTES = 2_000_000;
-
-// Read a response body up to `maxBytes`, then stop. Skips non-HTML bodies (we
-// only parse markup). Returns '' on a non-HTML content-type or read failure.
-async function readCapped(r: Response, maxBytes: number): Promise<string> {
-  const ct = (r.headers.get('content-type') || '').toLowerCase();
-  if (ct && !ct.includes('html') && !ct.includes('text')) return '';
-  const reader = r.body?.getReader();
-  if (!reader) {
-    // No stream — fall back to a bounded text read.
-    const t = await r.text();
-    return t.length > maxBytes ? t.slice(0, maxBytes) : t;
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (total < maxBytes) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) { chunks.push(value); total += value.length; }
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  const merged = new Uint8Array(Math.min(total, maxBytes));
-  let off = 0;
-  for (const c of chunks) {
-    const take = Math.min(c.length, merged.length - off);
-    if (take <= 0) break;
-    merged.set(c.subarray(0, take), off);
-    off += take;
-  }
-  return new TextDecoder('utf-8', { fatal: false }).decode(merged);
-}
-
-// Allowlist: luma.com / lu.ma and their subdomains only. Case-insensitive.
-function isLumaHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return (
-    h === 'luma.com' ||
-    h === 'lu.ma' ||
-    h.endsWith('.luma.com') ||
-    h.endsWith('.lu.ma')
-  );
 }

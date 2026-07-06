@@ -25,6 +25,8 @@ export function PosterEditorPage() {
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // Transient result of the last "↻ Sync from Luma" (event campaigns only).
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   // A campaign should always have at least one placement so the poster's QR
   // encodes a real, trackable code (not a dead preview). Create one if missing.
@@ -111,6 +113,41 @@ export function PosterEditorPage() {
       await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
       await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
       await reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Sync an EVENT campaign from its live Luma page: re-scrape → diff → persist
+  // only-changed logistics (free, no tokens). If the title changed, the painted
+  // hero is stale, so re-paint it (image tokens) — the ONLY case that spends any.
+  // Logistics render as live text in AiPoster, so a reload() reflects them with
+  // zero regeneration.
+  async function syncEvent() {
+    if (!campaign) return
+    setBusy('sync')
+    setSyncMsg(null)
+    try {
+      const { data, error } = await insforge.functions.invoke('sync-event', { body: { campaignId: campaign.id } })
+      if (error) throw new Error(error.message ?? 'Sync failed')
+      const d = data as { changed?: string[]; titleChanged?: boolean; note?: string } | null
+      const changed = d?.changed ?? []
+      if (d?.note === 'no-scrape') {
+        setSyncMsg("Couldn't read the Luma page just now — try again in a moment.")
+      } else if (changed.length === 0) {
+        setSyncMsg('No changes — your poster is up to date.')
+      } else if (d?.titleChanged) {
+        // The title is baked into the art — re-paint it. Other changes already
+        // persisted; hero reads the fresh title from the DB.
+        setSyncMsg(`Updated: ${changed.join(', ')}. Title changed — repainting poster…`)
+        await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+        setSyncMsg(`Updated: ${changed.join(', ')}. Poster repainted.`)
+      } else {
+        setSyncMsg(`Updated: ${changed.join(', ')}.`)
+      }
+      await reload()
+    } catch (e) {
+      setSyncMsg(`Sync failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(null)
     }
@@ -218,7 +255,15 @@ export function PosterEditorPage() {
                   {busy === 'layout' ? 'Designing…' : '↻ Regenerate layout'}
                 </button>
               )}
+              {campaign.scenario === 'event' && (
+                <button className="btn secondary sm" onClick={syncEvent} disabled={!!busy} title="Re-read the live Luma page and refresh date/time/location/host">
+                  {busy === 'sync' ? 'Syncing…' : '↻ Sync from Luma'}
+                </button>
+              )}
             </div>
+            {campaign.scenario === 'event' && syncMsg && (
+              <p className="hint" style={{ marginTop: 6 }}>{syncMsg}</p>
+            )}
             {isDesigner && campaign.design_status === 'failed' && (
               <p className="hint" style={{ marginTop: 6 }}>Layout design failed — try Regenerate layout.</p>
             )}

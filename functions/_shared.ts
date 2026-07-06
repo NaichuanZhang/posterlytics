@@ -455,6 +455,108 @@ export interface EventPosterSpec {
   urls: string;
 }
 
+// Host allowlist for any server-side Luma fetch (SSRF guard): luma.com / lu.ma
+// and their subdomains only. Case-insensitive. Used by both `event-preview`
+// (wizard pre-fill) and `sync-event` (refresh) before fetching a caller/stored URL.
+export function isLumaHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === 'luma.com' ||
+    h === 'lu.ma' ||
+    h.endsWith('.luma.com') ||
+    h.endsWith('.lu.ma')
+  );
+}
+
+// Fetch a Luma event page's HTML safely. SSRF-hardened + bounded:
+//   • the initial `target` MUST already be a validated Luma https URL (callers
+//     parse + isLumaHost-check it so they can return their own status code);
+//   • redirects are handled MANUALLY and each hop's Location is re-validated
+//     against the Luma allowlist — a `follow` could otherwise bounce to an
+//     internal/arbitrary host after the first check passed;
+//   • the body is STREAM-read with a hard byte cap so an unexpectedly huge (or
+//     hostile) allowed page can't exhaust edge memory;
+//   • non-HTML content-types are skipped.
+// Returns '' on ANY failure/timeout/off-allowlist redirect — callers treat an
+// empty parse as "no usable data" and degrade gracefully. Never throws.
+export async function fetchLumaHtml(target: URL, maxBytes = 2_000_000, timeoutMs = 5000): Promise<string> {
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    let current = target;
+    let hops = 0;
+    while (hops < 4) {
+      const r = await fetch(current.href, {
+        signal: ctl.signal,
+        redirect: 'manual',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        },
+      });
+      // Redirect: validate the next hop against the allowlist before following.
+      if (r.status >= 300 && r.status < 400) {
+        const loc = r.headers.get('location');
+        if (!loc) { await r.body?.cancel().catch(() => {}); return ''; }
+        let next: URL;
+        try {
+          next = new URL(loc, current);
+        } catch {
+          await r.body?.cancel().catch(() => {});
+          return '';
+        }
+        await r.body?.cancel().catch(() => {}); // drain the redirect response
+        if (next.protocol !== 'https:' || !isLumaHost(next.hostname)) return ''; // off-allowlist
+        current = next;
+        hops++;
+        continue;
+      }
+      if (!r.ok) { await r.body?.cancel().catch(() => {}); return ''; }
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (ct && !ct.includes('html') && !ct.includes('text')) {
+        await r.body?.cancel().catch(() => {});
+        return '';
+      }
+      return await readCapped(r, maxBytes);
+    }
+    return '';
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+// Read a response body up to `maxBytes` via the stream, then stop and cancel —
+// so we never buffer an unbounded body into memory. Returns the decoded prefix.
+async function readCapped(r: Response, maxBytes: number): Promise<string> {
+  const reader = r.body?.getReader();
+  if (!reader) {
+    const t = await r.text();
+    return t.length > maxBytes ? t.slice(0, maxBytes) : t;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) { chunks.push(value); total += value.length; }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const merged = new Uint8Array(Math.min(total, maxBytes));
+  let off = 0;
+  for (const c of chunks) {
+    const take = Math.min(c.length, merged.length - off);
+    if (take <= 0) break;
+    merged.set(c.subarray(0, take), off);
+    off += take;
+  }
+  return new TextDecoder('utf-8', { fatal: false }).decode(merged);
+}
+
 // Pull the tz offset ("-07:00" / "+05:30" / "Z"→"+00:00") out of an ISO datetime.
 function tzOffsetOf(iso: string): string | undefined {
   const m = /([+-]\d{2}:?\d{2})$|Z$/.exec(iso.trim());
