@@ -89,6 +89,12 @@ export default async function (req: Request): Promise<Response> {
   // Preserve fields the fresh scrape didn't provide (e.g. a cover image re-hosted
   // earlier, or a host logo) by merging fresh over stored — fresh wins per-field.
   const merged: EventDetails = { ...stored, ...pruneUndefined(fresh) };
+  // EXCEPTION: price is current-state, not an incrementally-filled fact. On a
+  // successful scrape an omitted price means it was removed/hidden, so the fresh
+  // value is authoritative even when absent — clear a now-stale stored price
+  // rather than showing it forever. (Other fields keep the conservative
+  // preserve-on-omit policy above so a partial scrape never wipes good data.)
+  if (fresh.price_label === undefined) delete merged.price_label;
 
   const freshLines = formatEventLines(merged);
   const storedSpec = (c.poster_spec ?? {}) as Record<string, unknown>;
@@ -122,7 +128,9 @@ export default async function (req: Request): Promise<Response> {
 
   // Also detect a change in the stored event_details as a whole (so a field that
   // doesn't surface in a line — e.g. tz_offset, register_url — still persists).
-  const detailsChanged = JSON.stringify(stored) !== JSON.stringify(merged);
+  // Compare with STABLE key order so a mere reordering from the spread-merge
+  // doesn't trigger a redundant write.
+  const detailsChanged = stableStringify(stored) !== stableStringify(merged);
 
   if (changed.length === 0 && !detailsChanged) {
     return jsonResponse({ changed: [], titleChanged: false });
@@ -156,4 +164,11 @@ function pruneUndefined(o: EventDetails): EventDetails {
     if (v !== undefined) out[k] = v;
   }
   return out as EventDetails;
+}
+
+// JSON with keys sorted, so two objects with the same content but different key
+// insertion order compare equal (event_details is flat string/bool fields).
+function stableStringify(o: Record<string, unknown>): string {
+  const keys = Object.keys(o).sort();
+  return JSON.stringify(o, keys);
 }

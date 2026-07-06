@@ -140,8 +140,13 @@ export function PosterEditorPage() {
         // The title is baked into the art — re-paint it. Other changes already
         // persisted; hero reads the fresh title from the DB.
         setSyncMsg(`Updated: ${changed.join(', ')}. Title changed — repainting poster…`)
-        await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
-        setSyncMsg(`Updated: ${changed.join(', ')}. Poster repainted.`)
+        const { error: hErr } = await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+        // Don't claim a repaint that didn't happen — the logistics still updated.
+        setSyncMsg(
+          hErr
+            ? `Updated: ${changed.join(', ')}. Poster repaint failed — try ↻ Regenerate.`
+            : `Updated: ${changed.join(', ')}. Poster repainted.`,
+        )
       } else {
         setSyncMsg(`Updated: ${changed.join(', ')}.`)
       }
