@@ -11,7 +11,7 @@ import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
 import { LayoutPreview } from '../components/LayoutPreview'
 import { PosterExportButton } from '../components/PosterExportButton'
-import { buildViewUrl } from '../lib/landingUrl'
+import { buildViewUrl } from '../lib/viewUrl'
 import { useElementWidth } from '../hooks/useElementWidth'
 
 export function PosterEditorPage() {
@@ -105,7 +105,7 @@ export function PosterEditorPage() {
   }
 
   // Reroll just the bespoke layout (designer style): re-design then re-paint,
-  // without re-running analyze. Independent of the poster spec/landing.
+  // without re-running analyze. Independent of the poster spec.
   async function regenerateLayout() {
     if (!campaign) return
     setBusy('layout')
@@ -386,7 +386,7 @@ export function PosterEditorPage() {
 }
 
 // One titled preview as its own card. Measures its own (content-box) width and
-// hands a fitted pixel width to its child so the poster/landing scales to the
+// hands a fitted pixel width to its child so the poster scales to the
 // card at any window size (never overflows, never collapses to a stacked column).
 function PreviewCell({ label, children }: { label: string; children: (width: number) => React.ReactNode }) {
   const [ref, width] = useElementWidth()

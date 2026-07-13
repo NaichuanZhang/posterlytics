@@ -360,7 +360,7 @@ export function truncateForTrace(value: unknown, cap = 12_000): unknown {
   return walk(value, 0);
 }
 
-export type TraceStep = 'analyze' | 'designer' | 'hero' | 'landing' | 'capture';
+export type TraceStep = 'analyze' | 'designer' | 'hero' | 'capture';
 export type TraceStatus = 'failed' | 'degraded';
 
 // Best-effort insert of one agent_traces row. Owner RLS (the auth-scoped client

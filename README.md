@@ -48,7 +48,7 @@ Scans, unique visitors, conversions, and conversion rate — per placement.
    Storage), and uses gpt-4o to produce:
    - `poster_style` + `poster_spec` — the auto-selected template (cozy scrapbook
      or SaaS glassmorphism) and its structured content
-   - `landing_content` — structured product copy (features, how-it-works,
+   - `poster_content` — structured product copy (features, how-it-works,
      why-use-it) used to enrich the poster text
    - `style_profile` — the brand's palette / fonts / tone
 4. **Two posters** — both rendered from that spec:

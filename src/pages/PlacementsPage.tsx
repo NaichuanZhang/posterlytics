@@ -7,7 +7,7 @@ import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { QrCode } from '../components/QrCode'
 import { PosterExportButton } from '../components/PosterExportButton'
-import { buildViewUrl } from '../lib/landingUrl'
+import { buildViewUrl } from '../lib/viewUrl'
 
 export function PlacementsPage() {
   const { id } = useParams<{ id: string }>()

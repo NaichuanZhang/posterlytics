@@ -20,7 +20,7 @@ import {
 //   1. scrapes the product site (HTML)
 //   2. extracts REAL brand assets — logo, og:image, product images, theme color
 //      — and re-hosts them in the public `assets` bucket (CORS-clean, durable)
-//   3. asks gpt-4o for poster_copy (scannable) + landing_content (full story) +
+//   3. asks gpt-4o for poster_copy (scannable) + poster_content (full story) +
 //      style_profile (palette/fonts/tone), as strict JSON
 //   4. writes it all back to the campaign row
 export default async function (req: Request): Promise<Response> {
@@ -140,7 +140,7 @@ export default async function (req: Request): Promise<Response> {
     : regexColors;
 
   // Re-host logo + up to 2 product images into the public assets bucket so the
-  // poster/landing never hot-link the origin (CORS-clean export, survives churn).
+  // poster never hot-links the origin (CORS-clean export, survives churn).
   const brand_assets: {
     logo_url?: string;
     logo_key?: string;
@@ -162,7 +162,7 @@ export default async function (req: Request): Promise<Response> {
   brand_assets.primary_image_url = brand_assets.images[0]?.url;
 
   // Upload the captured screenshot (a JPEG data URL) to the public assets bucket
-  // so the landing agent's vision step can reference it by URL.
+  // so it's URL-addressable (generation loading UI, future vision passes).
   let screenshot_url: string | null = null;
   let screenshot_key: string | null = null;
   if (capture?.screenshotDataUrl) {
@@ -180,7 +180,7 @@ export default async function (req: Request): Promise<Response> {
     }
   }
 
-  // 3. gpt-4o → landing_content + style_profile + brand_essence + poster_spec.
+  // 3. gpt-4o → poster_content + style_profile + brand_essence + poster_spec.
   // The poster is a fully AI-illustrated cozy-scrapbook image; poster_spec fills
   // the gamified template zones, brand_essence is a word-portrait that lets the
   // image model (which gets text only) infuse the real brand.
@@ -203,7 +203,7 @@ export default async function (req: Request): Promise<Response> {
         poster_style: 'designer', // events use a bespoke event layout, not saas/cozy
         style_profile: parsedEv.style_profile,
         poster_copy: parsedEv.poster_copy,
-        landing_content: parsedEv.landing_content,
+        poster_content: parsedEv.poster_content,
         brand_essence: parsedEv.brand_essence,
         poster_spec: parsedEv.poster_spec,
         brand_assets,
@@ -227,7 +227,7 @@ export default async function (req: Request): Promise<Response> {
       poster_style: 'designer',
       style_profile: parsedEv.style_profile,
       poster_copy: parsedEv.poster_copy,
-      landing_content: parsedEv.landing_content,
+      poster_content: parsedEv.poster_content,
       brand_essence: parsedEv.brand_essence,
       poster_spec: parsedEv.poster_spec,
       brand_assets,
@@ -239,7 +239,7 @@ export default async function (req: Request): Promise<Response> {
 
   const sys =
     'You are a senior product marketer, brand designer, and gamification copywriter. Given a product website and ' +
-    'its GTM inputs, produce a faithful style profile, landing copy, a brand word-portrait, choose the best poster ' +
+    'its GTM inputs, produce a faithful style profile, product copy, a brand word-portrait, choose the best poster ' +
     'template for this brand, and fill that template\'s structured spec. Output STRICT JSON only — no prose, no code fences.\n' +
     '"poster_style" MUST be one of: "saas_glassmorphism" (premium split light/dark product-launch poster with a 3D ' +
     'device mockup — pick for developer tools, B2B/SaaS, data, fintech, infra, "serious/premium tech" brands), or ' +
@@ -251,7 +251,7 @@ export default async function (req: Request): Promise<Response> {
     '"poster_style":"saas_glassmorphism" | "cozy_scrapbook",' +
     '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
     '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
-    '"landing_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
+    '"poster_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
     '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
     '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
     'UI vibe, signature colors (name the hex), and overall feel",' +
@@ -330,7 +330,7 @@ export default async function (req: Request): Promise<Response> {
   }
 
   // 4. Persist. design_tokens/screenshot are written even when the AI step used a
-  // fallback. landing_content feeds the poster copy (designer.ts); the QR itself
+  // fallback. poster_content feeds the poster copy (designer.ts); the QR itself
   // resolves to a pure tracked redirect, so there's no hosted landing page.
   const { error: upErr } = await client.database
     .from('campaigns')
@@ -340,7 +340,7 @@ export default async function (req: Request): Promise<Response> {
       poster_style: parsed.poster_style,
       style_profile: parsed.style_profile,
       poster_copy: parsed.poster_copy,
-      landing_content: parsed.landing_content,
+      poster_content: parsed.poster_content,
       brand_essence: parsed.brand_essence,
       poster_spec: parsed.poster_spec,
       brand_assets,
@@ -366,7 +366,7 @@ export default async function (req: Request): Promise<Response> {
     poster_style: parsed.poster_style,
     style_profile: parsed.style_profile,
     poster_copy: parsed.poster_copy,
-    landing_content: parsed.landing_content,
+    poster_content: parsed.poster_content,
     brand_essence: parsed.brand_essence,
     poster_spec: parsed.poster_spec,
     brand_assets,
@@ -397,7 +397,7 @@ interface ParsedContent {
   poster_style: string;
   style_profile: unknown;
   poster_copy: unknown;
-  landing_content: unknown;
+  poster_content: unknown;
   brand_essence: string;
   poster_spec: unknown;
 }
@@ -663,7 +663,7 @@ function normalize(
 ): ParsedContent {
   const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
   const sp = o.style_profile ?? {};
-  const lc = o.landing_content ?? {};
+  const lc = o.poster_content ?? {};
   const ps = (o.poster_spec ?? {}) as Record<string, unknown>;
   const product = c.product_name;
   const tagline = c.tagline || '';
@@ -698,8 +698,8 @@ function normalize(
     ? normalizeCozySpec(ps, product, tagline)
     : normalizeSaasSpec(ps, product, tagline);
 
-  // poster_copy kept for backward-compat (landing page, optimizer agent, editor
-  // fallbacks). Map from whichever spec shape we produced.
+  // poster_copy kept for backward-compat (optimizer agent, editor fallbacks).
+  // Map from whichever spec shape we produced.
   const posterCopy = poster_style !== 'cozy_scrapbook'
     ? {
         hook: (poster_spec as ReturnType<typeof normalizeSaasSpec>).slogan,
@@ -732,7 +732,7 @@ function normalize(
       layout_hint: (sp.layout_hint as string) ?? '',
     },
     poster_copy: posterCopy,
-    landing_content: {
+    poster_content: {
       headline: (lc.headline as string) || product,
       what_it_does: (lc.what_it_does as string) || tagline,
       how_it_works: asArray(lc.how_it_works).slice(0, 4),
@@ -755,7 +755,7 @@ function fallbackContent(
 }
 
 // =====================================================================
-// Event scenario: analyze a Luma event into an EventPosterSpec + landing copy.
+// Event scenario: analyze a Luma event into an EventPosterSpec + event copy.
 // Logistics (date/time/location/host) are DETERMINISTIC from event_details
 // (formatEventLines) — the model only writes the promo hook/blurb/RSVP label, so
 // the poster can never show a wrong date. Palette/fonts reuse the shared capture.
@@ -788,7 +788,7 @@ async function analyzeEvent(args: {
     '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
     '"brand_essence":"one vivid sentence describing the event\'s visual identity for an illustrator: mood, ' +
     'motif, signature colors (name the hex), and overall feel",' +
-    '"landing_content":{"headline":"compelling event headline","what_it_does":"1-2 sentence event pitch",' +
+    '"poster_content":{"headline":"compelling event headline","what_it_does":"1-2 sentence event pitch",' +
     '"how_it_works":["3-4 what-to-expect / agenda bullets"],"why_use_it":["3 reasons to attend"],' +
     '"features":["3-5 highlights: speakers, activities, perks"],"cta":"RSVP button text"},' +
     '"poster_spec":{"hook":"<=6 words, a punchy reason to attend","blurb":"one short line: who it\'s for + the draw",' +
@@ -825,7 +825,7 @@ async function analyzeEvent(args: {
   return normalizeEvent(ev, campaign, eventDetails, lines, siteColors, tokens, rsvpUrl, { system: sys, user });
 }
 
-// Assemble an EventPosterSpec + landing copy from the model output, forcing the
+// Assemble an EventPosterSpec + event copy from the model output, forcing the
 // deterministic logistics lines in and defaulting everything the model omitted.
 function normalizeEvent(
   raw: Record<string, unknown>,
@@ -838,7 +838,7 @@ function normalizeEvent(
   prompt: { system: string; user: string },
 ): ParsedContent & { prompt: { system: string; user: string } } {
   const sp = (raw.style_profile ?? {}) as Record<string, unknown>;
-  const lc = (raw.landing_content ?? {}) as Record<string, unknown>;
+  const lc = (raw.poster_content ?? {}) as Record<string, unknown>;
   const ps = (raw.poster_spec ?? {}) as Record<string, unknown>;
   const title = ev.event_name || c.product_name || 'Event';
 
@@ -886,7 +886,7 @@ function normalizeEvent(
       features: asArray(lc.features).slice(0, 3),
       cta: rsvpLabel,
     },
-    landing_content: {
+    poster_content: {
       headline: (lc.headline as string) || title,
       what_it_does: (lc.what_it_does as string) || (ps.blurb as string) || '',
       how_it_works: asArray(lc.how_it_works).slice(0, 4),

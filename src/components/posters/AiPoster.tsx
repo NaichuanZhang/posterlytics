@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 import type { Campaign, PosterStyle, EventPosterSpec } from '../../lib/types'
-import { buildViewUrl } from '../../lib/landingUrl'
+import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
 import { POSTER_2x3, type OutputFormat } from '../../lib/outputFormats'
 import { QrCode } from '../QrCode'

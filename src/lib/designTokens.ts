@@ -1,7 +1,7 @@
 // Pure normalization: the capture-service's compact `RawTokens` -> the bounded,
 // role-assigned `DesignTokens` the rest of the app consumes. No I/O, no LLM —
 // this is the deterministic, unit-testable seam between programmatic capture and
-// everything downstream (poster style_profile + the landing agent's inputs).
+// everything downstream (poster style_profile + the designer agent's inputs).
 //
 // The CANONICAL copy of this logic also lives inlined in functions/_shared.ts
 // (Deno bundle can't import across the boundary — same mirror pattern as QrZone).

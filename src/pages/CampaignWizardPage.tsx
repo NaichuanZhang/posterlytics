@@ -194,8 +194,8 @@ export function CampaignWizardPage() {
       patchStep('analyze', { status: 'error', error: errMsg(err) })
     }
 
-    // 3. Generate the assets. For the designer style the layout agent runs BEFORE
-    // hero (hero paints from the layout); then the landing agent.
+    // 3. Generate the poster. For the designer style the layout agent runs BEFORE
+    // hero (hero paints from the layout).
     setPhase('generating')
 
     if (isDesigner) {

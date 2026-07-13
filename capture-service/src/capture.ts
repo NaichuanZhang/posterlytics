@@ -138,7 +138,7 @@ function collectInBrowser(): BrowserCollection {
     });
   }
 
-  // Web-font stylesheets so the generated landing can <link> the same fonts.
+  // Web-font stylesheets the site loads (kept in design_tokens.fontLinks).
   const fontLinks: string[] = [];
   document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
     const href = (l as HTMLLinkElement).href;

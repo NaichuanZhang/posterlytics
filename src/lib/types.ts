@@ -23,7 +23,10 @@ export interface PosterCopy {
   cta: string
 }
 
-export interface LandingContent {
+// Structured product copy produced by `analyze` (headline, story, features) and
+// read by `designer` to enrich the poster text. Named PosterContent because
+// that's what it feeds — the retired AI landing page (db/17) never comes back.
+export interface PosterContent {
   headline: string
   what_it_does: string
   how_it_works: string[]
@@ -96,7 +99,7 @@ export interface DesignTokens {
     weight: number
     shadow?: string
   } | null
-  fontLinks: string[] // web-font stylesheet URLs to <link> in the landing
+  fontLinks: string[] // web-font stylesheet URLs the captured site loads
 }
 
 // Vision-detected calm zone for the AI-poster QR, as 0..1 fractions (top-left
@@ -227,7 +230,7 @@ export interface Campaign {
   destination_url: string
   style_profile: StyleProfile | null
   poster_copy: PosterCopy | null
-  landing_content: LandingContent | null
+  poster_content: PosterContent | null
   brand_assets: BrandAssets | null
   brand_essence: string | null
   poster_style: PosterStyle
@@ -260,7 +263,7 @@ export interface Placement {
 
 // A recorded failure/degrade event from the generation pipeline (agent_traces
 // table, db/15). Written best-effort by the edge functions; owner-read only.
-export type AgentTraceStep = 'analyze' | 'designer' | 'hero' | 'landing' | 'capture'
+export type AgentTraceStep = 'analyze' | 'designer' | 'hero' | 'capture'
 export type AgentTraceStatus = 'failed' | 'degraded'
 
 export interface AgentTrace {

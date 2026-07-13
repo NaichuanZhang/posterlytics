@@ -41,7 +41,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, landing_content, design_tokens, brand_assets')
+    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -56,7 +56,7 @@ export default async function (req: Request): Promise<Response> {
   const palette = sp.palette ?? {};
   const tokens = (c.design_tokens ?? null) as DesignTokens | null;
   const copy = (c.poster_copy ?? {}) as Record<string, unknown>;
-  const landing = (c.landing_content ?? {}) as Record<string, unknown>;
+  const content = (c.poster_content ?? {}) as Record<string, unknown>;
   const assets = (c.brand_assets ?? {}) as { logo_url?: string; primary_image_url?: string; images?: Array<{ url: string }> };
   const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
   const hasLogo = !!assets.logo_url;
@@ -69,7 +69,7 @@ export default async function (req: Request): Promise<Response> {
     accent: tokens?.colors.accent || palette.accent || '#10b981',
   };
 
-  const features = Array.isArray(landing.features) ? (landing.features as string[]).slice(0, 6) : [];
+  const features = Array.isArray(content.features) ? (content.features as string[]).slice(0, 6) : [];
 
   const sys =
     'You are an award-winning poster art director. Design a BESPOKE layout for a single PORTRAIT 2:3 product poster ' +
@@ -102,8 +102,8 @@ export default async function (req: Request): Promise<Response> {
     `BRAND ESSENCE (word-portrait for the art director): ${essence || '(none)'}\n` +
     `BRAND COLORS (use these for palette_roles): bg ${palHint.bg}, text ${palHint.text}, primary ${palHint.primary}, accent ${palHint.accent}\n` +
     `TONE: ${sp.tone || 'modern'}\n` +
-    `HEADLINE: ${String(landing.headline ?? copy.hook ?? product)}\n` +
-    `WHAT IT DOES: ${String(landing.what_it_does ?? copy.what_it_does ?? tagline)}\n` +
+    `HEADLINE: ${String(content.headline ?? copy.hook ?? product)}\n` +
+    `WHAT IT DOES: ${String(content.what_it_does ?? copy.what_it_does ?? tagline)}\n` +
     (features.length ? `FEATURES (use for a feature grid): ${features.join(' · ')}\n` : '') +
     `\nASSETS:\n` +
     (hasLogo ? `LOGO: ${assets.logo_url} (the real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (none found — use the product name as the brand mark)\n') +

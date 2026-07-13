@@ -3,7 +3,7 @@
 A headless-Chromium microservice that, for a given URL, returns **programmatic
 design tokens** (read from real `getComputedStyle`) plus an above-the-fold
 **screenshot**. Used by the `analyze` edge function to ground style extraction
-and the landing-page agent in the site's actual rendered design.
+and the poster agents in the site's actual rendered design.
 
 It is **not** part of the Vite app or the Deno edge functions — it's a separate
 Node container deployed as an InsForge compute (Fly) service, because Deno
