@@ -35,6 +35,8 @@ export default async function (req: Request): Promise<Response> {
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
   const userId = userData.user.id;
 
+  // posterStyle is accepted-but-ignored for backward compat: every product
+  // campaign now uses the designer path (the fixed template modes were removed).
   let body: { campaignId?: string; posterStyle?: string; scenario?: string };
   try {
     body = await req.json();
@@ -42,17 +44,6 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: 'bad json' }, 400);
   }
   if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
-
-  // Optional forced template. 'auto' (or absent) lets the model pick; otherwise
-  // we honor the explicit choice and override the model's pick in normalize().
-  // 'designer' is the agentic-layout mode — analyze still produces brand context
-  // + copy; the separate `designer` function designs the layout afterward.
-  const forcedStyle =
-    body.posterStyle === 'saas_glassmorphism' ||
-    body.posterStyle === 'cozy_scrapbook' ||
-    body.posterStyle === 'designer'
-      ? body.posterStyle
-      : null;
 
   // Load the campaign (owner RLS guarantees it's the caller's).
   const { data: campaign, error: cErr } = await client.database
@@ -180,10 +171,10 @@ export default async function (req: Request): Promise<Response> {
     }
   }
 
-  // 3. gpt-4o → poster_content + style_profile + brand_essence + poster_spec.
-  // The poster is a fully AI-illustrated cozy-scrapbook image; poster_spec fills
-  // the gamified template zones, brand_essence is a word-portrait that lets the
-  // image model (which gets text only) infuse the real brand.
+  // 3. gpt-4o → poster_content + style_profile + brand_essence. The `designer`
+  // agent then designs the bespoke layout from these and `hero` paints it;
+  // brand_essence is a word-portrait that lets the image model (which gets text
+  // only) infuse the real brand.
   const visibleText = stripToText(scrapeHtml).slice(0, 8000);
 
   // The event scenario uses its own prompt + spec normalizer (poster_spec becomes
@@ -200,7 +191,7 @@ export default async function (req: Request): Promise<Response> {
       .update({
         scenario: 'event',
         event_details,
-        poster_style: 'designer', // events use a bespoke event layout, not saas/cozy
+        poster_style: 'designer', // one mode for all campaigns; events paint a bespoke event prompt
         style_profile: parsedEv.style_profile,
         poster_copy: parsedEv.poster_copy,
         poster_content: parsedEv.poster_content,
@@ -237,55 +228,22 @@ export default async function (req: Request): Promise<Response> {
     });
   }
 
+  // Every product poster is designed by the layout agent (`designer`) and painted
+  // by `hero` — analyze only produces faithful brand context + structured copy.
+  // (The fixed cozy/saas template modes were removed; designer is the one path.)
   const sys =
-    'You are a senior product marketer, brand designer, and gamification copywriter. Given a product website and ' +
-    'its GTM inputs, produce a faithful style profile, product copy, a brand word-portrait, choose the best poster ' +
-    'template for this brand, and fill that template\'s structured spec. Output STRICT JSON only — no prose, no code fences.\n' +
-    '"poster_style" MUST be one of: "saas_glassmorphism" (premium split light/dark product-launch poster with a 3D ' +
-    'device mockup — pick for developer tools, B2B/SaaS, data, fintech, infra, "serious/premium tech" brands), or ' +
-    '"cozy_scrapbook" (warm hand-drawn gamified watercolor — pick for playful, consumer, lifestyle, creative, social, ' +
-    'or otherwise warm/friendly brands). Decide from the brand\'s tone and palette. (A third mode, "designer", exists ' +
-    'but is only chosen explicitly by the user — never auto-pick it; when it is in force a separate agent designs the ' +
-    'layout, so just produce faithful brand context and copy.)\n' +
-    'Common schema: {' +
-    '"poster_style":"saas_glassmorphism" | "cozy_scrapbook",' +
+    'You are a senior product marketer and brand designer. Given a product website and its GTM inputs, produce a ' +
+    'faithful style profile, structured product copy, and a brand word-portrait — a separate agent designs the ' +
+    'poster layout from them. Output STRICT JSON only — no prose, no code fences.\n' +
+    'Schema: {' +
     '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
     '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
     '"poster_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
     '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
     '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
     'UI vibe, signature colors (name the hex), and overall feel",' +
-    '"poster_spec":{ ...shape depends on poster_style... }}\n' +
-    'IF poster_style == "cozy_scrapbook", poster_spec = {' +
-    '"hook_line1":"<=5 words, the foil, e.g. \'Others ship updates.\'",' +
-    '"hook_line2":"<=5 words, the payoff, e.g. \'You ship attention.\'",' +
-    '"subtitle":"PRODUCT · one-line positioning",' +
-    '"level_badge":"a short level tag, e.g. \'Lv.26\'","xp":"e.g. \'94 / 100 XP\'",' +
-    '"mascot":"a cute chibi creature that literally EMBODIES this product (what object/animal it should be, its expression, what it holds)",' +
-    '"stat_nodes":[{"icon":"one-word icon idea","label":"<=2 words","stars":4}, ... exactly 5, stars 0-5],' +
-    '"quest_cards":[{"icon":"one-word icon idea","title":"<=3 words","desc":"<=5 words"}, ... exactly 3],' +
-    '"conv_left":{"heading":"e.g. Why <Product>","lines":["3 short benefit lines"]},' +
-    '"conv_right":{"heading":"e.g. Start in 3 Steps","steps":["3 short numbered steps"]},' +
-    '"qr_label":"<=4 words, e.g. Scan to Start",' +
-    '"footer_formula":"A × B × C (three core value words)",' +
-    '"urls":"primary url, optional secondary"}.\n' +
-    'Make the cozy hook a punchy \'Others <do X>. / You <do Y>.\' contrast specific to this product.\n' +
-    'IF poster_style == "saas_glassmorphism", poster_spec = {' +
-    '"headline":"<=4 words, the product/brand name as the hero, split-friendly",' +
-    '"sub_name":"<=6 words, a positioning sub-name or category",' +
-    '"slogan":"one punchy line, the core promise",' +
-    '"product_intro":"2-3 short lines: who it is for + what it does + the problem it solves",' +
-    '"device_context":"what the 3D device screen shows — a realistic, specific product UI (name the key panels/numbers)",' +
-    '"hero_metric":"one bold credible metric shown on the device, e.g. \'+164%\' or \'2.3s\'",' +
-    '"float_cards":[{"icon":"one-word icon idea","title":"<=2 words","desc":"<=6 words"}, ... exactly 3],' +
-    '"feature_matrix":[{"icon":"one-word icon idea","title":"<=2 words feature name","desc":"<=8 words"}, ... exactly 6],' +
-    '"reasons":[{"icon":"one-word icon idea","title":"<=3 words","desc":"<=8 words"}, ... exactly 4 — these go in the dark zone],' +
-    '"cta_main":"a decisive CTA headline",' +
-    '"cta_sub":"one supporting line under the CTA",' +
-    '"qr_label":"<=4 words, e.g. Scan to Start",' +
-    '"footer_slogan":"a short ALL-CAPS letter-spaced tagline",' +
-    '"urls":"primary url, optional secondary"}.\n' +
-    'Keep all poster text SHORT and legible. CRITICAL — the style_profile.palette MUST reflect the brand\'s REAL ' +
+    '"qr_label":"<=4 words for the scan caption, e.g. Scan to Start"}\n' +
+    'Keep all copy SHORT and legible. CRITICAL — the style_profile.palette MUST reflect the brand\'s REAL ' +
     'colors. You are given the actual hex colors mined from the site\'s own CSS (most-used first); use the most ' +
     'prominent vivid one as the "accent" and the brand\'s dominant dark/brand tone as "primary". Do NOT substitute a ' +
     'generic SaaS blue or any color that is not on the site. Only fall back to tasteful defaults if no site colors ' +
@@ -304,7 +262,7 @@ export default async function (req: Request): Promise<Response> {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ], { maxTokens: 2200 });
-    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
+    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, design_tokens);
   } catch {
     // One repair retry with a terse reminder.
     try {
@@ -312,7 +270,7 @@ export default async function (req: Request): Promise<Response> {
         { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
         { role: 'user', content: user },
       ], { maxTokens: 2200 });
-      parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
+      parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors, design_tokens);
     } catch (e) {
       // Both AI-chat attempts failed → hardcoded fallback content. The poster still
       // renders, but it's off-brand; record why so it's not invisible.
@@ -325,7 +283,7 @@ export default async function (req: Request): Promise<Response> {
         request: { model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o', system: sys, user },
         response: { error: e instanceof Error ? e.message : String(e) },
       });
-      parsed = fallbackContent(campaign as Record<string, string>, siteColors, forcedStyle, design_tokens);
+      parsed = fallbackContent(campaign as Record<string, string>, siteColors, design_tokens);
     }
   }
 
@@ -551,99 +509,6 @@ function asArray(v: unknown): string[] {
   return [];
 }
 
-function cards(
-  raw: unknown,
-  count: number,
-  iconDefault: string,
-  titleMax: number,
-  descMax: number,
-): Array<{ icon: string; title: string; desc: string }> {
-  return (Array.isArray(raw) ? raw : [])
-    .slice(0, count)
-    .map((n) => {
-      const x = (n ?? {}) as Record<string, unknown>;
-      return {
-        icon: String(x.icon ?? iconDefault),
-        title: String(x.title ?? x.name ?? '').slice(0, titleMax),
-        desc: String(x.desc ?? '').slice(0, descMax),
-      };
-    })
-    .filter((q) => q.title);
-}
-
-function normalizeCozySpec(ps: Record<string, unknown>, product: string, tagline: string) {
-  const statNodes = (Array.isArray(ps.stat_nodes) ? ps.stat_nodes : [])
-    .slice(0, 5)
-    .map((n) => {
-      const x = (n ?? {}) as Record<string, unknown>;
-      const stars = Math.max(0, Math.min(5, Math.round(Number(x.stars) || 4)));
-      return { icon: String(x.icon ?? 'star'), label: String(x.label ?? '').slice(0, 24), stars };
-    })
-    .filter((n) => n.label);
-  const questCards = cards(ps.quest_cards, 3, 'spark', 30, 60);
-  const convLeft = (ps.conv_left ?? {}) as Record<string, unknown>;
-  const convRight = (ps.conv_right ?? {}) as Record<string, unknown>;
-  return {
-    hook_line1: (ps.hook_line1 as string) || `Others just use ${product}.`,
-    hook_line2: (ps.hook_line2 as string) || `You level up with it.`,
-    subtitle: (ps.subtitle as string) || `${product}${tagline ? ' · ' + tagline : ''}`,
-    level_badge: (ps.level_badge as string) || 'Lv.1',
-    xp: (ps.xp as string) || '0 / 100 XP',
-    mascot: (ps.mascot as string) || `a cute chibi mascot embodying ${product}`,
-    stat_nodes: statNodes.length ? statNodes : [
-      { icon: 'spark', label: 'Easy', stars: 5 },
-      { icon: 'bolt', label: 'Fast', stars: 5 },
-      { icon: 'heart', label: 'Loved', stars: 4 },
-    ],
-    quest_cards: questCards.length ? questCards : [
-      { icon: 'spark', title: 'Get started', desc: 'in minutes' },
-    ],
-    conv_left: {
-      heading: String(convLeft.heading ?? `Why ${product}`),
-      lines: asArray(convLeft.lines).slice(0, 3),
-    },
-    conv_right: {
-      heading: String(convRight.heading ?? 'Start in 3 Steps'),
-      steps: asArray(convRight.steps).slice(0, 3),
-    },
-    qr_label: (ps.qr_label as string) || 'Scan to Start',
-    footer_formula: (ps.footer_formula as string) || '',
-    urls: (ps.urls as string) || '',
-  };
-}
-
-function normalizeSaasSpec(ps: Record<string, unknown>, product: string, tagline: string) {
-  const featureMatrix = cards(ps.feature_matrix, 6, 'bolt', 24, 80);
-  const floatCards = cards(ps.float_cards, 3, 'spark', 24, 60);
-  const reasons = cards(ps.reasons, 4, 'check', 30, 80);
-  return {
-    headline: (ps.headline as string) || product,
-    sub_name: (ps.sub_name as string) || tagline,
-    slogan: (ps.slogan as string) || tagline || `Meet ${product}`,
-    product_intro: (ps.product_intro as string) || tagline,
-    device_context: (ps.device_context as string) || `the ${product} dashboard with clean charts and key metrics`,
-    hero_metric: (ps.hero_metric as string) || '',
-    float_cards: floatCards.length ? floatCards : [
-      { icon: 'bolt', title: 'Fast', desc: 'Ships in minutes' },
-      { icon: 'lock', title: 'Secure', desc: 'Enterprise-grade' },
-      { icon: 'spark', title: 'Simple', desc: 'No setup needed' },
-    ],
-    feature_matrix: featureMatrix.length ? featureMatrix : [
-      { icon: 'bolt', title: 'Fast', desc: 'Built for speed' },
-      { icon: 'chart', title: 'Insightful', desc: 'Clear analytics' },
-    ],
-    reasons: reasons.length ? reasons : [
-      { icon: 'check', title: 'Trusted', desc: 'By modern teams' },
-      { icon: 'star', title: 'Loved', desc: 'High ratings' },
-    ],
-    cta_main: (ps.cta_main as string) || `Try ${product} today`,
-    cta_sub: (ps.cta_sub as string) || 'Scan to get started in seconds',
-    qr_label: (ps.qr_label as string) || 'Scan to Start',
-    footer_slogan: (ps.footer_slogan as string) || '',
-    urls: (ps.urls as string) || '',
-  };
-}
-
 // True if a hex is "vivid" (colorful enough to be an intentional accent).
 function isVivid(hex: string | undefined): boolean {
   if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return false;
@@ -658,13 +523,11 @@ function normalize(
   raw: unknown,
   c: Record<string, string>,
   siteColors: string[] = [],
-  forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | 'designer' | null = null,
   tokens: DesignTokens | null = null,
 ): ParsedContent {
   const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
   const sp = o.style_profile ?? {};
   const lc = o.poster_content ?? {};
-  const ps = (o.poster_spec ?? {}) as Record<string, unknown>;
   const product = c.product_name;
   const tagline = c.tagline || '';
 
@@ -686,36 +549,27 @@ function normalize(
   // Primary: captured computed color wins, then model's, else a dark default.
   const primary = tokens?.colors.primary || modelPalette.primary || '#1f2937';
 
-  // Honor an explicit user choice; otherwise use the model's auto-pick.
-  const poster_style = forcedStyle
-    ?? ((o.poster_style as unknown) === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook');
+  // The layout itself is designed later by the `designer` function; the product
+  // poster_spec carries only what the SPA band reads (qr_label) + the urls line.
+  const qrLabel = String((o.qr_label as unknown) ?? '').slice(0, 40) || 'Scan to start';
+  const poster_spec = { qr_label: qrLabel, urls: c.product_url || '' };
 
-  // For `designer`, the bespoke layout is designed later by the `designer`
-  // function — analyze just produces brand context + copy. We still fill a spec
-  // (via the saas shape) so poster_copy and editor fallbacks have content; the
-  // cozy shape is only used for the explicit cozy style.
-  const poster_spec = poster_style === 'cozy_scrapbook'
-    ? normalizeCozySpec(ps, product, tagline)
-    : normalizeSaasSpec(ps, product, tagline);
+  const contentHeadline = (lc.headline as string) || product;
+  const contentWhat = (lc.what_it_does as string) || tagline;
+  const contentFeatures = asArray(lc.features).slice(0, 6);
+  const contentCta = (lc.cta as string) || c.cta_text || 'Learn more';
 
-  // poster_copy kept for backward-compat (optimizer agent, editor fallbacks).
-  // Map from whichever spec shape we produced.
-  const posterCopy = poster_style !== 'cozy_scrapbook'
-    ? {
-        hook: (poster_spec as ReturnType<typeof normalizeSaasSpec>).slogan,
-        what_it_does: (poster_spec as ReturnType<typeof normalizeSaasSpec>).product_intro,
-        features: (poster_spec as ReturnType<typeof normalizeSaasSpec>).feature_matrix.map((f) => f.title).slice(0, 3),
-        cta: (poster_spec as ReturnType<typeof normalizeSaasSpec>).cta_main,
-      }
-    : {
-        hook: (poster_spec as ReturnType<typeof normalizeCozySpec>).hook_line1,
-        what_it_does: (poster_spec as ReturnType<typeof normalizeCozySpec>).subtitle,
-        features: (poster_spec as ReturnType<typeof normalizeCozySpec>).quest_cards.map((q) => q.title).slice(0, 3),
-        cta: (poster_spec as ReturnType<typeof normalizeCozySpec>).qr_label,
-      };
+  // poster_copy kept for backward-compat (editor fallbacks); derived straight
+  // from the structured content now that the template specs are gone.
+  const posterCopy = {
+    hook: contentHeadline,
+    what_it_does: contentWhat,
+    features: contentFeatures.slice(0, 3),
+    cta: contentCta,
+  };
 
   return {
-    poster_style,
+    poster_style: 'designer',
     style_profile: {
       palette: {
         primary,
@@ -733,12 +587,12 @@ function normalize(
     },
     poster_copy: posterCopy,
     poster_content: {
-      headline: (lc.headline as string) || product,
-      what_it_does: (lc.what_it_does as string) || tagline,
+      headline: contentHeadline,
+      what_it_does: contentWhat,
       how_it_works: asArray(lc.how_it_works).slice(0, 4),
       why_use_it: asArray(lc.why_use_it).slice(0, 4),
-      features: asArray(lc.features).slice(0, 6),
-      cta: (lc.cta as string) || c.cta_text || 'Learn more',
+      features: contentFeatures,
+      cta: contentCta,
     },
     brand_essence: String(o.brand_essence ?? `${product}: clean modern product, friendly approachable feel`).slice(0, 400),
     poster_spec,
@@ -748,10 +602,9 @@ function normalize(
 function fallbackContent(
   c: Record<string, string>,
   siteColors: string[] = [],
-  forcedStyle: 'saas_glassmorphism' | 'cozy_scrapbook' | null = null,
   tokens: DesignTokens | null = null,
 ): ParsedContent {
-  return normalize({}, c, siteColors, forcedStyle, tokens);
+  return normalize({}, c, siteColors, tokens);
 }
 
 // =====================================================================

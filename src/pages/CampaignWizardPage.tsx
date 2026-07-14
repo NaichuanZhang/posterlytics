@@ -122,10 +122,6 @@ export function CampaignWizardPage() {
 
   // Helper: the label/placeholder/hint for a field key in the active scenario.
   const fieldCfg = (key: string) => scenarioCfg.fields.find((f) => f.key === key)
-  // 'auto' lets the analyzer pick; otherwise force the template. 'designer' adds
-  // an agentic layout-design step (the `designer` function) before the image.
-  const [styleChoice, setStyleChoice] =
-    useState<'auto' | 'saas_glassmorphism' | 'cozy_scrapbook' | 'designer'>('auto')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -161,14 +157,14 @@ export function CampaignWizardPage() {
     }
     const campaignId = (created as { id: string }).id
 
-    // Seed the live step list (drop the Designer step unless that style is chosen).
-    // Events use a bespoke event prompt in hero (not the product layout agent), so
-    // the Designer step never runs for them.
-    const isDesigner = !isEvent && styleChoice === 'designer'
+    // Seed the live step list. Every product poster is agentically designed
+    // (analyze → designer → hero); events use a bespoke event prompt in hero
+    // instead of the layout agent, so the Designer step never runs for them.
+    const runsDesigner = !isEvent
     setScreenshotUrl(null)
     setLayout(null)
     setSteps(
-      STEP_DEFS.filter((d) => d.key !== 'designer' || isDesigner).map((d) => ({
+      STEP_DEFS.filter((d) => d.key !== 'designer' || runsDesigner).map((d) => ({
         ...d,
         status: 'pending' as const,
       })),
@@ -178,12 +174,12 @@ export function CampaignWizardPage() {
     // real prompt the moment it returns: analyze → [designer] → hero.
     // Each step is best-effort — an error marks that row and the flow continues.
 
-    // 2. Analyze: scrape + brand palette + auto-selected style + poster spec.
+    // 2. Analyze: scrape + brand palette + structured copy + style profile.
     setPhase('analyzing')
     patchStep('analyze', { status: 'running' })
     try {
       const { data, error: aErr } = await insforge.functions.invoke('analyze', {
-        body: { campaignId, scenario, posterStyle: styleChoice === 'auto' ? undefined : styleChoice },
+        body: { campaignId, scenario },
       })
       if (aErr) throw new Error(aErr.message ?? 'Analysis failed')
       const d = data as { screenshot_url?: string | null; prompt?: AgentPrompt } | null
@@ -194,11 +190,11 @@ export function CampaignWizardPage() {
       patchStep('analyze', { status: 'error', error: errMsg(err) })
     }
 
-    // 3. Generate the poster. For the designer style the layout agent runs BEFORE
-    // hero (hero paints from the layout).
+    // 3. Generate the poster. The layout agent runs BEFORE hero (hero paints
+    // from the layout).
     setPhase('generating')
 
-    if (isDesigner) {
+    if (runsDesigner) {
       patchStep('designer', { status: 'running' })
       try {
         const { data, error: dErr } = await insforge.functions.invoke('designer', { body: { campaignId } })
@@ -373,41 +369,6 @@ export function CampaignWizardPage() {
               </div>
             </div>
           </div>
-
-          {/* Product poster style — events use a bespoke event prompt, so this is
-              product-only. */}
-          {!isEvent && (
-          <div className="field field-num">
-            <label data-num="6">Poster style</label>
-            <div className="row wrap" style={{ gap: 8 }}>
-              {([
-                { key: 'auto', label: 'Auto', hint: 'Pick for me' },
-                { key: 'saas_glassmorphism', label: 'SaaS', hint: 'Sleek / glassmorphism' },
-                { key: 'cozy_scrapbook', label: 'Cozy', hint: 'Warm / scrapbook' },
-                { key: 'designer', label: 'Designer', hint: 'AI-designed bespoke layout' },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  className={`btn sm ${styleChoice === opt.key ? '' : 'ghost'}`}
-                  onClick={() => setStyleChoice(opt.key)}
-                  title={opt.hint}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            <div className="hint">
-              {styleChoice === 'auto'
-                ? 'We choose the style that fits your brand.'
-                : styleChoice === 'saas_glassmorphism'
-                  ? 'Premium split light/dark launch poster with a 3D device mockup.'
-                  : styleChoice === 'designer'
-                    ? 'An AI art director designs a bespoke layout for your brand, then paints it — not a fixed template.'
-                    : 'Warm hand-drawn scrapbook poster with a mascot and stat ring.'}
-            </div>
-          </div>
-          )}
 
           {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 

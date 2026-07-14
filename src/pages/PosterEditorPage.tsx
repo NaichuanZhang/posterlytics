@@ -62,39 +62,25 @@ export function PosterEditorPage() {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // Spec card rows depend on the active style. `designer` shows the AI-designed
-  // layout's composition/mood; the two templates show their structured spec.
-  const isSaas = campaign.poster_style === 'saas_glassmorphism'
-  const isDesigner = campaign.poster_style === 'designer'
-  const spec = campaign.poster_spec as Record<string, unknown> | null
+  // Spec card rows: events show their logistics; products show the AI-designed
+  // layout's composition/mood (every product poster is designer-mode now).
+  const isEventCampaign = campaign.scenario === 'event'
   const layout = campaign.poster_layout
-  const specRows: Array<{ label: string; value?: string }> = isDesigner
-    ? [
-        { label: 'Composition', value: layout?.composition },
-        { label: 'Mood', value: layout?.mood },
-        { label: 'Art style', value: layout?.art_style },
-      ]
-    : isSaas
-      ? [
-          { label: 'Headline', value: spec?.headline as string },
-          { label: 'Slogan', value: spec?.slogan as string },
-          { label: 'CTA', value: spec?.cta_main as string },
-        ]
-      : [
-          { label: 'Hook', value: [spec?.hook_line1, spec?.hook_line2].filter(Boolean).join(' ') },
-          { label: 'Subtitle', value: spec?.subtitle as string },
-          { label: 'Mascot', value: spec?.mascot as string },
-        ]
-  const styleLabel = isDesigner ? 'Designer' : isSaas ? 'SaaS Glassmorphism' : 'Cozy Scrapbook'
+  const specRows: Array<{ label: string; value?: string }> = [
+    { label: 'Composition', value: layout?.composition },
+    { label: 'Mood', value: layout?.mood },
+    { label: 'Art style', value: layout?.art_style },
+  ]
+  const styleLabel = isEventCampaign ? 'Event promo' : 'Designer'
 
   async function regenerate() {
     if (!campaign) return
     setBusy('regen')
     try {
-      // Re-extract the brand spec, then re-paint the AI poster. For the designer
-      // style, re-design the bespoke layout first so hero paints from it fresh.
+      // Re-extract the brand spec, re-design the bespoke layout, then re-paint.
+      // Events skip the layout agent (hero uses the bespoke event prompt).
       await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
-      if (campaign.poster_style === 'designer') {
+      if (!isEventCampaign) {
         await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
       }
       await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
@@ -219,10 +205,10 @@ export function PosterEditorPage() {
         <section className="ed-canvas">
           <PreviewCell label="Poster">
             {(w) =>
-              // Designer style with a layout but no painted image yet (fresh design,
+              // A layout designed but no painted image yet (fresh design,
               // mid-regenerate, or a failed paint): show the bespoke layout wireframe
               // instead of AiPoster's "still generating…" placeholder.
-              isDesigner && campaign.poster_layout && !campaign.hero_image_url ? (
+              !isEventCampaign && campaign.poster_layout && !campaign.hero_image_url ? (
                 <LayoutPreview layout={campaign.poster_layout} width={w} />
               ) : previewCode ? (
                 <Poster campaign={campaign} code={previewCode} width={w} />
@@ -238,7 +224,7 @@ export function PosterEditorPage() {
           <div className="card">
             <h3 style={{ margin: '0 0 10px' }}>Poster spec</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
-              Style auto-picked from your site. Regenerate for a fresh take.
+              An AI art director designs the layout from your brand. Regenerate for a fresh take.
             </p>
             <dl style={{ margin: 0, display: 'grid', gap: 8, fontSize: '0.9rem' }}>
               <Row label="Style" value={styleLabel} />
@@ -255,7 +241,7 @@ export function PosterEditorPage() {
               <button className="btn secondary sm" onClick={regenerate} disabled={!!busy}>
                 {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
               </button>
-              {isDesigner && (
+              {!isEventCampaign && (
                 <button className="btn secondary sm" onClick={regenerateLayout} disabled={!!busy}>
                   {busy === 'layout' ? 'Designing…' : '↻ Regenerate layout'}
                 </button>
@@ -269,7 +255,7 @@ export function PosterEditorPage() {
             {campaign.scenario === 'event' && syncMsg && (
               <p className="hint" style={{ marginTop: 6 }}>{syncMsg}</p>
             )}
-            {isDesigner && campaign.design_status === 'failed' && (
+            {!isEventCampaign && campaign.design_status === 'failed' && (
               <p className="hint" style={{ marginTop: 6 }}>Layout design failed — try Regenerate layout.</p>
             )}
           </div>

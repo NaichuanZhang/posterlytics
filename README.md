@@ -46,17 +46,14 @@ Scans, unique visitors, conversions, and conversion rate — per placement.
 3. **Poster Agent** (`analyze` function) scrapes the site, mines the brand's
    **real palette** from its CSS, pulls assets (logo, og:image → re-hosted in
    Storage), and uses gpt-4o to produce:
-   - `poster_style` + `poster_spec` — the auto-selected template (cozy scrapbook
-     or SaaS glassmorphism) and its structured content
    - `poster_content` — structured product copy (features, how-it-works,
      why-use-it) used to enrich the poster text
    - `style_profile` — the brand's palette / fonts / tone
-4. **Two posters** — both rendered from that spec:
-   - **Template** — deterministic HTML/CSS at 1080×1620, on-brand accent color,
-     a real fixed-size QR at a known anchor.
-   - **AI image** — the `hero` function paints an illustrated poster; the real
-     per-placement QR is composited on the reserved zone (`AiPoster`).
-   The user picks one (`poster_mode`); either is exportable to PNG per placement
+   - `brand_essence` — a word-portrait of the brand for the image model
+4. **Designed + painted** — the `designer` agent designs a bespoke
+   `poster_layout` from that context, then the `hero` function paints it as an
+   illustrated 2:3 poster; the real per-placement QR is composited into a
+   branded bottom band (`AiPoster`). Exportable to PNG per placement
    (`html-to-image`).
 5. **Placements** — each mints a unique short code → unique QR/link.
 6. **Publish** — activates the tracked QR links.

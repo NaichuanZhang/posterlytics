@@ -55,7 +55,7 @@ export function LandingPage() {
             <div className="lp-feature reveal">
               <div className="ic">{ICONS.wand}</div>
               <h3>On-brand by default</h3>
-              <p>We mine your site's real colors, copy, and style, then auto-pick a look that fits — SaaS, cozy, or a bespoke designer layout.</p>
+              <p>We mine your site's real colors, copy, and style, then an AI art director designs a bespoke poster layout that fits your brand.</p>
             </div>
             <div className="lp-feature reveal">
               <div className="ic">{ICONS.layers}</div>
@@ -122,7 +122,7 @@ export function LandingPage() {
             <h2>Four steps from URL to attribution</h2>
           </div>
           <div className="lp-steps">
-            <div className="lp-step reveal"><div className="n" /><h3>Paste your URL</h3><p>Add your product name, CTA, and destination. Pick Auto, SaaS, Cozy, or Designer.</p></div>
+            <div className="lp-step reveal"><div className="n" /><h3>Paste your URL</h3><p>Add your product name, CTA, and destination — the AI designs the rest.</p></div>
             <div className="lp-step reveal"><div className="n" /><h3>Get your poster</h3><p>We analyze your brand and paint an on-brand poster — refine it anytime.</p></div>
             <div className="lp-step reveal"><div className="n" /><h3>Mint placements</h3><p>One tracked QR + link per channel. Export PNGs and post them anywhere.</p></div>
             <div className="lp-step reveal"><div className="n" /><h3>See what converts</h3><p>Publish, then watch scans, unique visitors, and conversions per placement.</p></div>

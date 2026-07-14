@@ -42,7 +42,10 @@ export interface BrandAssets {
   primary_image_url?: string
 }
 
-export type PosterStyle = 'cozy_scrapbook' | 'saas_glassmorphism' | 'designer'
+// Every product poster is agentic now: the `designer` function designs a bespoke
+// poster_layout and `hero` paints it. The fixed template modes (cozy_scrapbook,
+// saas_glassmorphism) were removed; db/19 backfilled old rows to 'designer'.
+export type PosterStyle = 'designer'
 
 // Designer mode: an LLM-designed bespoke poster layout (produced by the
 // `designer` edge function) that `hero` compiles into the image prompt — instead
@@ -111,56 +114,10 @@ export interface QrZone {
   h: number
 }
 
-export interface StatNode {
-  icon: string
-  label: string
-  stars: number
-}
-
-export interface QuestCard {
-  icon: string
-  title: string
-  desc: string
-}
-
-// Cozy-scrapbook gamified poster (9:16-cropped) zones.
-export interface CozyPosterSpec {
-  hook_line1: string
-  hook_line2: string
-  subtitle: string
-  level_badge: string
-  xp: string
-  mascot: string
-  stat_nodes: StatNode[]
-  quest_cards: QuestCard[]
-  conv_left: { heading: string; lines: string[] }
-  conv_right: { heading: string; steps: string[] }
+// Product poster_spec: the SPA band only needs the scan caption; the layout
+// itself lives in poster_layout (designed by the `designer` agent).
+export interface ProductPosterSpec {
   qr_label: string
-  footer_formula: string
-  urls: string
-}
-
-export interface SaasCard {
-  icon: string
-  title: string
-  desc: string
-}
-
-// Premium SaaS / glassmorphism product-launch poster (2:3) zones.
-export interface SaasPosterSpec {
-  headline: string
-  sub_name: string
-  slogan: string
-  product_intro: string
-  device_context: string
-  hero_metric: string
-  float_cards: SaasCard[]
-  feature_matrix: SaasCard[]
-  reasons: SaasCard[]
-  cta_main: string
-  cta_sub: string
-  qr_label: string
-  footer_slogan: string
   urls: string
 }
 
@@ -215,10 +172,10 @@ export interface EventPosterSpec {
   urls: string
 }
 
-// poster_spec is one of these, discriminated by Campaign.poster_style (product
-// scenario) or Campaign.scenario (event). Kept as a loose union (every shape is
-// optional-friendly) so older rows still type-check.
-export type PosterSpec = CozyPosterSpec | SaasPosterSpec | EventPosterSpec
+// poster_spec is one of these, discriminated by Campaign.scenario. Kept as a
+// loose union so older rows (which may carry retired template-spec shapes)
+// still type-check — readers only touch qr_label / the event logistics lines.
+export type PosterSpec = ProductPosterSpec | EventPosterSpec
 
 export interface Campaign {
   id: string

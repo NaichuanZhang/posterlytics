@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import type { Campaign, PosterStyle, EventPosterSpec } from '../../lib/types'
+import type { Campaign, EventPosterSpec } from '../../lib/types'
 import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
 import { POSTER_2x3, type OutputFormat } from '../../lib/outputFormats'
@@ -64,7 +64,6 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   const NATIVE_H = format.h
   const IMG_H = NATIVE_H - BAND_H
   const img = imageSrcOverride ?? campaign.hero_image_url
-  const style: PosterStyle = campaign.poster_style === 'saas_glassmorphism' ? 'saas_glassmorphism' : 'cozy_scrapbook'
   const isEvent = campaign.scenario === 'event'
   // For events the poster_spec is an EventPosterSpec; its logistics lines were
   // computed deterministically by analyze (formatEventLines) so they're accurate.
@@ -101,7 +100,6 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
         display: 'flex',
         flexDirection: 'column',
       }}
-      data-poster-style={style}
     >
       {/* Image row — the top ~81.5%. Cropped from the TOP (objectPosition:'top')
           so the discarded slice is the bottom of the art, never the headline. */}

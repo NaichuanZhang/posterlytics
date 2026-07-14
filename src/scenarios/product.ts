@@ -55,9 +55,8 @@ export const productScenario: ScenarioConfig = {
       hint: 'Where the QR ultimately sends people (after we log the conversion).',
     },
   ],
-  // Editor spec-card rows come from poster_spec/poster_copy for products; no
-  // scenario-specific rows are needed (the existing isSaas/isDesigner branches
-  // in PosterEditorPage keep handling those), so this stays empty.
+  // Editor spec-card rows come from poster_layout for products (PosterEditorPage
+  // shows Composition/Mood/Art style directly), so this stays empty.
   specRows: [],
   // The dashboard's conversion metric label for this scenario.
   conversionLabel: 'Conversions',
