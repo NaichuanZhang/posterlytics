@@ -3,6 +3,7 @@ import {
   aiChat,
   errorDetails,
   extractJson,
+  inlineReferenceImages,
   jsonResponse,
   createUserClient,
   normalizePosterLayout,
@@ -59,12 +60,15 @@ export default async function (req: Request): Promise<Response> {
   const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
   const hasLogo = !!assets.logo_url;
   const referenceContext = String(c.reference_context ?? '').trim().slice(0, 4000);
-  const referenceImages = Array.isArray(c.reference_images)
+  const referenceUrls = Array.isArray(c.reference_images)
     ? (c.reference_images as Array<Record<string, unknown>>)
         .map((image) => typeof image.url === 'string' ? image.url : '')
         .filter(Boolean)
         .slice(0, 5)
     : [];
+  // Inline as data URLs so the vision model doesn't try to fetch our storage
+  // CDN (which serves binary/octet-stream and gets rejected).
+  const referenceImages = await inlineReferenceImages(referenceUrls, { maxImages: 5 });
 
   // Palette hints: prefer the programmatic computed tokens, fall back to style_profile.
   const palHint = {

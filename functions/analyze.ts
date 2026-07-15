@@ -6,6 +6,7 @@ import {
   createUserClient,
   captureSite,
   dataUrlToBlob,
+  inlineReferenceImages,
   parseColor,
   toHex,
   logPipelineEvent,
@@ -55,12 +56,15 @@ export default async function (req: Request): Promise<Response> {
   const persistedScenario = (campaign as { scenario?: string | null }).scenario;
   const scenario = persistedScenario === 'event' ? 'event' : 'product';
   const referenceContext = String((campaign as Record<string, unknown>).reference_context ?? '').trim().slice(0, 4000);
-  const referenceImages = Array.isArray((campaign as Record<string, unknown>).reference_images)
+  const referenceUrls = Array.isArray((campaign as Record<string, unknown>).reference_images)
     ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
         .map((image) => typeof image.url === 'string' ? image.url : '')
         .filter(Boolean)
         .slice(0, 5)
     : [];
+  // Inline as data URLs (raster only) — our storage CDN serves
+  // binary/octet-stream, which model providers reject when fetching by URL.
+  const referenceImages = await inlineReferenceImages(referenceUrls, { maxImages: 5 });
 
   await client.database.from('campaigns').update({ status: 'analyzing' }).eq('id', campaign.id);
 
@@ -143,12 +147,26 @@ export default async function (req: Request): Promise<Response> {
     primary_image_url?: string;
   } = { images: [] };
 
-  if (assets.logo) {
-    const up = await rehost(client, assets.logo, `brand/${campaign.id}/logo`);
+  // Try logo candidates in priority order, taking the first RASTER one that
+  // rehosts successfully. Image models 400 on SVG references, and the site's
+  // canonical <link rel="logo"> is often an SVG — so skip past it to the
+  // masthead PNG or apple-touch-icon rather than persisting an unusable URL.
+  for (const candidate of assets.logoCandidates.slice(0, 5)) {
+    const up = await rehost(client, candidate, `brand/${campaign.id}/logo`, { rasterOnly: true });
     if (up) {
       brand_assets.logo_url = up.url;
       brand_assets.logo_key = up.key;
+      break;
     }
+  }
+  if (assets.logoCandidates.length > 0 && !brand_assets.logo_url) {
+    logPipelineEvent({
+      source: 'analyze',
+      campaignId: campaign.id,
+      status: 'degraded',
+      code: 'logo_rehost_no_raster',
+      detail: `Found ${assets.logoCandidates.length} logo candidate(s) but none were fetchable raster images; painting with the product name instead.`,
+    });
   }
   for (const imgUrl of assets.images.slice(0, 2)) {
     const up = await rehost(client, imgUrl, `brand/${campaign.id}/img-${crypto.randomUUID().slice(0, 8)}`);
@@ -373,10 +391,11 @@ function abs(url: string, base: string): string | null {
 
 function extractAssets(htmlText: string, base: string): {
   logo: string | null;
+  logoCandidates: string[];
   images: string[];
   themeColor: string | null;
 } {
-  if (!htmlText) return { logo: null, images: [], themeColor: null };
+  if (!htmlText) return { logo: null, logoCandidates: [], images: [], themeColor: null };
   const images: string[] = [];
 
   const og =
@@ -401,49 +420,35 @@ function extractAssets(htmlText: string, base: string): {
     if (a && !/sprite|icon|pixel|tracking|1x1|logo/i.test(a) && !images.includes(a)) images.push(a);
   }
 
-  // Logo: try several signals in priority order (first hit wins). Real sites tag
-  // logos in many ways, so cast a wide net before falling back to icons.
-  let logo: string | null = null;
+  // Logo: try several signals in priority order and RETURN ALL candidates. Real
+  // sites tag logos in many ways (canonical SVG, PNG masthead, apple-touch icon)
+  // and image models can't consume SVG — so the caller picks the first raster
+  // candidate that successfully rehosts, instead of dead-ending on the first hit.
+  const logoCandidates: string[] = [];
+  const pushCandidate = (url: string | null | undefined) => {
+    if (!url) return;
+    const a = abs(url, base);
+    if (a && !logoCandidates.includes(a)) logoCandidates.push(a);
+  };
   // 1. schema.org JSON-LD "logo": "url" (very common, points at the canonical mark).
-  if (!logo) {
-    const ld = /"logo"\s*:\s*"([^"]+\.(?:png|jpe?g|webp|svg)(?:\?[^"]*)?)"/i.exec(htmlText)?.[1];
-    if (ld) logo = abs(ld, base);
-  }
+  pushCandidate(/"logo"\s*:\s*"([^"]+\.(?:png|jpe?g|webp|svg)(?:\?[^"]*)?)"/i.exec(htmlText)?.[1]);
   // 2. <link rel="...logo..."> or <meta property="og:logo">.
-  if (!logo) {
-    const linkLogo =
-      /<link[^>]+rel=["'][^"']*logo[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1] ||
-      /<meta[^>]+property=["']og:logo["'][^>]+content=["']([^"']+)["']/i.exec(htmlText)?.[1];
-    if (linkLogo) logo = abs(linkLogo, base);
-  }
-  // 3. An <img> whose class/id/alt/src mentions "logo" (now incl. id, and .svg).
-  if (!logo) {
-    const logoImg = /<img[^>]+(?:class|id|alt|src|data-[a-z-]+)=["'][^"']*logo[^"']*["'][^>]*>/i.exec(htmlText)?.[0];
-    if (logoImg) {
-      const src = /\bsrc=["']([^"']+)["']/i.exec(logoImg)?.[1];
-      if (src) logo = abs(src, base);
-    }
-  }
+  pushCandidate(/<link[^>]+rel=["'][^"']*logo[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1]);
+  pushCandidate(/<meta[^>]+property=["']og:logo["'][^>]+content=["']([^"']+)["']/i.exec(htmlText)?.[1]);
+  // 3. An <img> whose class/id/alt/src mentions "logo".
+  const logoImg = /<img[^>]+(?:class|id|alt|src|data-[a-z-]+)=["'][^"']*logo[^"']*["'][^>]*>/i.exec(htmlText)?.[0];
+  if (logoImg) pushCandidate(/\bsrc=["']([^"']+)["']/i.exec(logoImg)?.[1]);
   // 4. The first <img> inside the <header> (the masthead brand mark).
-  if (!logo) {
-    const header = /<header\b[\s\S]*?<\/header>/i.exec(htmlText)?.[0];
-    const headerImg = header ? /<img[^>]+\bsrc=["']([^"']+\.(?:png|jpe?g|webp|svg)(?:\?[^"']*)?)["']/i.exec(header)?.[1] : null;
-    if (headerImg) logo = abs(headerImg, base);
-  }
-  // 5. apple-touch-icon, then favicon.
-  if (!logo) {
-    const touch = /<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1];
-    if (touch) logo = abs(touch, base);
-  }
-  if (!logo) {
-    const icon = /<link[^>]+rel=["'][^"']*icon[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1];
-    if (icon) logo = abs(icon, base);
-  }
+  const header = /<header\b[\s\S]*?<\/header>/i.exec(htmlText)?.[0];
+  if (header) pushCandidate(/<img[^>]+\bsrc=["']([^"']+\.(?:png|jpe?g|webp|svg)(?:\?[^"']*)?)["']/i.exec(header)?.[1]);
+  // 5. apple-touch-icon, then favicon (both usually raster — good final fallback).
+  pushCandidate(/<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1]);
+  pushCandidate(/<link[^>]+rel=["'][^"']*icon[^"']*["'][^>]+href=["']([^"']+)["']/i.exec(htmlText)?.[1]);
 
   const themeColor =
     /<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i.exec(htmlText)?.[1] || null;
 
-  return { logo, images, themeColor };
+  return { logo: logoCandidates[0] ?? null, logoCandidates, images, themeColor };
 }
 
 // Mine the most-used VIVID (non-grayscale, mid-luminance) hex colors from the raw
@@ -484,6 +489,7 @@ async function rehost(
   client: ReturnType<typeof createUserClient>,
   srcUrl: string,
   keyBase: string,
+  opts: { rasterOnly?: boolean } = {},
 ): Promise<{ url: string; key: string } | null> {
   try {
     const ctl = new AbortController();
@@ -493,6 +499,9 @@ async function rehost(
     if (!r.ok) return null;
     const ct = r.headers.get('content-type') || '';
     if (!/image\//.test(ct)) return null;
+    // Image models can't consume SVG (it's text). rasterOnly rejects SVG so the
+    // caller can try the next candidate instead of persisting an unusable logo.
+    if (opts.rasterOnly && ct.includes('svg')) return null;
     const blob = await r.blob();
     if (blob.size === 0 || blob.size > 5_000_000) return null;
     const ext = ct.includes('png') ? 'png' : ct.includes('svg') ? 'svg' : ct.includes('webp') ? 'webp' : 'jpg';

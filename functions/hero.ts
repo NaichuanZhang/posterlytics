@@ -2,7 +2,9 @@ import {
   CORS,
   aiImage,
   errorDetails,
+  fetchImageAsDataUrl,
   imageSourceToBlob,
+  inlineReferenceImages,
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
@@ -47,7 +49,10 @@ export default async function (req: Request): Promise<Response> {
   const style = isEvent ? 'event' : 'designer';
 
   // The real brand logo (if any) is passed to the image model as a reference so
-  // it can paint the actual logo into the poster's brand row.
+  // it can paint the actual logo into the poster's brand row. References are
+  // inlined as raster data URLs: the provider fetches plain URLs itself and
+  // rejects our CDN's binary/octet-stream content type (and SVG logos outright),
+  // which 400s the whole generation.
   const assets = ((campaign as Record<string, unknown>).brand_assets ?? {}) as { logo_url?: string };
   const userReferences = Array.isArray((campaign as Record<string, unknown>).reference_images)
     ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
@@ -55,8 +60,30 @@ export default async function (req: Request): Promise<Response> {
         .filter(Boolean)
         .slice(0, 5)
     : [];
-  const referenceImages = [...(assets.logo_url ? [assets.logo_url] : []), ...userReferences].slice(0, 6);
-  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, !!assets.logo_url);
+  const inlinedLogo = assets.logo_url ? await fetchImageAsDataUrl(assets.logo_url) : null;
+  const inlinedRefs = await inlineReferenceImages(userReferences, { maxImages: 5 });
+  if (assets.logo_url && !inlinedLogo) {
+    logPipelineEvent({
+      source: 'hero',
+      campaignId: campaign.id,
+      status: 'degraded',
+      code: 'logo_reference_skipped',
+      detail: 'Brand logo could not be inlined as a raster image (SVG or fetch failure); painting without it.',
+    });
+  }
+  if (inlinedRefs.length < userReferences.length) {
+    logPipelineEvent({
+      source: 'hero',
+      campaignId: campaign.id,
+      status: 'degraded',
+      code: 'reference_image_skipped',
+      detail: `${userReferences.length - inlinedRefs.length} of ${userReferences.length} reference image(s) could not be inlined; painting with the rest.`,
+    });
+  }
+  // hasLogo reflects what is ACTUALLY attached, so the prompt never promises a
+  // logo reference the model won't receive.
+  const referenceImages = [...(inlinedLogo ? [inlinedLogo] : []), ...inlinedRefs].slice(0, 6);
+  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, !!inlinedLogo);
 
   // Request 2:3 explicitly — aspect ratio only, never provider pixel dimensions
   // (AiPoster shows the full image uncropped above the external QR footer).

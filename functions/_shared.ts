@@ -116,6 +116,84 @@ export function userContentWithImages(text: string, imageUrls: readonly string[]
   ];
 }
 
+// Detect a raster image mime from magic bytes. Content-type headers are
+// untrustworthy here — the storage CDN serves everything as
+// binary/octet-stream — and SVG/XML/text never match, which is the point:
+// image models can only consume raster references. Pure; unit-tested.
+export function sniffImageMime(bytes: Uint8Array): string | null {
+  if (bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && // RIFF
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'image/webp'; // WEBP
+  if (bytes.length >= 6 &&
+    bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return 'image/gif'; // GIF8
+  return null;
+}
+
+// Chunked base64 so a multi-MB image never hits the String.fromCharCode
+// argument-count limit.
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// Fetch a reference image and return it as a raster data URL, or null when it
+// can't be used (SVG, non-image, oversized, fetch failure). Model providers
+// fetch URL references themselves and choke on the CDN's binary/octet-stream
+// content type — inlining bytes sidesteps that entirely.
+export async function fetchImageAsDataUrl(url: string, maxBytes = 5_000_000): Promise<string | null> {
+  if (url.startsWith('data:')) {
+    return /^data:image\/(png|jpe?g|webp|gif)[;,]/i.test(url) ? url : null;
+  }
+  try {
+    const ctl = new AbortController();
+    const timeout = setTimeout(() => ctl.abort(), 10_000);
+    try {
+      const response = await fetch(url, { signal: ctl.signal });
+      if (!response.ok) return null;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length === 0 || bytes.length > maxBytes) return null;
+      const mime = sniffImageMime(bytes);
+      if (!mime) return null;
+      return `data:${mime};base64,${bytesToBase64(bytes)}`;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return null;
+  }
+}
+
+// Inline a list of reference-image URLs as data URLs, in order, dropping any
+// that fail and stopping before the total payload outgrows the request-size
+// headroom of the chat/image APIs.
+export async function inlineReferenceImages(
+  urls: readonly string[],
+  opts: { maxImages?: number; maxTotalBytes?: number } = {},
+): Promise<string[]> {
+  const { maxImages = 6, maxTotalBytes = 10_000_000 } = opts;
+  const fetched = await Promise.all(
+    urls.filter(Boolean).slice(0, maxImages).map((url) => fetchImageAsDataUrl(url)),
+  );
+  const inlined: string[] = [];
+  let total = 0;
+  for (const dataUrl of fetched) {
+    if (!dataUrl) continue;
+    // ~3/4 of the base64 length is the byte size; close enough for a budget.
+    const approxBytes = Math.floor(dataUrl.length * 0.75);
+    if (total + approxBytes > maxTotalBytes) break;
+    total += approxBytes;
+    inlined.push(dataUrl);
+  }
+  return inlined;
+}
+
 async function upstreamFailure(provider: string, response: Response): Promise<UpstreamError> {
   const body = (await response.text().catch(() => '')).slice(0, 500);
   const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
