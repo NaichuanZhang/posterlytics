@@ -89,17 +89,16 @@ export default async function (req: Request): Promise<Response> {
     'RULES: design 5-7 zones, ordered top→lower, to make the poster INFORMATION-DENSE and editorial — fill the canvas ' +
     'with substance (a brand row, a hero headline, a feature grid, a stats/proof row, product detail) rather than a few ' +
     'sparse elements. Use the band labels to place them: "top" (brand/logo row), "upper" (hero headline + key message), ' +
-    '"mid" (features grid, stats, product detail — usually 2-3 zones here), "lower" (a final value prop or proof point). ' +
+    '"mid" (features grid, stats, product detail — usually 2-3 zones here), "lower" (a final value prop or proof point, ' +
+    'running to the bottom edge of the artwork). ' +
     'Keep every content string SHORT and legible. The palette_roles MUST use the real brand colors provided. ' +
-    'This is a PRINTED POSTER IMAGE, not an app screen. ' +
+    'This is a PRINTED POSTER IMAGE, not an app screen. The four bands together fill the COMPLETE 2:3 frame. ' +
     'CRITICAL: do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere — the tracked QR ' +
-    'footer bar (composited afterward) IS the call-to-action, so a CTA zone would be redundant. Use the "lower" zone ' +
-    'for a closing value prop or proof point instead. ' +
+    'footer bar (printed separately below the artwork) IS the call-to-action, so a CTA zone would be redundant. ' +
+    'Use the "lower" zone for a closing value prop or proof point instead. ' +
     (hasLogo
       ? 'The brand has a real LOGO (a reference image is passed to the painter) — include a "top" brand-row zone whose role mentions the logo. '
-      : '') +
-    'Leave the BOTTOM ~26% of the poster empty — do NOT place any zone or text below ~74% down; the QR footer bar is ' +
-    'composited there. The lowest zone sits around 60-73% down, never below ~74%.';
+      : '');
 
   const user =
     `PRODUCT: ${product}\n` +

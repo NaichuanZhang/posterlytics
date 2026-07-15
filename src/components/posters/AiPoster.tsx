@@ -2,7 +2,17 @@ import { forwardRef } from 'react'
 import type { Campaign, EventPosterSpec } from '../../lib/types'
 import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
-import { POSTER_HEIGHT, POSTER_WIDTH } from '../../lib/posterSize'
+import { parseColor, toHex } from '../../lib/colorUtils'
+import {
+  ARTWORK_HEIGHT,
+  ARTWORK_WIDTH,
+  FOOTER_H,
+  MATTE_GAP,
+  POSTER_HEIGHT,
+  POSTER_WIDTH,
+  QR_PX,
+  SHEET_MARGIN_Y,
+} from '../../lib/posterSize'
 import { QrCode } from '../QrCode'
 
 interface Props {
@@ -14,44 +24,32 @@ interface Props {
   imageSrcOverride?: string
 }
 
-// AI-image poster: the model-generated illustration in the TOP ~81.5% of the
-// native 1080×1620 (2:3) frame, with the REAL per-placement QR in a DEDICATED
-// branded band that owns the bottom ~18.5% as its OWN row (no overlap). The image
-// model can't render a scannable QR, so we composite ours.
+// A4 print sheet: the COMPLETE model-generated 2:3 illustration centered on a
+// portrait A4 canvas (matte-framed, object-fit: contain — never cropped,
+// stretched, or covered), with the REAL per-placement QR in a branded footer
+// row BELOW the artwork. The image model can't render a scannable QR, so we
+// composite ours — but outside the art, so no pixel the model painted is ever
+// hidden or faded.
 //
-// The band is a genuine letterbox row, not an overlay: the image is cropped to
-// the image row with `objectPosition:'top'` (sheds the BOTTOM of the art, where
-// stray CTA/footer pixels land), and the band sits in normal flow below it. This
-// makes the old "band seam clips drawn art" failure structurally impossible —
-// the band never sits on top of any artwork. hero.ts prompts the model to finish
-// all content by ~74% down and leave the bottom ~26% as empty margin so a clean
-// strip of the poster's own background sits above the band (smooth transition,
-// the crop line never slices a headline or a drawn control).
+// The matte matches the analyzed brand background so the artwork (which the
+// prompt asks to fill edge-to-edge with that same bg) reads as one surface;
+// monochrome/unparsable palettes fall back to the neutral paper color.
 //
 // The QR card is ALWAYS white with dark modules, independent of brand palette,
-// so it stays scannable on any background. The band is dark (posterColors.ink)
+// so it stays scannable on any background. The footer is dark (posterColors.ink)
 // with a thin vivid brand-accent hairline on top for identity.
-// Band geometry (native px). BAND_H is about 18.5% of the 2:3 poster height; the
-// image row takes the remaining height so the two stack without overlapping.
-const BAND_H = 300
-// Vertical fade scrim over the bottom of the image row: content the model painted
-// near the crop line dissolves into the band color instead of being hard-sliced
-// (models often ignore the "leave the bottom empty" prompt). ≈ band height.
-const SCRIM_H = 300
-const BAND_PAD_X = 64
-const BAND_GAP = 44
-const QR_PX = 200
-const QR_CARD_PAD = 18
-const QR_CARD_RADIUS = 20
+const FOOTER_PAD_X = 56
+const FOOTER_GAP = 40
+const QR_CARD_PAD = 14
+const QR_CARD_RADIUS = 16
 const HAIRLINE = 3
-const CTA_TITLE_PX = 52
-const CTA_SUB_PX = 30
+const CTA_TITLE_PX = 44
+const CTA_SUB_PX = 26
 
 export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   { campaign, code, imageSrcOverride },
   ref,
 ) {
-  const IMG_H = POSTER_HEIGHT - BAND_H
   const img = imageSrcOverride ?? campaign.hero_image_url
   const isEvent = campaign.scenario === 'event'
   // For events the poster_spec is an EventPosterSpec; its logistics lines were
@@ -69,14 +67,17 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
       ].filter((s): s is string => !!s && s.trim().length > 0)
     : []
 
-  // Dark, neutral band with a vivid brand accent hairline. The accent is derived
-  // by posterColors (handles monochrome brands by falling back to a tasteful
-  // default), so identity shows even when the brand palette is grayscale.
+  // Dark, neutral footer with a vivid brand accent hairline. The accent is
+  // derived by posterColors (handles monochrome brands by falling back to a
+  // tasteful default), so identity shows even when the brand is grayscale.
   const pc = posterColors(campaign.style_profile)
-  const bandBg = pc.ink
-  const bandAccent = pc.accent
-  const bandText = '#ffffff'
-  const bandTextDim = 'rgba(255,255,255,0.72)'
+  // Matte = the analyzed brand background when parseable, else the paper color.
+  const brandBg = parseColor(campaign.style_profile?.palette?.bg)
+  const matte = brandBg ? toHex(brandBg) : pc.paper
+  const footerBg = pc.ink
+  const footerAccent = pc.accent
+  const footerText = '#ffffff'
+  const footerTextDim = 'rgba(255,255,255,0.72)'
 
   return (
     <div
@@ -85,36 +86,31 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
         width: POSTER_WIDTH,
         height: POSTER_HEIGHT,
         overflow: 'hidden',
-        background: bandBg,
+        background: matte,
         display: 'flex',
         flexDirection: 'column',
+        alignItems: 'center',
+        paddingTop: SHEET_MARGIN_Y,
+        paddingBottom: SHEET_MARGIN_Y,
+        boxSizing: 'border-box',
       }}
     >
-      {/* Image row — the top ~81.5%. Cropped from the TOP (objectPosition:'top')
-          so the discarded slice is the bottom of the art, never the headline. */}
-      <div style={{ width: '100%', height: IMG_H, overflow: 'hidden', flex: '0 0 auto', position: 'relative' }}>
+      {/* Artwork area — the full 2:3 image, contained (never cropped). */}
+      <div
+        style={{
+          width: ARTWORK_WIDTH,
+          height: ARTWORK_HEIGHT,
+          flex: '0 0 auto',
+          overflow: 'hidden',
+        }}
+      >
         {img ? (
-          <>
-            <img
-              src={img}
-              crossOrigin="anonymous"
-              alt={`${campaign.product_name} poster`}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }}
-            />
-            {/* Fade the bottom of the image into the band color so any content the
-                model painted near the crop line dissolves in — no hard chop. */}
-            <div
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: SCRIM_H,
-                pointerEvents: 'none',
-                background: `linear-gradient(to bottom, ${hexToRgba(bandBg, 0)}, ${hexToRgba(bandBg, 1)})`,
-              }}
-            />
-          </>
+          <img
+            src={img}
+            crossOrigin="anonymous"
+            alt={`${campaign.product_name} poster`}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          />
         ) : (
           <div
             style={{
@@ -126,6 +122,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
               fontSize: 34,
               textAlign: 'center',
               padding: 80,
+              boxSizing: 'border-box',
             }}
           >
             AI poster is still generating…
@@ -133,32 +130,31 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
         )}
       </div>
 
-      {/* Dedicated bottom band — its OWN row below the image, never overlapping
-          art. QR card on the left (always white for contrast), CTA copy right. */}
+      {/* QR footer — its own row BELOW the artwork (aligned to the artwork
+          width), never overlapping art. White QR card left, CTA copy right. */}
       {img && (
         <div
           style={{
-            width: '100%',
-            height: BAND_H,
+            width: ARTWORK_WIDTH,
+            height: FOOTER_H,
             flex: '0 0 auto',
-            background: bandBg,
-            borderTop: `${HAIRLINE}px solid ${bandAccent}`,
-            boxShadow: '0 -24px 48px rgba(0,0,0,0.28)',
+            marginTop: MATTE_GAP,
+            background: footerBg,
+            borderTop: `${HAIRLINE}px solid ${footerAccent}`,
             display: 'flex',
             alignItems: 'center',
-            padding: `0 ${BAND_PAD_X}px`,
-            gap: BAND_GAP,
+            padding: `0 ${FOOTER_PAD_X}px`,
+            gap: FOOTER_GAP,
             boxSizing: 'border-box',
           }}
         >
           {/* White QR card — light quiet-zone frame keeps the code scannable
-              regardless of the band/brand color. */}
+              regardless of the footer/brand color. */}
           <div
             style={{
               background: '#ffffff',
               padding: QR_CARD_PAD,
               borderRadius: QR_CARD_RADIUS,
-              boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
               flex: '0 0 auto',
               display: 'flex',
             }}
@@ -166,17 +162,17 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             <QrCode value={buildViewUrl(code)} size={QR_PX} dark="#0b0c0b" light="#ffffff" />
           </div>
 
-          {/* Band copy. For events: RSVP label + the real date/time/location/host
+          {/* Footer copy. For events: RSVP label + the real date/time/location/host
               lines (accurate, composited — never AI-painted). For products: the
               CTA caption + a "point your camera" nudge. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: isEvent ? 6 : 8, minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isEvent ? 5 : 8, minWidth: 0 }}>
             <span
               style={{
-                fontSize: isEvent ? 40 : CTA_TITLE_PX,
+                fontSize: isEvent ? 36 : CTA_TITLE_PX,
                 fontWeight: 800,
                 lineHeight: 1.05,
                 letterSpacing: '-0.01em',
-                color: bandText,
+                color: footerText,
               }}
             >
               {caption}
@@ -186,17 +182,17 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
                 <span
                   key={i}
                   style={{
-                    fontSize: i === 0 ? 30 : 26,
+                    fontSize: i === 0 ? 27 : 24,
                     fontWeight: i === 0 ? 700 : 500,
                     lineHeight: 1.25,
-                    color: i === 0 ? bandText : bandTextDim,
+                    color: i === 0 ? footerText : footerTextDim,
                   }}
                 >
                   {line}
                 </span>
               ))
             ) : (
-              <span style={{ fontSize: CTA_SUB_PX, fontWeight: 500, lineHeight: 1.2, color: bandTextDim }}>
+              <span style={{ fontSize: CTA_SUB_PX, fontWeight: 500, lineHeight: 1.2, color: footerTextDim }}>
                 Point your camera here
               </span>
             )}
@@ -206,15 +202,3 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     </div>
   )
 })
-
-// Build an rgba() string from a #rrggbb (or #rgb) hex at the given alpha. Used for
-// the fade scrim so it dissolves to exactly the band color (not a gray "transparent"
-// keyword halo) and tracks bandBg if it ever changes. Falls back to black on a
-// non-hex value.
-function hexToRgba(hex: string, alpha: number): string {
-  let h = (hex || '').trim().replace('#', '')
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('')
-  const n = parseInt(h, 16)
-  if (h.length !== 6 || Number.isNaN(n)) return `rgba(0, 0, 0, ${alpha})`
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
-}

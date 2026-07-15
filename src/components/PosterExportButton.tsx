@@ -7,18 +7,18 @@ import { AiPoster } from './posters/AiPoster'
 interface Props {
   campaign: Campaign
   placement: Placement
-  label?: string // button text; defaults to 'Export PNG'
+  label?: string // button text; defaults to 'Export A4 PNG'
 }
 
-// Exports the poster with this placement's QR embedded as a 1080x1620 PNG.
-// AiPoster renders off-screen at full
-// size and html-to-image captures it (the QR is a same-origin data-URL <img>, so no
-// canvas taint). No scaling — pixel-exact output.
+// Exports the poster with this placement's QR embedded as an A4 PNG
+// (2480×3508 — the 1240×1754 sheet captured at pixelRatio 2). AiPoster renders
+// off-screen at full size and html-to-image captures it (the QR is a
+// same-origin data-URL <img>, so no canvas taint).
 //
 // The AI hero lives on cross-origin Storage, which would taint the export canvas;
 // we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
 // imageSrcOverride (falling back to the hosted URL if the fetch fails).
-export function PosterExportButton({ campaign, placement, label = 'Export PNG' }: Props) {
+export function PosterExportButton({ campaign, placement, label = 'Export A4 PNG' }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
@@ -61,7 +61,7 @@ export function PosterExportButton({ campaign, placement, label = 'Export PNG' }
       })
       const a = document.createElement('a')
       a.href = dataUrl
-      a.download = `${campaign.product_name.replace(/\W+/g, '-')}-${placement.label.replace(/\W+/g, '-')}.png`
+      a.download = `${campaign.product_name.replace(/\W+/g, '-')}-${placement.label.replace(/\W+/g, '-')}-A4.png`
       a.click()
     } catch (e) {
       console.error('export failed', e)

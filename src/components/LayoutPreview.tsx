@@ -1,7 +1,15 @@
 import type { PosterLayout, PosterLayoutZone } from '../lib/types'
 import { parseColor } from '../lib/colorUtils'
 import { BAND_GEOMETRY, groupZonesByBand } from '../lib/layoutPreview'
-import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
+import {
+  ARTWORK_HEIGHT,
+  ARTWORK_WIDTH,
+  FOOTER_H,
+  MATTE_GAP,
+  POSTER_HEIGHT,
+  POSTER_WIDTH,
+  SHEET_MARGIN_Y,
+} from '../lib/posterSize'
 
 interface Props {
   layout: PosterLayout
@@ -11,10 +19,12 @@ interface Props {
 // A deterministic WIREFRAME of a designer-mode poster layout, rendered straight
 // from the `poster_layout` JSON the `designer` agent produced — shown while the AI
 // image is still painting (or in the editor before/if the paint is missing). It is
-// explicitly NOT the final poster: palette-tinted blocks per zone with the role +
-// exact content text, sized by emphasis, in the correct band, with the reserved QR
-// band marked. Same native-size + transform:scale idiom as Poster/AiPoster so the
-// band proportions match what compileLayoutPrompt tells the model to paint.
+// explicitly NOT the final poster: the same A4 sheet as AiPoster (matte, centered
+// full 2:3 artwork area, QR footer placeholder OUTSIDE the artwork), with
+// palette-tinted blocks per zone showing the role + exact content text, sized by
+// emphasis, in the correct band. Same native-size + transform:scale idiom as
+// Poster/AiPoster so the proportions match what compileLayoutPrompt tells the
+// model to paint.
 const DEFAULT_PREVIEW_W = 440
 
 export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
@@ -43,6 +53,10 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
           color: p.text,
           display: 'flex',
           flexDirection: 'column',
+          alignItems: 'center',
+          paddingTop: SHEET_MARGIN_Y,
+          paddingBottom: SHEET_MARGIN_Y,
+          boxSizing: 'border-box',
           position: 'relative',
           fontFamily: 'Inter, system-ui, sans-serif',
         }}
@@ -51,8 +65,8 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
         <div
           style={{
             position: 'absolute',
-            top: 22,
-            right: 22,
+            top: 42,
+            right: 42,
             zIndex: 2,
             background: 'rgba(0,0,0,0.55)',
             color: '#fff',
@@ -66,21 +80,32 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
           PREVIEW · bespoke layout
         </div>
 
-        {BAND_GEOMETRY.map((row) => {
-          const height = (row.heightPct / 100) * POSTER_HEIGHT
-          if (row.band === 'reserved') {
-            return <ReservedBand key="reserved" height={height} accent={p.accent} />
-          }
-          return (
+        {/* Full 2:3 artwork wireframe — the four content bands own the whole frame. */}
+        <div
+          style={{
+            width: ARTWORK_WIDTH,
+            height: ARTWORK_HEIGHT,
+            flex: '0 0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            border: '1px dashed rgba(128,128,128,0.35)',
+            boxSizing: 'border-box',
+          }}
+        >
+          {BAND_GEOMETRY.map((row) => (
             <ContentBand
               key={row.band}
               label={row.label}
-              height={height}
+              height={(row.heightPct / 100) * ARTWORK_HEIGHT}
               zones={zonesByBand[row.band] ?? []}
               palette={p}
             />
-          )
-        })}
+          ))}
+        </div>
+
+        {/* QR footer placeholder — composited by AiPoster OUTSIDE the artwork. */}
+        <FooterPlaceholder accent={p.accent} />
       </div>
     </div>
   )
@@ -187,19 +212,21 @@ function ZoneBlock({ zone, palette, count }: { zone: PosterLayoutZone; palette: 
   )
 }
 
-function ReservedBand({ height, accent }: { height: number; accent: string }) {
+function FooterPlaceholder({ accent }: { accent: string }) {
   return (
     <div
       style={{
-        height,
+        width: ARTWORK_WIDTH,
+        height: FOOTER_H,
         flex: '0 0 auto',
+        marginTop: MATTE_GAP,
         boxSizing: 'border-box',
         background: '#0b0c0b',
         borderTop: `3px solid ${accent}`,
         display: 'flex',
         alignItems: 'center',
         gap: 28,
-        padding: '0 64px',
+        padding: '0 56px',
       }}
     >
       <div
@@ -218,8 +245,8 @@ function ReservedBand({ height, accent }: { height: number; accent: string }) {
         ▦
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 40, fontWeight: 800, color: '#fff' }}>QR band</span>
-        <span style={{ fontSize: 26, color: 'rgba(255,255,255,0.72)' }}>added automatically — kept clear</span>
+        <span style={{ fontSize: 40, fontWeight: 800, color: '#fff' }}>QR footer</span>
+        <span style={{ fontSize: 26, color: 'rgba(255,255,255,0.72)' }}>added automatically — below the artwork</span>
       </div>
     </div>
   )

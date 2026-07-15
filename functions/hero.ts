@@ -13,11 +13,10 @@ import {
 // `hero` renders the poster (2:3) as a single AI image. Products compile the
 // LLM-designed poster_layout (produced by the `designer` agent) into the prompt
 // via the pure compileLayoutPrompt(); events use their own bespoke event prompt.
-// The image model gets TEXT ONLY, so the brand is described in words. The SPA
-// letterboxes this image into the TOP ~81.5% and gives the QR its own branded
-// band in the bottom row, so we prompt the model to FINISH all content by ~80%
-// down and leave the bottom ~20% as empty margin (the crop line lands there,
-// discarding nothing important). Stored in the public assets bucket.
+// The image model gets TEXT ONLY, so the brand is described in words. The
+// artwork fills its complete 2:3 frame — the SPA shows it uncropped on an A4
+// sheet with the QR footer composited OUTSIDE the artwork. Stored in the public
+// assets bucket.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -59,8 +58,8 @@ export default async function (req: Request): Promise<Response> {
   const referenceImages = [...(assets.logo_url ? [assets.logo_url] : []), ...userReferences].slice(0, 6);
   const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, !!assets.logo_url);
 
-  // The image model emits a native 2:3 portrait regardless of aspect_ratio; we
-  // request 2:3 explicitly (AiPoster letterboxes it above the QR band).
+  // Request 2:3 explicitly — aspect ratio only, never provider pixel dimensions
+  // (AiPoster shows the full image uncropped above the external QR footer).
   let imageSource: string;
   try {
     imageSource = await aiImage(prompt, '2:3', referenceImages);
@@ -191,9 +190,9 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
 }
 
 // Compose the text-to-image prompt for an EVENT promo poster (2:3). The exact
-// date/time/location are rendered as REAL text by the SPA (AiPoster band), NOT by
-// the image model — so this prompt paints only the ATMOSPHERE + event title + host,
-// and (like every style) leaves the bottom ~26% empty for the composited band.
+// date/time/location are rendered as REAL text by the SPA (AiPoster's footer,
+// outside the artwork), NOT by the image model — so this prompt paints only the
+// ATMOSPHERE + event title + host, filling the complete 2:3 frame.
 function buildEventPrompt(c: Record<string, unknown>, hasLogo = false): string {
   const spec = (c.poster_spec ?? {}) as {
     title?: string; hook?: string; blurb?: string; host_line?: string;
@@ -227,18 +226,15 @@ Arrange it top to bottom:
   visual element, with expressive typography and decorative accents around it.
 ${hook ? `- Just below the title, a short punchy hook line reading "${hook}".` : ''}
 ${hostLine ? `- A small host/presenter line reading "${hostLine}".` : ''}
-- Middle: rich atmospheric illustration evoking the event's theme and energy (people gathering, venue mood, motifs from
-  the brand essence) — make it feel exciting and specific, not generic clip-art.
+- Middle and lower: rich atmospheric illustration evoking the event's theme and energy (people gathering, venue mood,
+  motifs from the brand essence), filling the frame all the way to the bottom edge — make it feel exciting and
+  specific, not generic clip-art.
 
-- CRITICAL FRAMING: FINISH all artwork and text by about 74% of the way down. Leave the BOTTOM ~26% — a full-width
-  horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background with nothing in it: no
-  text, cards, icons, buttons, QR code, barcode, date, time, address, or decoration. That bottom margin is cropped and
-  replaced by a branded footer bar (with the real date/time/location + a scannable QR) afterward, so anything drawn
-  there is discarded or clashes. Do NOT paint any date, time, address, or QR code yourself — those are added later as
-  crisp real text.
+Do NOT paint any date, time, address, QR code, or barcode yourself — the real date/time/location and a scannable QR
+are printed separately below the artwork as crisp real text.
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above.
 High quality, sharp, 8k, atmospheric event-poster art direction.
 Avoid: product/app UI mockups, painted buttons/pills, any QR/barcode drawn by you, any painted date/time/address,
-garbled or misspelled text, non-English text, and a busy/cluttered bottom edge.`;
+garbled or misspelled text, non-English text, and watermarks.`;
 }

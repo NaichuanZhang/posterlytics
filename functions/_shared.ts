@@ -198,7 +198,7 @@ export interface PosterLayout {
   mood: string; // e.g. "editorial, calm, premium"
   art_style: string; // visual medium/treatment, e.g. "flat vector + soft gradients"
   palette_roles: { bg: string; surface?: string; text: string; primary: string; accent: string };
-  zones: PosterLayoutZone[]; // top→lower; must finish by ~80% (bottom reserved for the QR band)
+  zones: PosterLayoutZone[]; // top→lower; the artwork fills the full 2:3 frame (QR footer is outside it)
 }
 
 const LAYOUT_BANDS: LayoutBand[] = ['top', 'upper', 'mid', 'lower'];
@@ -253,8 +253,8 @@ export function normalizePosterLayout(
 // Compile a PosterLayout into a text-to-image prompt. PURE + deterministic — the
 // testable seam between the agentic layout and the image model. Reuses hero.ts's
 // proven conventions: 2:3 framing, brand-honoring, "render only these exact
-// quoted strings", the bottom ~20% empty-margin rule (so the SPA letterbox crop
-// + QR band stay clean), and an Avoid list.
+// quoted strings", and an Avoid list. The artwork fills the complete frame —
+// the SPA composites the QR footer OUTSIDE the artwork on the A4 sheet.
 export function compileLayoutPrompt(
   layout: PosterLayout,
   ctx: { product: string; essence: string; hasLogo?: boolean },
@@ -262,9 +262,9 @@ export function compileLayoutPrompt(
   const p = layout.palette_roles;
   const bandLabel: Record<LayoutBand, string> = {
     top: 'TOP strip (0-12% down)',
-    upper: 'UPPER area (12-40% down)',
-    mid: 'MIDDLE area (40-60% down)',
-    lower: 'LOWER area (60-74% down)',
+    upper: 'UPPER area (12-42% down)',
+    mid: 'MIDDLE area (42-72% down)',
+    lower: 'LOWER area (72-100% down)',
   };
   // Stable top→lower order regardless of the order the model emitted zones in.
   const ordered = [...layout.zones].sort((a, b) => LAYOUT_BANDS.indexOf(a.band) - LAYOUT_BANDS.indexOf(b.band));
@@ -284,9 +284,9 @@ export function compileLayoutPrompt(
   return `Create a single PORTRAIT 2:3 product-promotion poster. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
 
-This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, rounded clickable controls, tabs, or any UI chrome. The scannable QR footer bar (composited afterward) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.
+This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, rounded clickable controls, tabs, or any UI chrome. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.
 
-Make the poster INFORMATION-DENSE and editorial: fill the composition with multiple supporting elements (a feature grid, a stat or proof row, product detail, icons) so it feels rich and considered — avoid large empty areas above the reserved bottom margin.
+Make the poster INFORMATION-DENSE and editorial: fill the composition with multiple supporting elements (a feature grid, a stat or proof row, product detail, icons) so it feels rich and considered — the artwork owns the COMPLETE frame edge to edge, so avoid large empty areas anywhere.
 ${logoLine}
 Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; vivid accent ${p.accent}; ${p.surface ? `card/surface ${p.surface}; ` : ''}body text ${p.text}. Stay within this palette plus neutrals — no rogue colors.
 
@@ -295,13 +295,11 @@ ${ctx.essence || ctx.product}
 
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings listed below, and they must all be in ENGLISH. Do NOT print any of the layout/section descriptions, role names, position words, or instruction words as visible text — those are directions, not content.
 
-Arrange the poster top to bottom using these zones:
+Arrange the poster top to bottom using these zones — together they fill the complete frame:
 ${zoneLines || '- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
 
-CRITICAL FRAMING: FINISH all artwork and text by about 74% of the way down the poster. Leave the BOTTOM ~26% — a full-width horizontal strip along the very bottom edge — as completely clean, plain, EMPTY background (color ${p.bg}) with absolutely nothing in it: no cards, panels, frames, text, icons, buttons, QR code, barcode, or decoration. That bottom margin is cropped off and replaced by a branded footer bar afterward, so anything drawn there is discarded or clashes. Keep a comfortable empty gap of plain background between the last content and that bottom margin so the transition reads cleanly.
-
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
-Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
+Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, and watermarks.`;
 }
 
 export async function aiImage(

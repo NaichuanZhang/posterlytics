@@ -9,20 +9,17 @@ function layout(zones: PosterLayout['zones']): PosterLayout {
   return { composition: 'c', mood: 'm', art_style: 'a', palette_roles: PALETTE, zones }
 }
 
-test('BAND_GEOMETRY sums to 100 and includes the reserved QR band last', () => {
+test('BAND_GEOMETRY is exactly the four content bands, top→lower, summing to 100', () => {
   const total = BAND_GEOMETRY.reduce((sum, r) => sum + r.heightPct, 0)
   assert.equal(total, 100)
-  const last = BAND_GEOMETRY[BAND_GEOMETRY.length - 1]
-  assert.equal(last.band, 'reserved')
-  // The four content bands precede the reserved row, in top→lower order.
-  const contentBands = BAND_GEOMETRY.slice(0, 4).map((r) => r.band)
-  assert.deepEqual(contentBands, LAYOUT_BAND_ORDER)
+  // The artwork owns its complete frame — no reserved QR row (the footer lives
+  // outside the artwork on the A4 sheet).
+  assert.deepEqual(BAND_GEOMETRY.map((r) => r.band), LAYOUT_BAND_ORDER)
 })
 
-test('BAND_GEOMETRY content bands occupy 74% (bottom 26% reserved), matching compileLayoutPrompt', () => {
-  const content = BAND_GEOMETRY.filter((r) => r.band !== 'reserved').reduce((s, r) => s + r.heightPct, 0)
-  assert.equal(content, 74)
-  assert.equal(BAND_GEOMETRY.find((r) => r.band === 'reserved')?.heightPct, 26)
+test('BAND_GEOMETRY matches the band ranges compileLayoutPrompt bakes into the image prompt', () => {
+  // top 0–12, upper 12–42, mid 42–72, lower 72–100
+  assert.deepEqual(BAND_GEOMETRY.map((r) => r.heightPct), [12, 30, 30, 28])
 })
 
 test('groupZonesByBand returns all four bands top→lower regardless of input order', () => {

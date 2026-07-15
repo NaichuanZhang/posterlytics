@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Posterlytics turns a product URL into an on-brand advertising poster, mints a **unique tracked QR/link per placement**, and reports visits and unique visitors by channel. New campaign creation is product-only; existing event campaigns remain compatible.
+Posterlytics turns a product URL into an on-brand advertising poster, mints a **unique tracked QR/link per placement**, and reports visits and unique visitors by channel. New campaign creation is product-only; existing event campaigns remain compatible. Live app: https://3f9q2998.insforge.site
 
 **Project management:** the [Posterlytics Notion hub](https://www.notion.so/alexhomebase/Posterlytics-38412ea3d4678044b95ae6a93cad0159) is the central PM page — the product roadmap (a Backlog / In-Progress / Done sprint board), status snapshot, and backlog all live there.
 
@@ -15,7 +15,15 @@ npm run lint     # tsc --noEmit  (type-check only; there is no ESLint/Prettier c
 npm test         # node --test on tests/*.test.ts (pure src/lib + functions/_shared helpers)
 ```
 
-There is **no ESLint/Prettier**. `lint` is a type-check. `npm test` runs Node's built-in test runner over pure helpers in `src/lib/` and `functions/_shared.ts`. The capture service has its own Node tests for aggregation, normalization, popup handling, and URL safety. Run one app test with `node --test --import ./tests/register.mjs tests/<name>.test.ts`. There is no component test runner; verify UI changes in the running app.
+There is **no ESLint/Prettier**. `lint` is a type-check. `npm test` runs Node's built-in test runner over pure helpers in `src/lib/` and `functions/_shared.ts`. The capture service has its own Node tests for aggregation, normalization, popup handling, and URL safety. Run one app test with `node --test --import ./tests/register.mjs tests/<name>.test.ts`; one capture-service test with `cd capture-service && node --import tsx --test test/<name>.test.ts`. There is no component test runner; verify UI changes in the running app.
+
+### Frontend deploy (InsForge hosting)
+
+```bash
+npm run build && npx @insforge/cli deployments deploy .
+```
+
+`vercel.json` supplies the SPA fallback rewrite; `.vercelignore` keeps backend-only directories (functions, migrations, capture-service, docs) out of the upload.
 
 ### Edge functions (Deno Subhosting)
 
@@ -29,7 +37,7 @@ The CLI may report a **deploy timeout** while the deploy actually succeeded — 
 
 ### Capture service (`capture-service/`, InsForge compute / Fly)
 
-A standalone Node + Playwright container — Deno edge functions can't run a browser. It exposes `POST /capture` (bearer-auth) → programmatic design tokens + screenshot. Requires the **latest** CLI (`compute` is absent from older pinned versions like the homebrew `0.1.40`):
+A standalone Node + Playwright container — Deno edge functions can't run a browser. It exposes `POST /capture` (bearer-auth) → programmatic design tokens + screenshot. It enforces a **12-second capture deadline** (`server.ts`) and **blocks private-network targets** (`networkSafety.ts`) — keep both when touching capture code. Requires the **latest** CLI (`compute` is absent from older pinned versions like the homebrew `0.1.40`):
 
 ```bash
 npx -y @insforge/cli@latest compute deploy ./capture-service --name posterlytics-capture --port 8080 \

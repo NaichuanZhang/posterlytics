@@ -70,16 +70,33 @@ test('compileLayoutPrompt orders zones top→lower regardless of input order', (
   assert.ok(iTop < iUpper && iUpper < iLower, 'top must come before upper before lower')
 })
 
-test('compileLayoutPrompt embeds exact zone text, palette, 2:3 framing, and the bottom-margin rule', () => {
+test('compileLayoutPrompt embeds exact zone text, palette, and 2:3 full-frame framing', () => {
   const prompt = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: 'a crisp blue data brand' })
   assert.ok(prompt.includes('"Start free today"'))
   assert.ok(prompt.includes('"Ship dashboards fast"'))
   assert.ok(prompt.includes('2:3'))
-  assert.ok(/BOTTOM ~26%/.test(prompt), 'must reserve the bottom 26% empty for the QR band')
   assert.ok(prompt.includes('#3b82f6') && prompt.includes('#f97316'))
   assert.ok(prompt.includes('a crisp blue data brand'))
   // never asks the model to draw a QR/barcode
   assert.ok(/QR code or barcode drawn by you/i.test(prompt))
+})
+
+test('compileLayoutPrompt lets the artwork fill the frame — no crop or reserved-margin instructions', () => {
+  // All four bands present, so every band label lands in the prompt.
+  const fullFrame: PosterLayout = {
+    ...LAYOUT,
+    zones: [...LAYOUT.zones, { band: 'mid', role: 'feature grid', content: 'Fast · Safe · Easy' }],
+  }
+  const prompt = compileLayoutPrompt(fullFrame, { product: 'Acme', essence: '' })
+  assert.ok(
+    !/BOTTOM ~26%|reserved bottom margin|cropped off|FINISH all artwork/i.test(prompt),
+    'must not reserve or crop any part of the frame',
+  )
+  // The band labels cover the complete frame.
+  assert.ok(prompt.includes('0-12%'))
+  assert.ok(prompt.includes('12-42%'))
+  assert.ok(prompt.includes('42-72%'))
+  assert.ok(prompt.includes('72-100%'))
 })
 
 test('compileLayoutPrompt forbids painted buttons (printed poster, not a web UI)', () => {
@@ -105,5 +122,6 @@ test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => 
 test('compileLayoutPrompt tolerates an empty zone list with a sensible default', () => {
   const prompt = compileLayoutPrompt({ ...LAYOUT, zones: [] }, { product: 'Acme', essence: '' })
   assert.ok(prompt.includes('2:3'))
-  assert.ok(/BOTTOM ~26%/.test(prompt))
+  assert.ok(prompt.includes('UPPER area: a bold hero headline'))
+  assert.ok(!/BOTTOM ~26%/.test(prompt))
 })
