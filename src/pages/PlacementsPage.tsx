@@ -44,7 +44,7 @@ export function PlacementsPage() {
       <h1 className="page-title">Placements — {campaign.product_name}</h1>
       <p className="page-sub">
         <Link to={`/campaigns/${campaign.id}`}>← Back to poster</Link> · Each placement mints a unique QR + link so
-        you can see which channel actually drives conversions.
+        you can compare visits across channels.
       </p>
 
       {campaign.status !== 'published' && (

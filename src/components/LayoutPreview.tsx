@@ -1,6 +1,7 @@
 import type { PosterLayout, PosterLayoutZone } from '../lib/types'
 import { parseColor } from '../lib/colorUtils'
 import { BAND_GEOMETRY, groupZonesByBand } from '../lib/layoutPreview'
+import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
 
 interface Props {
   layout: PosterLayout
@@ -14,13 +15,11 @@ interface Props {
 // exact content text, sized by emphasis, in the correct band, with the reserved QR
 // band marked. Same native-size + transform:scale idiom as Poster/AiPoster so the
 // band proportions match what compileLayoutPrompt tells the model to paint.
-const NATIVE_W = 1080
-const NATIVE_H = 1620
 const DEFAULT_PREVIEW_W = 440
 
 export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
   const p = layout.palette_roles
-  const scale = width / NATIVE_W
+  const scale = width / POSTER_WIDTH
   const groups = groupZonesByBand(layout)
   const zonesByBand = Object.fromEntries(groups.map((g) => [g.band, g.zones])) as Record<string, PosterLayoutZone[]>
 
@@ -28,7 +27,7 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
     <div
       style={{
         width,
-        height: NATIVE_H * scale,
+        height: POSTER_HEIGHT * scale,
         overflow: 'hidden',
         borderRadius: 8,
         boxShadow: '0 8px 30px rgba(0,0,0,0.16)',
@@ -36,8 +35,8 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
     >
       <div
         style={{
-          width: NATIVE_W,
-          height: NATIVE_H,
+          width: POSTER_WIDTH,
+          height: POSTER_HEIGHT,
           transform: `scale(${scale})`,
           transformOrigin: 'top left',
           background: p.bg,
@@ -68,7 +67,7 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
         </div>
 
         {BAND_GEOMETRY.map((row) => {
-          const height = (row.heightPct / 100) * NATIVE_H
+          const height = (row.heightPct / 100) * POSTER_HEIGHT
           if (row.band === 'reserved') {
             return <ReservedBand key="reserved" height={height} accent={p.accent} />
           }

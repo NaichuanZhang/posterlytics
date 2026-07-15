@@ -1,6 +1,5 @@
 import {
   CORS,
-  env,
   aiChat,
   extractJson,
   jsonResponse,
@@ -9,9 +8,12 @@ import {
   dataUrlToBlob,
   parseColor,
   toHex,
-  logTrace,
+  logPipelineEvent,
+  userContentWithImages,
   extractEventDetails,
+  fetchLumaHtml,
   formatEventLines,
+  isLumaHost,
   type DesignTokens,
   type EventDetails,
 } from './_shared.ts';
@@ -27,17 +29,12 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
 
-  const baseUrl = env('INSFORGE_BASE_URL');
-  const apiKey = env('API_KEY');
   const client = createUserClient(req);
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
-  const userId = userData.user.id;
 
-  // posterStyle is accepted-but-ignored for backward compat: every product
-  // campaign now uses the designer path (the fixed template modes were removed).
-  let body: { campaignId?: string; posterStyle?: string; scenario?: string };
+  let body: { campaignId?: string };
   try {
     body = await req.json();
   } catch {
@@ -48,45 +45,54 @@ export default async function (req: Request): Promise<Response> {
   // Load the campaign (owner RLS guarantees it's the caller's).
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario')
+    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario, reference_context, reference_images')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
-  // Which scenario this campaign promotes. 'event' branches the extraction +
-  // prompt + spec; anything else is the original product flow. An explicit
-  // body.scenario wins (the wizard sends it on the first analyze); otherwise we
-  // read the PERSISTED scenario so that a re-analyze/regenerate of an existing
-  // event campaign — which sends only { campaignId } — never silently reverts to
-  // the product path. Brand-new/product campaigns fall back to 'product'.
+  // New event creation is retired. Only persisted legacy event rows enter the
+  // event branch, so a request body cannot turn a product campaign into an event.
   const persistedScenario = (campaign as { scenario?: string | null }).scenario;
-  const scenario =
-    body.scenario === 'event' || body.scenario === 'product'
-      ? body.scenario
-      : persistedScenario === 'event'
-        ? 'event'
-        : 'product';
+  const scenario = persistedScenario === 'event' ? 'event' : 'product';
+  const referenceContext = String((campaign as Record<string, unknown>).reference_context ?? '').trim().slice(0, 4000);
+  const referenceImages = Array.isArray((campaign as Record<string, unknown>).reference_images)
+    ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
+        .map((image) => typeof image.url === 'string' ? image.url : '')
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
 
   await client.database.from('campaigns').update({ status: 'analyzing' }).eq('id', campaign.id);
 
   const productUrl: string = (campaign as Record<string, string>).product_url;
 
-  // 1. Scrape the site (5s budget).
+  // 1. Scrape the site. Legacy events retain the strict Luma allowlist.
   let scrapeHtml = '';
-  try {
-    const ctl = new AbortController();
-    const to = setTimeout(() => ctl.abort(), 5000);
-    const r = await fetch(productUrl, {
-      signal: ctl.signal,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-      },
-    });
-    clearTimeout(to);
-    if (r.ok) scrapeHtml = await r.text();
-  } catch {
-    scrapeHtml = '';
+  if (scenario === 'event') {
+    try {
+      const target = new URL(productUrl);
+      if (target.protocol === 'https:' && isLumaHost(target.hostname)) {
+        scrapeHtml = await fetchLumaHtml(target);
+      }
+    } catch {
+      scrapeHtml = '';
+    }
+  } else {
+    try {
+      const ctl = new AbortController();
+      const timeout = setTimeout(() => ctl.abort(), 5000);
+      const response = await fetch(productUrl, {
+        signal: ctl.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        },
+      });
+      clearTimeout(timeout);
+      if (response.ok) scrapeHtml = await response.text();
+    } catch {
+      scrapeHtml = '';
+    }
   }
 
   // 1b. For the event scenario, parse the Luma page's schema.org/Event JSON-LD
@@ -106,19 +112,17 @@ export default async function (req: Request): Promise<Response> {
   // back to the regex-mined colors below. (Capture happens here so its palette
   // can seed the model and its tokens are persisted.)
   const capture = await captureSite(productUrl);
-  if (!capture) {
-    // Silent degrade: the capture-service was unconfigured/unreachable/slow, so we
-    // lose real computed tokens + the screenshot and fall back to regex colors.
-    await logTrace(client, {
+  if (capture.error) {
+    logPipelineEvent({
+      source: 'capture',
       campaignId: campaign.id,
-      userId,
-      step: 'capture',
       status: 'degraded',
-      detail: 'capture-service returned null — fell back to regex-mined colors, no design_tokens/screenshot',
-      request: { url: productUrl },
+      code: capture.error.code,
+      detail: 'Capture unavailable; using HTML color extraction.',
+      error: capture.error.message,
     });
   }
-  const design_tokens: DesignTokens | null = capture?.tokens ?? null;
+  const design_tokens: DesignTokens | null = capture.tokens;
   // Prefer the programmatic palette (computed, role-aware) over regex mining;
   // fall back to regex colors when capture is unavailable.
   const siteColors = design_tokens
@@ -156,7 +160,7 @@ export default async function (req: Request): Promise<Response> {
   // so it's URL-addressable (generation loading UI, future vision passes).
   let screenshot_url: string | null = null;
   let screenshot_key: string | null = null;
-  if (capture?.screenshotDataUrl) {
+  if (capture.screenshotDataUrl) {
     try {
       const blob = dataUrlToBlob(capture.screenshotDataUrl);
       const { data } = await client.storage
@@ -182,16 +186,15 @@ export default async function (req: Request): Promise<Response> {
   // asset re-hosting, persistence — is shared with the product path.
   if (scenario === 'event') {
     const parsedEv = await analyzeEvent({
-      baseUrl, apiKey, campaign: campaign as Record<string, string>,
+      campaign: campaign as Record<string, string>,
       eventDetails: event_details ?? {}, siteColors, tokens: design_tokens,
-      visibleText, client, userId,
+      visibleText, referenceContext, referenceImages,
     });
     const { error: upErrEv } = await client.database
       .from('campaigns')
       .update({
         scenario: 'event',
         event_details,
-        poster_style: 'designer', // one mode for all campaigns; events paint a bespoke event prompt
         style_profile: parsedEv.style_profile,
         poster_copy: parsedEv.poster_copy,
         poster_content: parsedEv.poster_content,
@@ -205,17 +208,17 @@ export default async function (req: Request): Promise<Response> {
       })
       .eq('id', campaign.id);
     if (upErrEv) {
-      await logTrace(client, {
-        campaignId: campaign.id, userId, step: 'analyze', status: 'failed',
+      logPipelineEvent({
+        source: 'analyze', campaignId: campaign.id, status: 'failed',
+        code: 'campaign_persist_failed',
         detail: 'campaign persist failed after event analyze',
-        response: { error: upErrEv.message },
+        error: upErrEv,
       });
       return jsonResponse({ error: upErrEv.message }, 500);
     }
     return jsonResponse({
       scenario: 'event',
       event_details,
-      poster_style: 'designer',
       style_profile: parsedEv.style_profile,
       poster_copy: parsedEv.poster_copy,
       poster_content: parsedEv.poster_content,
@@ -254,48 +257,48 @@ export default async function (req: Request): Promise<Response> {
     `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
     `PRODUCT URL: ${productUrl}\n` +
     `REAL BRAND COLORS mined from the site CSS (most-used first, use these for the palette): ${siteColors.length ? siteColors.join(', ') : '(none found — infer tasteful defaults)'}\n\n` +
-    `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}`;
+    `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}\n\n` +
+    `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
+    `The user supplied ${referenceImages.length} supporting image(s). Treat them as visual references, not text to reproduce verbatim.`;
+  const userContent = userContentWithImages(user, referenceImages);
 
   let parsed: ParsedContent;
   try {
-    const raw = await aiChat(baseUrl, apiKey, [
+    const raw = await aiChat([
       { role: 'system', content: sys },
-      { role: 'user', content: user },
+      { role: 'user', content: userContent },
     ], { maxTokens: 2200 });
     parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, design_tokens);
   } catch {
     // One repair retry with a terse reminder.
     try {
-      const raw2 = await aiChat(baseUrl, apiKey, [
+      const raw2 = await aiChat([
         { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
-        { role: 'user', content: user },
+        { role: 'user', content: userContent },
       ], { maxTokens: 2200 });
       parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors, design_tokens);
     } catch (e) {
       // Both AI-chat attempts failed → hardcoded fallback content. The poster still
       // renders, but it's off-brand; record why so it's not invisible.
-      await logTrace(client, {
+      logPipelineEvent({
+        source: 'analyze',
         campaignId: campaign.id,
-        userId,
-        step: 'analyze',
         status: 'degraded',
+        code: 'analysis_ai_failed',
         detail: 'AI chat failed twice — used hardcoded fallback content',
-        request: { model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o', system: sys, user },
-        response: { error: e instanceof Error ? e.message : String(e) },
+        error: e,
       });
       parsed = fallbackContent(campaign as Record<string, string>, siteColors, design_tokens);
     }
   }
 
   // 4. Persist. design_tokens/screenshot are written even when the AI step used a
-  // fallback. poster_content feeds the poster copy (designer.ts); the QR itself
-  // resolves to a pure tracked redirect, so there's no hosted landing page.
+  // fallback. poster_content feeds the poster copy in designer.ts.
   const { error: upErr } = await client.database
     .from('campaigns')
     .update({
       scenario: 'product',
       event_details: null, // clear any stale event data if a campaign switched to product
-      poster_style: parsed.poster_style,
       style_profile: parsed.style_profile,
       poster_copy: parsed.poster_copy,
       poster_content: parsed.poster_content,
@@ -309,19 +312,18 @@ export default async function (req: Request): Promise<Response> {
     })
     .eq('id', campaign.id);
   if (upErr) {
-    await logTrace(client, {
+    logPipelineEvent({
+      source: 'analyze',
       campaignId: campaign.id,
-      userId,
-      step: 'analyze',
       status: 'failed',
+      code: 'campaign_persist_failed',
       detail: 'campaign persist failed after analyze',
-      response: { error: upErr.message },
+      error: upErr,
     });
     return jsonResponse({ error: upErr.message }, 500);
   }
 
   return jsonResponse({
-    poster_style: parsed.poster_style,
     style_profile: parsed.style_profile,
     poster_copy: parsed.poster_copy,
     poster_content: parsed.poster_content,
@@ -352,7 +354,6 @@ function dedupeColors(colors: string[]): string[] {
 }
 
 interface ParsedContent {
-  poster_style: string;
   style_profile: unknown;
   poster_copy: unknown;
   poster_content: unknown;
@@ -569,7 +570,6 @@ function normalize(
   };
 
   return {
-    poster_style: 'designer',
     style_profile: {
       palette: {
         primary,
@@ -614,18 +614,23 @@ function fallbackContent(
 // the poster can never show a wrong date. Palette/fonts reuse the shared capture.
 // =====================================================================
 async function analyzeEvent(args: {
-  baseUrl: string;
-  apiKey: string;
   campaign: Record<string, string>;
   eventDetails: EventDetails;
   siteColors: string[];
   tokens: DesignTokens | null;
   visibleText: string;
-  // deno-lint-ignore no-explicit-any
-  client: any;
-  userId: string;
+  referenceContext: string;
+  referenceImages: string[];
 }): Promise<ParsedContent & { prompt: { system: string; user: string } }> {
-  const { baseUrl, apiKey, campaign, eventDetails, siteColors, tokens, visibleText, client, userId } = args;
+  const {
+    campaign,
+    eventDetails,
+    siteColors,
+    tokens,
+    visibleText,
+    referenceContext,
+    referenceImages,
+  } = args;
   const lines = formatEventLines(eventDetails);
   const title = eventDetails.event_name || campaign.product_name || 'the event';
   const rsvpUrl = campaign.destination_url || campaign.product_url || '';
@@ -656,21 +661,26 @@ async function analyzeEvent(args: {
     `PRICE: ${eventDetails.price_label ?? '(unknown)'}\n` +
     `CTA HINT: ${campaign.cta_text ?? 'Scan to RSVP'}\n` +
     `REAL BRAND COLORS mined from the page (use for palette): ${siteColors.length ? siteColors.join(', ') : '(none — infer tasteful defaults)'}\n\n` +
-    `EVENT PAGE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the fields above)'}`;
+    `EVENT PAGE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the fields above)'}\n\n` +
+    `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
+    `The user supplied ${referenceImages.length} supporting image(s). Use them as visual references.`;
+  const userContent = userContentWithImages(user, referenceImages);
 
   let ev: Record<string, unknown> = {};
   try {
-    const raw = await aiChat(baseUrl, apiKey, [
+    const raw = await aiChat([
       { role: 'system', content: sys },
-      { role: 'user', content: user },
+      { role: 'user', content: userContent },
     ], { maxTokens: 1600 });
     ev = extractJson(raw) as Record<string, unknown>;
   } catch (e) {
-    await logTrace(client, {
-      campaignId: campaign.id, userId, step: 'analyze', status: 'degraded',
+    logPipelineEvent({
+      source: 'analyze',
+      campaignId: campaign.id,
+      status: 'degraded',
+      code: 'event_analysis_ai_failed',
       detail: 'event AI chat failed — used deterministic logistics + minimal fallback copy',
-      request: { system: sys, user },
-      response: { error: e instanceof Error ? e.message : String(e) },
+      error: e,
     });
     ev = {};
   }
@@ -718,7 +728,6 @@ function normalizeEvent(
   const hook = (ps.hook as string) || (lc.headline as string) || `You're invited: ${title}`;
 
   return {
-    poster_style: 'designer',
     style_profile: {
       palette: {
         primary,

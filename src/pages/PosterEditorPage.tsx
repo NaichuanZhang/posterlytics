@@ -3,16 +3,18 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { insforge } from '../lib/insforge'
 import { useCampaign } from '../hooks/useCampaign'
 import { usePlacements } from '../hooks/usePlacements'
-import { useAgentTraces } from '../hooks/useAgentTraces'
 import { useAuth } from '../auth/AuthProvider'
-import type { AgentTrace } from '../lib/types'
+import type { ReferenceImage } from '../lib/types'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
 import { Poster } from '../components/Poster'
 import { LayoutPreview } from '../components/LayoutPreview'
 import { PosterExportButton } from '../components/PosterExportButton'
+import { GenerationReferences } from '../components/GenerationReferences'
 import { buildViewUrl } from '../lib/viewUrl'
 import { useElementWidth } from '../hooks/useElementWidth'
+import { deleteReferenceImages, uploadReferenceImages } from '../lib/referenceStorage'
+import { normalizeReferenceContext, normalizeReferenceImages } from '../lib/references'
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -20,13 +22,14 @@ export function PosterEditorPage() {
   const { user } = useAuth()
   const { campaign, loading, reload, remove } = useCampaign(id)
   const { placements, ensureDefault } = usePlacements(id, user?.id)
-  const { traces } = useAgentTraces(id)
   const [busy, setBusy] = useState<string | null>(null)
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  // Transient result of the last "↻ Sync from Luma" (event campaigns only).
-  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [referenceContext, setReferenceContext] = useState('')
+  const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([])
+  const [pendingReferenceFiles, setPendingReferenceFiles] = useState<File[]>([])
+  const [referenceMessage, setReferenceMessage] = useState<string | null>(null)
 
   // A campaign should always have at least one placement so the poster's QR
   // encodes a real, trackable code (not a dead preview). Create one if missing.
@@ -45,6 +48,14 @@ export function PosterEditorPage() {
       setSelectedPlacementId(placements[0].id)
     }
   }, [placements, selectedPlacementId])
+
+  useEffect(() => {
+    if (!campaign) return
+    setReferenceContext(campaign.reference_context ?? '')
+    setReferenceImages(normalizeReferenceImages(campaign.reference_images))
+    setPendingReferenceFiles([])
+    setReferenceMessage(null)
+  }, [campaign?.id])
 
   if (loading) return <Layout><Spinner full /></Layout>
   if (!campaign) return <Layout><p className="muted">Campaign not found.</p></Layout>
@@ -73,18 +84,61 @@ export function PosterEditorPage() {
   ]
   const styleLabel = isEventCampaign ? 'Event promo' : 'Designer'
 
+  async function persistReferences() {
+    if (!campaign || !user) throw new Error('Campaign is not ready.')
+
+    const uploaded = await uploadReferenceImages(user.id, campaign.id, pendingReferenceFiles)
+    const nextImages = [...referenceImages, ...uploaded]
+    const { error: updateError } = await insforge.database
+      .from('campaigns')
+      .update({
+        reference_context: normalizeReferenceContext(referenceContext),
+        reference_images: nextImages,
+      })
+      .eq('id', campaign.id)
+
+    if (updateError) {
+      await deleteReferenceImages(uploaded)
+      throw new Error(updateError.message)
+    }
+
+    const retainedKeys = new Set(nextImages.map((image) => image.key))
+    const removed = normalizeReferenceImages(campaign.reference_images)
+      .filter((image) => !retainedKeys.has(image.key))
+    await deleteReferenceImages(removed)
+
+    setReferenceImages(nextImages)
+    setPendingReferenceFiles([])
+    await reload()
+  }
+
+  async function saveReferences() {
+    setBusy('references')
+    setReferenceMessage(null)
+    try {
+      await persistReferences()
+      setReferenceMessage('References saved.')
+    } catch (cause) {
+      setReferenceMessage(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function regenerate() {
     if (!campaign) return
     setBusy('regen')
+    setReferenceMessage(null)
     try {
-      // Re-extract the brand spec, re-design the bespoke layout, then re-paint.
-      // Events skip the layout agent (hero uses the bespoke event prompt).
-      await insforge.functions.invoke('analyze', { body: { campaignId: campaign.id } })
+      await persistReferences()
+      await invokeGenerationFunction('analyze', campaign.id)
       if (!isEventCampaign) {
-        await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
+        await invokeGenerationFunction('designer', campaign.id)
       }
-      await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+      await invokeGenerationFunction('hero', campaign.id)
       await reload()
+    } catch (cause) {
+      setReferenceMessage(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(null)
     }
@@ -95,50 +149,13 @@ export function PosterEditorPage() {
   async function regenerateLayout() {
     if (!campaign) return
     setBusy('layout')
+    setReferenceMessage(null)
     try {
-      await insforge.functions.invoke('designer', { body: { campaignId: campaign.id } })
-      await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
+      await invokeGenerationFunction('designer', campaign.id)
+      await invokeGenerationFunction('hero', campaign.id)
       await reload()
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  // Sync an EVENT campaign from its live Luma page: re-scrape → diff → persist
-  // only-changed logistics (free, no tokens). If the title changed, the painted
-  // hero is stale, so re-paint it (image tokens) — the ONLY case that spends any.
-  // Logistics render as live text in AiPoster, so a reload() reflects them with
-  // zero regeneration.
-  async function syncEvent() {
-    if (!campaign) return
-    setBusy('sync')
-    setSyncMsg(null)
-    try {
-      const { data, error } = await insforge.functions.invoke('sync-event', { body: { campaignId: campaign.id } })
-      if (error) throw new Error(error.message ?? 'Sync failed')
-      const d = data as { changed?: string[]; titleChanged?: boolean; note?: string } | null
-      const changed = d?.changed ?? []
-      if (d?.note === 'no-scrape') {
-        setSyncMsg("Couldn't read the Luma page just now — try again in a moment.")
-      } else if (changed.length === 0) {
-        setSyncMsg('No changes — your poster is up to date.')
-      } else if (d?.titleChanged) {
-        // The title is baked into the art — re-paint it. Other changes already
-        // persisted; hero reads the fresh title from the DB.
-        setSyncMsg(`Updated: ${changed.join(', ')}. Title changed — repainting poster…`)
-        const { error: hErr } = await insforge.functions.invoke('hero', { body: { campaignId: campaign.id } })
-        // Don't claim a repaint that didn't happen — the logistics still updated.
-        setSyncMsg(
-          hErr
-            ? `Updated: ${changed.join(', ')}. Poster repaint failed — try ↻ Regenerate.`
-            : `Updated: ${changed.join(', ')}. Poster repainted.`,
-        )
-      } else {
-        setSyncMsg(`Updated: ${changed.join(', ')}.`)
-      }
-      await reload()
-    } catch (e) {
-      setSyncMsg(`Sync failed: ${e instanceof Error ? e.message : String(e)}`)
+    } catch (cause) {
+      setReferenceMessage(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(null)
     }
@@ -152,8 +169,7 @@ export function PosterEditorPage() {
     setBusy(null)
   }
 
-  // Permanently delete the campaign (cascades placements/scans/conversions and
-  // cleans up its storage assets), then return to the dashboard.
+  // Permanently delete the campaign and its visit data, then clean up storage.
   async function deleteCampaign() {
     if (!campaign) return
     setBusy('delete')
@@ -222,6 +238,26 @@ export function PosterEditorPage() {
         {/* Control rail: the 4 cards, placed LEFT on desktop / BOTTOM on mobile. */}
         <aside className="ed-rail">
           <div className="card">
+            <h3 style={{ margin: '0 0 8px' }}>Generation references</h3>
+            <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 14px' }}>
+              These are included the next time you regenerate the poster.
+            </p>
+            <GenerationReferences
+              context={referenceContext}
+              onContextChange={setReferenceContext}
+              existingImages={referenceImages}
+              onRemoveExisting={(image) => setReferenceImages((images) => images.filter((item) => item.key !== image.key))}
+              pendingFiles={pendingReferenceFiles}
+              onPendingFilesChange={setPendingReferenceFiles}
+              disabled={!!busy}
+            />
+            <button className="btn secondary sm" onClick={saveReferences} disabled={!!busy} style={{ marginTop: 14 }}>
+              {busy === 'references' ? 'Saving...' : 'Save references'}
+            </button>
+            {referenceMessage && <p className="hint" role="status">{referenceMessage}</p>}
+          </div>
+
+          <div className="card">
             <h3 style={{ margin: '0 0 10px' }}>Poster spec</h3>
             <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
               An AI art director designs the layout from your brand. Regenerate for a fresh take.
@@ -246,15 +282,7 @@ export function PosterEditorPage() {
                   {busy === 'layout' ? 'Designing…' : '↻ Regenerate layout'}
                 </button>
               )}
-              {campaign.scenario === 'event' && (
-                <button className="btn secondary sm" onClick={syncEvent} disabled={!!busy} title="Re-read the live Luma page and refresh date/time/location/host">
-                  {busy === 'sync' ? 'Syncing…' : '↻ Sync from Luma'}
-                </button>
-              )}
             </div>
-            {campaign.scenario === 'event' && syncMsg && (
-              <p className="hint" style={{ marginTop: 6 }}>{syncMsg}</p>
-            )}
             {!isEventCampaign && campaign.design_status === 'failed' && (
               <p className="hint" style={{ marginTop: 6 }}>Layout design failed — try Regenerate layout.</p>
             )}
@@ -331,7 +359,7 @@ export function PosterEditorPage() {
               {confirmingDelete ? (
                 <>
                   <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 10px' }}>
-                    Delete permanently? Its placements, scans, and conversions are removed too — this can’t be undone.
+                    Delete permanently? Its placements and visit history are removed too - this cannot be undone.
                   </p>
                   <div className="row wrap" style={{ gap: 8 }}>
                     <button className="btn danger sm" onClick={deleteCampaign} disabled={!!busy}>
@@ -350,21 +378,6 @@ export function PosterEditorPage() {
             </div>
           </div>
 
-          {/* Debug / error details — only shown when the pipeline recorded a
-              failure or silent degrade for this campaign (agent_traces). */}
-          {traces.length > 0 && (
-            <div className="card">
-              <h3 style={{ margin: '0 0 8px' }}>Debug · error details</h3>
-              <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
-                {traces.length} event{traces.length === 1 ? '' : 's'} recorded while generating. Expand for the request & response.
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {traces.map((t) => (
-                  <TraceRow key={t.id} trace={t} />
-                ))}
-              </div>
-            </div>
-          )}
         </aside>
       </div>
     </Layout>
@@ -395,38 +408,7 @@ function Row({ label, value }: { label: string; value?: string | null }) {
   )
 }
 
-// One collapsible failure/degrade trace: step + status badge + short detail, with
-// an expandable panel showing the full request/response payloads.
-function TraceRow({ trace }: { trace: AgentTrace }) {
-  const [open, setOpen] = useState(false)
-  const failed = trace.status === 'failed'
-  const payload = { request: trace.request, response: trace.response }
-  const hasPayload = !!(trace.request || trace.response)
-  return (
-    <div className={`genprog-step is-${failed ? 'error' : 'pending'}`}>
-      <div className="genprog-step-head">
-        <span
-          className="badge"
-          style={{
-            background: failed ? 'var(--bad)' : 'var(--muted, #9a8f80)',
-            color: '#fff',
-            fontSize: '0.7rem',
-            textTransform: 'uppercase',
-          }}
-        >
-          {trace.status}
-        </span>
-        <div className="genprog-step-meta">
-          <span className="genprog-step-label">{trace.step}</span>
-          <span className="muted genprog-step-blurb">{trace.detail || '—'}</span>
-        </div>
-        {hasPayload && (
-          <button type="button" className="genprog-toggle" onClick={() => setOpen((v) => !v)}>
-            {open ? 'Hide ▴' : 'Details ▾'}
-          </button>
-        )}
-      </div>
-      {open && hasPayload && <pre className="genprog-pre">{JSON.stringify(payload, null, 2)}</pre>}
-    </div>
-  )
+async function invokeGenerationFunction(slug: 'analyze' | 'designer' | 'hero', campaignId: string) {
+  const { error } = await insforge.functions.invoke(slug, { body: { campaignId } })
+  if (error) throw new Error(error.message ?? `${slug} failed`)
 }

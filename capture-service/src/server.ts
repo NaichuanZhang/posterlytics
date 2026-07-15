@@ -1,6 +1,6 @@
 // Minimal HTTP server for the capture container (Node built-ins only).
 //   GET  /healthz   -> 200 "ok"            (compute liveness)
-//   POST /capture   -> { raw_tokens, screenshot_b64, final_url, title }
+//   POST /capture   -> { tokens, screenshot_b64, final_url, title }
 //     Auth: Authorization: Bearer <CAPTURE_TOKEN>
 //     Body: { "url": "https://..." }
 //
@@ -9,18 +9,37 @@
 // the screenshot as base64 and `analyze` (which has API_KEY) stores it.
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { captureUrl } from './capture.js';
+import { captureUrl, warmBrowser } from './capture.js';
+import { UnsafeTargetError } from './networkSafety.js';
+import type { CaptureErrorBody, CaptureResponse } from './types.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || '';
 const MAX_BODY_BYTES = 16 * 1024; // request bodies are tiny ({url})
+const CAPTURE_DEADLINE_MS = 12_000;
+
+class BodyTooLargeError extends Error {}
+class CaptureDeadlineError extends Error {}
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': typeof body === 'string' ? 'text/plain' : 'application/json',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
   });
   res.end(payload);
+}
+
+function sendError(
+  res: ServerResponse,
+  status: number,
+  code: string,
+  message: string,
+  retryable = false,
+): void {
+  const body: CaptureErrorBody = { error: { code, message, retryable } };
+  send(res, status, body);
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -30,7 +49,7 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error('body too large'));
+        reject(new BodyTooLargeError('Request body is too large.'));
         req.destroy();
         return;
       }
@@ -48,6 +67,23 @@ function authorized(req: IncomingMessage): boolean {
   return header === `Bearer ${CAPTURE_TOKEN}`;
 }
 
+async function captureWithDeadline(url: string): Promise<CaptureResponse> {
+  const controller = new AbortController();
+  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new CaptureDeadlineError('Capture exceeded the 12 second deadline.'));
+    }, CAPTURE_DEADLINE_MS);
+  });
+
+  try {
+    return await Promise.race([captureUrl(url, controller.signal), deadline]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/healthz') {
@@ -55,56 +91,57 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && (req.url === '/capture' || req.url?.startsWith('/capture?'))) {
-      if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
+      if (!authorized(req)) {
+        return sendError(res, 401, 'unauthorized', 'A valid bearer token is required.');
+      }
 
       let url: string;
       try {
         const parsed = JSON.parse((await readBody(req)) || '{}');
         url = String(parsed.url || '').trim();
-      } catch {
-        return send(res, 400, { error: 'bad json' });
+      } catch (error) {
+        if (error instanceof BodyTooLargeError) {
+          return sendError(res, 413, 'body_too_large', error.message);
+        }
+        return sendError(res, 400, 'invalid_json', 'The request body must be valid JSON.');
       }
-      if (!url) return send(res, 400, { error: 'missing url' });
+      if (!url) return sendError(res, 400, 'missing_url', 'The request must include a URL.');
 
       try {
-        const result = await captureUrl(url);
+        const result = await captureWithDeadline(url);
         return send(res, 200, result);
       } catch (err) {
-        // Degrade gracefully: 200 with empty tokens so `analyze` falls back.
         const message = err instanceof Error ? err.message : String(err);
-        return send(res, 200, {
-          raw_tokens: emptyRawTokens(url),
-          screenshot_b64: null,
-          final_url: url,
-          title: '',
-          error: message,
-        });
+        if (err instanceof UnsafeTargetError) {
+          return sendError(res, 422, 'unsafe_target', message);
+        }
+        if (err instanceof CaptureDeadlineError) {
+          return sendError(res, 504, 'capture_timeout', message, true);
+        }
+        return sendError(res, 502, 'capture_failed', message, true);
       }
     }
 
-    return send(res, 404, { error: 'not found' });
+    return sendError(res, 404, 'not_found', 'Route not found.');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return send(res, 500, { error: message });
+    return sendError(res, 500, 'internal_error', message);
   }
 });
 
-function emptyRawTokens(url: string) {
-  return {
-    fonts: [],
-    fontSizes: [],
-    fontWeights: [],
-    colors: [],
-    radii: [],
-    shadows: [],
-    spacing: [],
-    button: null,
-    fontLinks: [],
-    meta: { url, finalUrl: url, title: '', viewport: { width: 1280, height: 800 } },
-  };
+async function startServer(): Promise<void> {
+  try {
+    await warmBrowser();
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'capture_browser_warm_failed',
+      message: error instanceof Error ? error.message : String(error),
+    }));
+  }
+
+  server.listen(PORT, () => {
+    console.log(`capture-service listening on :${PORT}`);
+  });
 }
 
-server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`capture-service listening on :${PORT}`);
-});
+void startServer();

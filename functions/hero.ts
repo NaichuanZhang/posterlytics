@@ -1,12 +1,12 @@
 import {
   CORS,
-  env,
   aiImage,
-  dataUrlToBlob,
+  errorDetails,
+  imageSourceToBlob,
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
-  logTrace,
+  logPipelineEvent,
   type PosterLayout,
 } from './_shared.ts';
 
@@ -22,13 +22,10 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
 
-  const baseUrl = env('INSFORGE_BASE_URL');
-  const apiKey = env('API_KEY');
   const client = createUserClient(req);
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
-  const userId = userData.user.id;
 
   let body: { campaignId?: string };
   try {
@@ -40,7 +37,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details')
+    .select('id, product_name, tagline, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, hero_image_key, reference_context, reference_images')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -53,77 +50,84 @@ export default async function (req: Request): Promise<Response> {
   // The real brand logo (if any) is passed to the image model as a reference so
   // it can paint the actual logo into the poster's brand row.
   const assets = ((campaign as Record<string, unknown>).brand_assets ?? {}) as { logo_url?: string };
-  const referenceImages = assets.logo_url ? [assets.logo_url] : [];
-  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, referenceImages.length > 0);
+  const userReferences = Array.isArray((campaign as Record<string, unknown>).reference_images)
+    ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
+        .map((image) => typeof image.url === 'string' ? image.url : '')
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+  const referenceImages = [...(assets.logo_url ? [assets.logo_url] : []), ...userReferences].slice(0, 6);
+  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, !!assets.logo_url);
 
   // The image model emits a native 2:3 portrait regardless of aspect_ratio; we
   // request 2:3 explicitly (AiPoster letterboxes it above the QR band).
-  let dataUrl: string;
+  let imageSource: string;
   try {
-    dataUrl = await aiImage(baseUrl, apiKey, prompt, '2:3', referenceImages);
+    imageSource = await aiImage(prompt, '2:3', referenceImages);
   } catch (e) {
-    await logTrace(client, {
+    logPipelineEvent({
+      source: 'hero',
       campaignId: campaign.id,
-      userId,
-      step: 'hero',
       status: 'failed',
+      code: 'image_generation_failed',
       detail: 'AI image generation failed',
-      request: { model: Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image', image: prompt },
-      response: { error: e instanceof Error ? e.message : String(e) },
+      error: e,
     });
-    return jsonResponse({ error: String(e) }, 502);
+    const details = errorDetails(e);
+    return jsonResponse({ error: details.message, code: details.code, retryable: details.retryable }, 502);
   }
 
   let url: string;
   let key: string;
   try {
-    const blob = dataUrlToBlob(dataUrl);
+    const blob = await imageSourceToBlob(imageSource);
     const { data, error } = await client.storage
       .from('assets')
       .upload(`poster/${campaign.id}/${crypto.randomUUID()}.png`, blob);
     if (error || !data) {
-      await logTrace(client, {
+      logPipelineEvent({
+        source: 'hero',
         campaignId: campaign.id,
-        userId,
-        step: 'hero',
         status: 'failed',
+        code: 'poster_upload_failed',
         detail: 'poster image upload failed',
-        request: { image: prompt },
-        response: { error: error?.message ?? 'upload failed' },
+        error: error?.message ?? 'upload failed',
       });
       return jsonResponse({ error: error?.message ?? 'upload failed' }, 500);
     }
     url = data.url;
     key = data.key;
   } catch (e) {
-    await logTrace(client, {
+    logPipelineEvent({
+      source: 'hero',
       campaignId: campaign.id,
-      userId,
-      step: 'hero',
       status: 'failed',
+      code: 'poster_upload_failed',
       detail: 'poster image upload threw',
-      request: { image: prompt },
-      response: { error: e instanceof Error ? e.message : String(e) },
+      error: e,
     });
     return jsonResponse({ error: String(e) }, 500);
   }
 
-  // Persist the image. The QR sits in a deterministic SPA-rendered bottom band,
-  // so there's no qr_zone to detect or store; any legacy value is left untouched.
   const { error: upErr } = await client.database
     .from('campaigns')
     .update({ hero_image_url: url, hero_image_key: key })
     .eq('id', campaign.id);
   if (upErr) {
-    await logTrace(client, {
+    await client.storage.from('assets').remove(key).catch(() => {});
+    logPipelineEvent({
+      source: 'hero',
       campaignId: campaign.id,
-      userId,
-      step: 'hero',
       status: 'failed',
+      code: 'campaign_persist_failed',
       detail: 'campaign persist failed after image generation',
-      response: { error: upErr.message },
+      error: upErr,
     });
     return jsonResponse({ error: upErr.message }, 500);
+  }
+  const previousKey = String((campaign as Record<string, unknown>).hero_image_key ?? '');
+  if (previousKey && previousKey !== key) {
+    await client.storage.from('assets').remove(previousKey).catch(() => {});
   }
 
   // Return the compiled text-to-image prompt for the generation loading UI.
@@ -135,7 +139,12 @@ export default async function (req: Request): Promise<Response> {
 // not yet run), fall back to a minimal generic editorial layout compiled from
 // the same brand context, so hero never hard-fails.
 function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: boolean): string {
-  if (style === 'event') return buildEventPrompt(c, hasLogo);
+  const context = String(c.reference_context ?? '').trim().slice(0, 4000);
+  const referenceCount = Array.isArray(c.reference_images) ? c.reference_images.length : 0;
+  const referenceBlock =
+    `\n\nUSER CREATIVE CONTEXT: ${context || '(none provided)'}` +
+    `\n${referenceCount} user-supplied supporting image(s) accompany this prompt. Use them for subject, product, and visual direction fidelity.`;
+  if (style === 'event') return buildEventPrompt(c, hasLogo) + referenceBlock;
   const layout = c.poster_layout as PosterLayout | null;
   const ctx = {
     product: String(c.product_name ?? 'the product'),
@@ -143,9 +152,9 @@ function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: b
     hasLogo,
   };
   if (layout && Array.isArray(layout.zones) && layout.zones.length > 0) {
-    return compileLayoutPrompt(layout, ctx);
+    return compileLayoutPrompt(layout, ctx) + referenceBlock;
   }
-  return compileLayoutPrompt(fallbackLayout(c), ctx);
+  return compileLayoutPrompt(fallbackLayout(c), ctx) + referenceBlock;
 }
 
 // A safe generic layout for when poster_layout is absent (designer failed or

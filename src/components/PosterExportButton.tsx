@@ -1,25 +1,24 @@
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import type { Campaign, Placement } from '../lib/types'
-import { POSTER_2x3, type OutputFormat } from '../lib/outputFormats'
+import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
 import { AiPoster } from './posters/AiPoster'
 
 interface Props {
   campaign: Campaign
   placement: Placement
   label?: string // button text; defaults to 'Export PNG'
-  format?: OutputFormat // output size/layout; defaults to the 2:3 poster
 }
 
-// Exports the poster — with THIS placement's QR embedded — as a PNG at the output
-// format's native size (default 1080×1620). AiPoster renders off-screen at full
+// Exports the poster with this placement's QR embedded as a 1080x1620 PNG.
+// AiPoster renders off-screen at full
 // size and html-to-image captures it (the QR is a same-origin data-URL <img>, so no
 // canvas taint). No scaling — pixel-exact output.
 //
 // The AI hero lives on cross-origin Storage, which would taint the export canvas;
 // we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
 // imageSrcOverride (falling back to the hosted URL if the fetch fails).
-export function PosterExportButton({ campaign, placement, label = 'Export PNG', format = POSTER_2x3 }: Props) {
+export function PosterExportButton({ campaign, placement, label = 'Export PNG' }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
@@ -55,8 +54,8 @@ export function PosterExportButton({ campaign, placement, label = 'Export PNG', 
       // Give the QR image a tick to render.
       await new Promise((r) => setTimeout(r, 150))
       const dataUrl = await toPng(offscreenRef.current, {
-        width: format.w,
-        height: format.h,
+        width: POSTER_WIDTH,
+        height: POSTER_HEIGHT,
         pixelRatio: 2,
         cacheBust: true,
       })
@@ -85,7 +84,6 @@ export function PosterExportButton({ campaign, placement, label = 'Export PNG', 
           campaign={campaign}
           code={placement.code}
           imageSrcOverride={imgDataUrl ?? undefined}
-          format={format}
         />
       </div>
     </>

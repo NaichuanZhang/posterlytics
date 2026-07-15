@@ -23,9 +23,7 @@ export interface PosterCopy {
   cta: string
 }
 
-// Structured product copy produced by `analyze` (headline, story, features) and
-// read by `designer` to enrich the poster text. Named PosterContent because
-// that's what it feeds — the retired AI landing page (db/17) never comes back.
+// Structured product copy produced by `analyze` and read by `designer`.
 export interface PosterContent {
   headline: string
   what_it_does: string
@@ -42,10 +40,13 @@ export interface BrandAssets {
   primary_image_url?: string
 }
 
-// Every product poster is agentic now: the `designer` function designs a bespoke
-// poster_layout and `hero` paints it. The fixed template modes (cozy_scrapbook,
-// saas_glassmorphism) were removed; db/19 backfilled old rows to 'designer'.
-export type PosterStyle = 'designer'
+export interface ReferenceImage {
+  key: string
+  url: string
+  name: string
+  mime_type: string
+  size_bytes: number
+}
 
 // Designer mode: an LLM-designed bespoke poster layout (produced by the
 // `designer` edge function) that `hero` compiles into the image prompt — instead
@@ -105,15 +106,6 @@ export interface DesignTokens {
   fontLinks: string[] // web-font stylesheet URLs the captured site loads
 }
 
-// Vision-detected calm zone for the AI-poster QR, as 0..1 fractions (top-left
-// origin) of the hero image. null → AiPoster falls back to the per-style ANCHORS.
-export interface QrZone {
-  x: number
-  y: number
-  w: number
-  h: number
-}
-
 // Product poster_spec: the SPA band only needs the scan caption; the layout
 // itself lives in poster_layout (designed by the `designer` agent).
 export interface ProductPosterSpec {
@@ -121,14 +113,11 @@ export interface ProductPosterSpec {
   urls: string
 }
 
-// Which kind of thing a campaign promotes. Mirrors the `scenario` column
-// (db/16). 'product' is the original flow; 'event' is a Luma event. No exhaustive
-// switch depends on this being closed — future scenarios extend it without a
-// migration (the column has no CHECK).
+// New campaigns are products. `event` remains for historical rows.
 export type CampaignScenario = 'product' | 'event'
 
-// The scraped/entered details for an 'event' scenario campaign (the `event_details`
-// JSONB, db/16). NULL for product campaigns. Every field is optional so a partial
+// Scraped details for a historical event campaign. Null for product campaigns.
+// Every field is optional so a partial
 // Luma scrape round-trips — e.g. a "Register to See Address" event exposes a city
 // but no street. Times are ISO-8601 strings carrying the event's own tz offset
 // (e.g. "2026-07-04T18:30:00-07:00"); render the event's LOCAL time, don't convert
@@ -190,18 +179,17 @@ export interface Campaign {
   poster_content: PosterContent | null
   brand_assets: BrandAssets | null
   brand_essence: string | null
-  poster_style: PosterStyle
   poster_spec: PosterSpec | null
   hero_image_url: string | null
   hero_image_key: string | null
-  qr_zone: QrZone | null
   design_tokens: DesignTokens | null
   screenshot_url: string | null
   screenshot_key: string | null
   poster_layout: PosterLayout | null
   design_status: DesignStatus | null
-  // Which scenario this campaign promotes (db/16). Defaults to 'product' for every
-  // existing row. For 'event', product_url/product_name/destination_url are
+  reference_context: string | null
+  reference_images: ReferenceImage[]
+  // New rows use product. For historical events, product_url/product_name/destination_url are
   // repurposed (event URL / title / Luma RSVP target) and event_details is set.
   scenario: CampaignScenario
   event_details: EventDetails | null
@@ -218,37 +206,18 @@ export interface Placement {
   created_at: string
 }
 
-// A recorded failure/degrade event from the generation pipeline (agent_traces
-// table, db/15). Written best-effort by the edge functions; owner-read only.
-export type AgentTraceStep = 'analyze' | 'designer' | 'hero' | 'capture'
-export type AgentTraceStatus = 'failed' | 'degraded'
-
-export interface AgentTrace {
-  id: string
-  campaign_id: string
-  user_id: string
-  step: AgentTraceStep
-  status: AgentTraceStatus
-  detail: string | null
-  request: Record<string, unknown> | null
-  response: Record<string, unknown> | null
-  created_at: string
-}
-
 export interface PlacementStat {
   placement_id: string
   label: string
   code: string
-  scans: number
+  visits: number
   unique_visitors: number
-  conversions: number
-  conversion_rate: number | null
 }
 
-// One row of an audience breakdown (a device type, OS, or country) with its scan count.
+// One row of an audience breakdown (a device type, OS, or country).
 export interface BreakdownBucket {
   key: string
-  scans: number
+  visits: number
 }
 
 // Campaign-wide audience breakdowns from the `campaign_breakdowns` RPC.

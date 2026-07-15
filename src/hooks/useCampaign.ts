@@ -24,12 +24,8 @@ export function useCampaign(id: string | undefined) {
     void reload()
   }, [reload])
 
-  // Delete the campaign and its data. Placements/scans/conversions cascade away
-  // at the DB level (ON DELETE CASCADE), and the owner RLS policy enforces
-  // ownership. Storage objects are NOT cascaded, so we best-effort remove the
-  // campaign's assets first — one failed/missing key never blocks the rest or
-  // the row delete (Promise.allSettled). Throws on the row-delete error so the
-  // caller can surface it.
+  // Database children cascade. Storage objects do not, so remove known keys
+  // best-effort before deleting the owner-scoped campaign row.
   const remove = useCallback(async () => {
     if (!campaign) return
     const assets = campaign.brand_assets
@@ -38,6 +34,7 @@ export function useCampaign(id: string | undefined) {
       campaign.screenshot_key,
       assets?.logo_key,
       ...(assets?.images ?? []).map((img) => img.key),
+      ...(campaign.reference_images ?? []).map((image) => image.key),
     ].filter((k): k is string => !!k)
     await Promise.allSettled(keys.map((key) => insforge.storage.from('assets').remove(key)))
 

@@ -6,11 +6,12 @@
 import { chromium, type Browser } from 'playwright';
 import { buildRawTokens } from './buildRawTokens.js';
 import { dismissPopups } from './dismissPopups.js';
+import { assertPublicUrl } from './networkSafety.js';
+import { normalizeDesignTokens } from './normalizeDesignTokens.js';
 import type { BrowserCollection, CaptureResponse, RawTokens } from './types.js';
 
-const NAV_TIMEOUT_MS = 15_000;
+const NAV_TIMEOUT_MS = 9_000;
 const VIEWPORT = { width: 1280, height: 800 };
-// JPEG keeps the screenshot well under the AI proxy's ~750KB data-URL ceiling.
 const SCREENSHOT_QUALITY = 70;
 
 let browserPromise: Promise<Browser> | null = null;
@@ -18,35 +19,68 @@ let browserPromise: Promise<Browser> | null = null;
 // One shared browser per container process (Chromium launch is expensive).
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = chromium.launch({
+    const launch = chromium.launch({
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
+    browserPromise = launch;
+    void launch.then(
+      (browser) => {
+        browser.once('disconnected', () => {
+          if (browserPromise === launch) browserPromise = null;
+        });
+      },
+      () => {
+        if (browserPromise === launch) browserPromise = null;
+      },
+    );
   }
   return browserPromise;
 }
 
-export async function captureUrl(rawUrl: string): Promise<CaptureResponse> {
+export async function warmBrowser(): Promise<void> {
+  await getBrowser();
+}
+
+export async function captureUrl(rawUrl: string, signal?: AbortSignal): Promise<CaptureResponse> {
   const url = normalizeUrl(rawUrl);
+  await assertPublicUrl(url);
+  signal?.throwIfAborted();
   const browser = await getBrowser();
+  signal?.throwIfAborted();
   const context = await browser.newContext({
     viewport: VIEWPORT,
     userAgent:
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
     deviceScaleFactor: 1,
   });
+  const closeOnAbort = () => void context.close().catch(() => {});
+  signal?.addEventListener('abort', closeOnAbort, { once: true });
+  const checkedHosts = new Map<string, Promise<void>>();
+  await context.route('**/*', async (route) => {
+    const requestUrl = route.request().url();
+    if (/^(data|blob):/.test(requestUrl)) return route.continue();
+    try {
+      const hostname = new URL(requestUrl).hostname.toLowerCase();
+      let check = checkedHosts.get(hostname);
+      if (!check) {
+        check = assertPublicUrl(requestUrl).then(() => undefined);
+        checkedHosts.set(hostname, check);
+      }
+      await check;
+      await route.continue();
+    } catch {
+      await route.abort('blockedbyclient');
+    }
+  });
   const page = await context.newPage();
+  page.setDefaultTimeout(1_500);
   // Never let a download or dialog wedge the page.
   page.on('dialog', (d) => void d.dismiss().catch(() => {}));
 
   try {
-    try {
-      await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
-    } catch {
-      // Slow/streaming sites never reach networkidle — fall back to DOM ready.
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
-    }
-    // Give late CSS/fonts a beat to settle.
-    await page.waitForTimeout(600);
+    signal?.throwIfAborted();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+    await page.waitForTimeout(400);
 
     // Dismiss cookie banners / consent + newsletter modals / age gates BEFORE
     // sampling tokens and screenshotting, so both come out clean. Best-effort:
@@ -61,7 +95,8 @@ export async function captureUrl(rawUrl: string): Promise<CaptureResponse> {
       title: collection.title,
       viewport: VIEWPORT,
     };
-    const raw_tokens = buildRawTokens(collection.samples, collection.fontLinks, meta);
+    const rawTokens = buildRawTokens(collection.samples, collection.fontLinks, meta);
+    const tokens = normalizeDesignTokens(rawTokens);
 
     // Above-the-fold JPEG screenshot (clip to viewport so the payload stays tiny).
     let screenshot_b64: string | null = null;
@@ -76,8 +111,14 @@ export async function captureUrl(rawUrl: string): Promise<CaptureResponse> {
       screenshot_b64 = null;
     }
 
-    return { raw_tokens, screenshot_b64, final_url: finalUrl, title: collection.title };
+    return {
+      tokens,
+      screenshot_b64,
+      final_url: finalUrl,
+      title: collection.title,
+    };
   } finally {
+    signal?.removeEventListener('abort', closeOnAbort);
     await context.close().catch(() => {});
   }
 }

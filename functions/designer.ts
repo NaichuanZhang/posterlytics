@@ -1,12 +1,13 @@
 import {
   CORS,
-  env,
   aiChat,
+  errorDetails,
   extractJson,
   jsonResponse,
   createUserClient,
   normalizePosterLayout,
-  logTrace,
+  logPipelineEvent,
+  userContentWithImages,
   type DesignTokens,
 } from './_shared.ts';
 
@@ -23,13 +24,10 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
 
-  const baseUrl = env('INSFORGE_BASE_URL');
-  const apiKey = env('API_KEY');
   const client = createUserClient(req);
 
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
-  const userId = userData.user.id;
 
   let body: { campaignId?: string };
   try {
@@ -41,7 +39,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets')
+    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, reference_context, reference_images')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -60,6 +58,13 @@ export default async function (req: Request): Promise<Response> {
   const assets = (c.brand_assets ?? {}) as { logo_url?: string; primary_image_url?: string; images?: Array<{ url: string }> };
   const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
   const hasLogo = !!assets.logo_url;
+  const referenceContext = String(c.reference_context ?? '').trim().slice(0, 4000);
+  const referenceImages = Array.isArray(c.reference_images)
+    ? (c.reference_images as Array<Record<string, unknown>>)
+        .map((image) => typeof image.url === 'string' ? image.url : '')
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
 
   // Palette hints: prefer the programmatic computed tokens, fall back to style_profile.
   const palHint = {
@@ -108,21 +113,24 @@ export default async function (req: Request): Promise<Response> {
     `\nASSETS:\n` +
     (hasLogo ? `LOGO: ${assets.logo_url} (the real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (none found — use the product name as the brand mark)\n') +
     (heroImg ? `PRODUCT IMAGE: ${heroImg}\n` : '') +
+    `CREATIVE CONTEXT: ${referenceContext || '(none provided)'}\n` +
+    `SUPPORTING IMAGES: ${referenceImages.length} image(s) are attached as visual references.\n` +
     `\nDesign the poster layout JSON now (no CTA zone — the QR footer is the action).`;
+  const userContent = userContentWithImages(user, referenceImages);
 
   let layout;
   try {
-    const raw = await aiChat(baseUrl, apiKey, [
+    const raw = await aiChat([
       { role: 'system', content: sys },
-      { role: 'user', content: user },
+      { role: 'user', content: userContent },
     ], { maxTokens: 1400 });
     layout = normalizePosterLayout(extractJson(raw), palHint);
   } catch {
     // One repair retry with a terse reminder, then give up (design_status=failed).
     try {
-      const raw2 = await aiChat(baseUrl, apiKey, [
+      const raw2 = await aiChat([
         { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
-        { role: 'user', content: user },
+        { role: 'user', content: userContent },
       ], { maxTokens: 1400 });
       layout = normalizePosterLayout(extractJson(raw2), palHint);
     } catch (e) {
@@ -130,16 +138,16 @@ export default async function (req: Request): Promise<Response> {
         .from('campaigns')
         .update({ design_status: 'failed' })
         .eq('id', campaign.id);
-      await logTrace(client, {
+      logPipelineEvent({
+        source: 'designer',
         campaignId: campaign.id,
-        userId,
-        step: 'designer',
         status: 'failed',
+        code: 'layout_ai_failed',
         detail: 'layout design AI chat failed twice',
-        request: { model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o', system: sys, user },
-        response: { error: e instanceof Error ? e.message : String(e) },
+        error: e,
       });
-      return jsonResponse({ error: `layout design failed: ${String(e)}` }, 502);
+      const details = errorDetails(e);
+      return jsonResponse({ error: details.message, code: details.code, retryable: details.retryable }, 502);
     }
   }
 
@@ -149,13 +157,13 @@ export default async function (req: Request): Promise<Response> {
     .eq('id', campaign.id);
   if (upErr) {
     await client.database.from('campaigns').update({ design_status: 'failed' }).eq('id', campaign.id);
-    await logTrace(client, {
+    logPipelineEvent({
+      source: 'designer',
       campaignId: campaign.id,
-      userId,
-      step: 'designer',
       status: 'failed',
+      code: 'campaign_persist_failed',
       detail: 'campaign persist failed after layout design',
-      response: { error: upErr.message },
+      error: upErr,
     });
     return jsonResponse({ error: upErr.message }, 500);
   }

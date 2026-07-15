@@ -7,7 +7,7 @@ export const insforge = createClient({
   anonKey: import.meta.env.VITE_INSFORGE_ANON_KEY,
 })
 
-// Base host where the public edge functions are served (view / convert).
+// Base host where the public edge functions are served.
 // Derived from the API base: <appkey>.<region>.insforge.app -> <appkey>.functions.insforge.app
 export const FUNCTIONS_HOST = (() => {
   try {

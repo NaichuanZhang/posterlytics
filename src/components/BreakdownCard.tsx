@@ -1,10 +1,10 @@
 import type { BreakdownBucket } from '../lib/types'
 
 // A single audience-breakdown dimension (Device / OS / Country) as a horizontal
-// bar list. Each bucket shows its scan count + share of the total. Reuses the
+// bar list. Each bucket shows its visit count + share of the total. Reuses the
 // existing card/muted tokens so it matches the Stat cards in AnalyticsPage.
 export function BreakdownCard({ title, buckets }: { title: string; buckets: BreakdownBucket[] }) {
-  const total = buckets.reduce((sum, b) => sum + b.scans, 0)
+  const total = buckets.reduce((sum, b) => sum + b.visits, 0)
   return (
     <div className="card">
       <div
@@ -18,7 +18,7 @@ export function BreakdownCard({ title, buckets }: { title: string; buckets: Brea
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           {buckets.map((b) => {
-            const pct = total ? Math.round((b.scans / total) * 100) : 0
+            const pct = total ? Math.round((b.visits / total) * 100) : 0
             return (
               <div key={b.key}>
                 <div className="row between" style={{ marginBottom: 4 }}>
@@ -30,7 +30,7 @@ export function BreakdownCard({ title, buckets }: { title: string; buckets: Brea
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
-                    {b.scans} · {pct}%
+                    {b.visits} · {pct}%
                   </span>
                 </div>
                 <div style={{ height: 8, borderRadius: 999, background: 'var(--hairline)', overflow: 'hidden' }}>

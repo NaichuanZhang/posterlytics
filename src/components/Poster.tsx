@@ -1,27 +1,24 @@
 import { forwardRef } from 'react'
 import type { Campaign } from '../lib/types'
-import { POSTER_2x3, type OutputFormat } from '../lib/outputFormats'
+import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
 import { AiPoster } from './posters/AiPoster'
 
 interface Props {
   campaign: Campaign
   code: string // the placement code whose QR is embedded
   width?: number // rendered preview width in px (defaults to fit the editor column)
-  format?: OutputFormat // output size/layout; defaults to the 2:3 poster
 }
 
-// The poster is the AI-painted hero image rendered at the output format's native
-// size (default 1080×1620, 2:3), then scaled down to the requested preview width.
+// The poster is the AI-painted hero image rendered at 1080x1620 (2:3), then
+// scaled down to the requested preview width.
 // AiPoster letterboxes the model image into the top region and composites a real,
 // fixed-size QR <img> into a branded bottom band — so the QR is crisp and always
 // scannable regardless of what the model drew. Use `forwardRef` so
 // PosterExportButton can capture the full-res node.
 const DEFAULT_PREVIEW_W = 440
 
-export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code, width = DEFAULT_PREVIEW_W, format = POSTER_2x3 }, ref) {
-  const NATIVE_W = format.w
-  const NATIVE_H = format.h
-  const scale = width / NATIVE_W
+export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campaign, code, width = DEFAULT_PREVIEW_W }, ref) {
+  const scale = width / POSTER_WIDTH
 
   return (
     // Outer box occupies the SCALED footprint so layout flows normally; the inner
@@ -29,7 +26,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
     <div
       style={{
         width,
-        height: NATIVE_H * scale,
+        height: POSTER_HEIGHT * scale,
         overflow: 'hidden',
         borderRadius: 8,
         boxShadow: '0 8px 30px rgba(0,0,0,0.16)',
@@ -37,13 +34,13 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster({ campai
     >
       <div
         style={{
-          width: NATIVE_W,
-          height: NATIVE_H,
+          width: POSTER_WIDTH,
+          height: POSTER_HEIGHT,
           transform: `scale(${scale})`,
           transformOrigin: 'top left',
         }}
       >
-        <AiPoster ref={ref} campaign={campaign} code={code} format={format} />
+        <AiPoster ref={ref} campaign={campaign} code={code} />
       </div>
     </div>
   )

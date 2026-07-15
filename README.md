@@ -1,108 +1,86 @@
 # Posterlytics
 
-Turn a product's own website into an on-brand **advertising poster**, mint a
-**unique tracked QR/link per placement** (bulletin board, LinkedIn, IG story…),
-and see **which placement actually drove conversions — not just clicks**.
+Posterlytics turns a product website into an on-brand advertising poster. Each
+placement gets its own tracked QR and link, so the dashboard shows visits and
+unique visitors by channel.
 
-Per-placement attribution is the moat: same product, N unique codes, every scan
-and conversion logged, so the dashboard answers "the bulletin board out-pulled
-LinkedIn" — which a generic shortener can't.
+Live app: **https://3f9q2998.insforge.site**
 
-> Live: **https://3f9q2998.insforge.site**
+## Product flow
 
-## Pick your poster
+1. Sign in and create a product campaign.
+2. Enter the product URL, campaign copy, destination, and optional generation
+   context or reference images.
+3. `analyze` captures the site and prepares brand context and poster copy.
+4. `designer` creates a structured 2:3 layout.
+5. `hero` paints the poster through OpenRouter.
+6. Add placements, publish, and export a PNG with each placement's QR.
+7. A visit to the QR link is recorded and redirected to the destination URL.
+8. Analytics reports visits, unique visitors, device, OS, and country.
 
-Paste a URL and Posterlytics generates **two on-brand posters** from the same
-analysis — a crisp **deterministic HTML/CSS template** and an **AI illustration**
-— then you choose. Both carry a real, always-scannable QR.
-
-![Pick your poster — two takes on the same brand](docs/screenshots/03-picker.png)
-
-## Editor
-
-The chosen poster, the auto-extracted spec (style, headline, slogan, CTA, tone),
-a Template ↔ AI-image toggle, and one-click publish.
-
-![Editor](docs/screenshots/04-editor.png)
-
-## Per-placement tracking
-
-Every placement mints its own short code → unique QR + tracked link, so you can
-tell which channel converts.
-
-![Placements — unique QR + link per channel](docs/screenshots/05-placements.png)
-
-## Attribution dashboard
-
-Scans, unique visitors, conversions, and conversion rate — per placement.
-
-![Analytics dashboard](docs/screenshots/06-analytics.png)
-
-## How it works
-
-1. **Sign in** (email + password, no verification).
-2. **New campaign** — paste your product URL + GTM details (name, tagline, CTA,
-   destination).
-3. **Poster Agent** (`analyze` function) scrapes the site, mines the brand's
-   **real palette** from its CSS, pulls assets (logo, og:image → re-hosted in
-   Storage), and uses gpt-4o to produce:
-   - `poster_content` — structured product copy (features, how-it-works,
-     why-use-it) used to enrich the poster text
-   - `style_profile` — the brand's palette / fonts / tone
-   - `brand_essence` — a word-portrait of the brand for the image model
-4. **Designed + painted** — the `designer` agent designs a bespoke
-   `poster_layout` from that context, then the `hero` function paints it as an
-   illustrated 2:3 poster; the real per-placement QR is composited into a
-   branded bottom band (`AiPoster`). Exportable to PNG per placement
-   (`html-to-image`).
-5. **Placements** — each mints a unique short code → unique QR/link.
-6. **Publish** — activates the tracked QR links.
-7. **Scan** → `view` logs the scan (device from UA, first-party visitor cookie)
-   **and** the conversion in one step, then 302s straight to the real product
-   page. A scan *is* the conversion — there's no intermediate landing page.
-8. **Dashboard** — per-placement scans / unique visitors / conversions / rate.
+New campaign creation is product-only. Existing event campaigns remain
+renderable and can be regenerated.
 
 ## Architecture
 
-- **Frontend**: Vite + React + TypeScript SPA (`src/`). Auth-gated dashboard.
-- **Backend**: InsForge (Postgres + RLS, Storage, Auth, edge functions).
-- **Edge functions** (`functions/`, Deno): `view` (the tracked QR redirect),
-  `analyze`, `designer`, `hero`. Source imports `_shared.ts`; `functions/build.mjs`
-  inlines it into one deployable file per function (Subhosting uploads a single file).
-- **AI**: InsForge AI proxy (`/api/ai/chat/completion`, `/api/ai/image/generation`)
-  with the project key — no separate OpenRouter key needed.
-- **Schema**: `db/*.sql` applied via `npx @insforge/cli db import`. Owner-only
-  dashboard access; anon can read only published campaigns and write (not read)
-  scans/conversions; uniqueness + stats via `SECURITY DEFINER` RPCs.
+- **App:** Vite, React, and TypeScript in `src/`.
+- **Backend:** InsForge Postgres, RLS, Auth, Storage, edge functions, and
+  frontend hosting.
+- **Generation:** `analyze`, `designer`, and `hero` are authenticated Deno edge
+  functions. `view` is the public tracked redirect.
+- **AI:** Edge functions call OpenRouter directly with the server-only
+  `OPENROUTER_API_KEY`.
+- **Capture:** `capture-service/` is a Playwright compute service that returns
+  normalized design tokens and a screenshot. It enforces a 12-second deadline
+  and blocks private-network targets.
+- **Data:** Owner-only campaign data and visits-only analytics are exposed
+  through RLS and narrow `SECURITY DEFINER` RPCs.
 
 ## Develop
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173  (.env.local has VITE_INSFORGE_URL / _ANON_KEY)
-npm run build        # type-check + bundle
+npm run dev
+npm run lint
+npm test
+npm run build
 ```
 
-### Edge functions
+Capture service:
 
 ```bash
-node functions/build.mjs                 # build all → functions/dist/<slug>.ts
-npx @insforge/cli functions deploy view --file ./functions/dist/view.ts
-# repeat for analyze, designer, hero
+cd capture-service
+npm install
+npm test
+npm run build
 ```
 
-### Database
+Edge functions:
 
 ```bash
-npx @insforge/cli db import db/01_campaigns.sql   # apply all db/*.sql in numeric order
-npx @insforge/cli db tables && npx @insforge/cli db policies
+node functions/build.mjs
+npx @insforge/cli functions deploy analyze --file functions/dist/analyze.ts
+npx @insforge/cli functions deploy designer --file functions/dist/designer.ts
+npx @insforge/cli functions deploy hero --file functions/dist/hero.ts
+npx @insforge/cli functions deploy view --file functions/dist/view.ts
 ```
+
+## Database
+
+`db/schema.sql` is the current baseline for a fresh backend. Production changes
+are applied through timestamped files in `migrations/`:
+
+```bash
+npx @insforge/cli db migrations list
+npx @insforge/cli db migrations up --all
+```
+
+Do not apply the baseline to an existing project.
 
 ## Deploy
 
 ```bash
 npm run build
-npx @insforge/cli deployments env set VITE_INSFORGE_URL https://3f9q2998.us-east.insforge.app
-npx @insforge/cli deployments env set VITE_INSFORGE_ANON_KEY <anon-key>
+npx @insforge/cli deployments env list
 npx @insforge/cli deployments deploy .
 ```

@@ -11,7 +11,7 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "playwright": "1.49.1"
+    "playwright": "1.61.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

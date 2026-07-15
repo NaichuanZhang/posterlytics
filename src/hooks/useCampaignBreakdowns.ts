@@ -18,8 +18,22 @@ export function useCampaignBreakdowns(campaignId: string | undefined) {
     const { data, error } = await insforge.database.rpc('campaign_breakdowns', {
       p_campaign_id: campaignId,
     })
-    if (error) setError(error.message)
-    else setBreakdowns((data as CampaignBreakdowns | null) ?? EMPTY)
+    if (error) {
+      setError(error.message)
+    } else {
+      const raw = (data ?? {}) as Record<string, unknown>
+      const normalize = (value: unknown) =>
+        (Array.isArray(value) ? value : []).map((bucket: Record<string, unknown>) => ({
+          key: String(bucket.key ?? 'Unknown'),
+          visits: Number(bucket.visits ?? bucket.scans ?? 0),
+        }))
+      setBreakdowns({
+        devices: normalize(raw.devices),
+        os: normalize(raw.os),
+        countries: normalize(raw.countries),
+      })
+      setError(null)
+    }
     setLoading(false)
   }, [campaignId])
 

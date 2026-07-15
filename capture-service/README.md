@@ -14,25 +14,30 @@ Subhosting cannot run a browser.
 | Route | Method | Auth | Body | Response |
 |---|---|---|---|---|
 | `/healthz` | GET | — | — | `200 ok` |
-| `/capture` | POST | `Authorization: Bearer $CAPTURE_TOKEN` | `{ "url": "https://..." }` | `{ raw_tokens, screenshot_b64, final_url, title, error? }` |
+| `/capture` | POST | `Authorization: Bearer $CAPTURE_TOKEN` | `{ "url": "https://..." }` | `{ tokens, screenshot_b64, final_url, title }` |
 
 - The container holds **no InsForge credentials** by design. It returns the
   screenshot as base64; `analyze` (which has `API_KEY`) uploads it to Storage.
-- The screenshot is a viewport-clipped JPEG (q70, 1280×800) to stay under the
-  AI proxy's ~750KB vision data-URL ceiling.
-- Failures degrade gracefully: a capture error returns `200` with empty
-  `raw_tokens` and `screenshot_b64: null` so `analyze` falls back to its legacy
-  regex extraction.
+- The screenshot is a compact viewport-clipped JPEG (q70, 1280x800).
+- Chromium warms before the service accepts traffic. Page capture then has a
+  12-second deadline and rejects private/reserved network targets, including
+  redirects and subresources.
+- Failures return a non-2xx response with
+  `{ "error": { "code", "message", "retryable" } }`. `analyze` records the
+  structured error and falls back to HTML color extraction.
 
-`raw_tokens` is frequency-aggregated and compact; the edge side
-(`normalizeDesignTokens`) turns it into the final bounded `DesignTokens`.
+The browser readings are frequency-aggregated into compact raw tokens inside the
+container, then normalized into the bounded `tokens` response before crossing
+the service boundary.
 
 ## Layers (separation of concerns)
 
 - `src/capture.ts` — Playwright orchestration + the in-browser DOM collector.
 - `src/buildRawTokens.ts` — **pure** aggregation of element samples → `RawTokens`
-  (the unit-tested seam; no DOM, no I/O).
-- `src/server.ts` — Node `http` server, bearer auth, graceful degradation.
+  (a unit-tested seam; no DOM, no I/O).
+- `src/normalizeDesignTokens.ts` — **pure** normalization into the public response.
+- `src/networkSafety.ts` — URL/DNS validation for SSRF protection.
+- `src/server.ts` — Node `http` server, bearer auth, deadline, structured errors.
 
 ## Env
 
@@ -46,7 +51,7 @@ Subhosting cannot run a browser.
 ```bash
 npm install
 npm run build          # tsc -> dist/
-npm test               # node --test on the pure aggregation layer
+npm test               # node --test on aggregation, normalization, and URL safety
 npm run dev            # tsx src/server.ts (needs local Chromium: npx playwright install chromium)
 ```
 

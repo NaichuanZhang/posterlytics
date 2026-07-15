@@ -1,12 +1,12 @@
 # Playwright's official image ships Chromium + all system libs pre-installed,
 # pinned to the same version as the npm dependency above.
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy
+FROM mcr.microsoft.com/playwright:v1.61.1-jammy
 
 WORKDIR /app
 
 # Install deps first for layer caching.
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev=false
+RUN npm ci
 
 # Build TypeScript -> dist/.
 COPY tsconfig.json ./

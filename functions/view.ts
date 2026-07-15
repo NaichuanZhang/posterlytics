@@ -10,8 +10,7 @@ import {
 // `view` is the QR target — a pure tracked redirect. It:
 //   1. resolves the placement by ?code=
 //   2. ensures a first-party visitor cookie (plv)
-//   3. logs the scan AND the conversion in one atomic step (log_visit RPC) —
-//      a scan IS the conversion now that there's no intermediate landing page
+//   3. logs one visit through the log_visit RPC
 //   4. 302s straight to the campaign's real destination URL
 // A null result means the code is unknown OR the campaign isn't published;
 // distinguish the two via link_status so we can explain rather than 404 blindly.
@@ -34,7 +33,7 @@ export default async function (req: Request): Promise<Response> {
   const vhash = await visitorHash(env('VISITOR_SALT'), visitorId);
   const { device, os } = parseUA(req.headers.get('user-agent') ?? '');
 
-  // Log scan + conversion and get the destination in one round-trip. The
+  // Log the visit and get the destination in one round-trip. The
   // published-check lives inside the RPC; a null/missing result means the code is
   // unknown or the campaign isn't live.
   let destination: string | null = null;

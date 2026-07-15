@@ -65,90 +65,112 @@ export function readCookie(req: Request, name: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-// Call the InsForge AI chat proxy. Returns the model's text output.
-// `content` may be a plain string OR an OpenAI-style multimodal parts array
-// ([{type:'text',text},{type:'image_url',image_url:{url}}]) — the proxy forwards
-// the messages verbatim, so vision-capable models (gpt-4o) accept both.
-export async function aiChat(
-  baseUrl: string,
-  apiKey: string,
-  messages: Array<{ role: string; content: string | unknown[] }>,
-  opts: { maxTokens?: number } = {},
-): Promise<string> {
-  const r = await fetch(`${baseUrl}/api/ai/chat/completion`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o',
-      messages,
-      max_completion_tokens: opts.maxTokens ?? 1200,
-    }),
-  });
-  if (!r.ok) throw new Error(`AI chat failed: ${r.status} ${await r.text()}`);
-  const j = await r.json();
-  return j.text ?? '';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+export class UpstreamError extends Error {
+  code: string;
+  status: number;
+  retryable: boolean;
+
+  constructor(
+    code: string,
+    message: string,
+    status: number,
+    retryable: boolean,
+  ) {
+    super(message);
+    this.name = 'UpstreamError';
+    this.code = code;
+    this.status = status;
+    this.retryable = retryable;
+  }
 }
 
-// Vision-detected calm zone for the AI-poster QR: 0..1 fractions, top-left origin.
-export interface QrZone { x: number; y: number; w: number; h: number }
+export function errorDetails(error: unknown): {
+  code: string;
+  message: string;
+  retryable: boolean;
+  upstream_status?: number;
+} {
+  if (error instanceof UpstreamError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      upstream_status: error.status || undefined,
+    };
+  }
+  return {
+    code: 'internal_error',
+    message: error instanceof Error ? error.message : String(error),
+    retryable: false,
+  };
+}
 
-// Ask a vision model (gpt-4o via the chat proxy) for the bounding box of the
-// largest clean/empty region in a generated poster image, suitable for compositing
-// a square QR sticker. Returns 0..1 fractions (top-left origin) or null on ANY
-// failure/uncertainty — NEVER throws, so callers can treat it as best-effort.
-// `styleHint` nudges where the gap likely is for the active template.
-export async function detectQrZone(
-  baseUrl: string,
-  apiKey: string,
-  imageUrl: string,
-  styleHint: string,
-): Promise<QrZone | null> {
+export function userContentWithImages(text: string, imageUrls: readonly string[]): string | unknown[] {
+  const urls = imageUrls.filter(Boolean).slice(0, 5);
+  if (urls.length === 0) return text;
+  return [
+    { type: 'text', text },
+    ...urls.map((url) => ({ type: 'image_url', image_url: { url } })),
+  ];
+}
+
+async function upstreamFailure(provider: string, response: Response): Promise<UpstreamError> {
+  const body = (await response.text().catch(() => '')).slice(0, 500);
+  const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+  return new UpstreamError(
+    `${provider}_http_error`,
+    `${provider} request failed (${response.status})${body ? `: ${body}` : ''}`,
+    response.status,
+    retryable,
+  );
+}
+
+export async function aiChat(
+  messages: Array<{ role: string; content: string | unknown[] }>,
+  opts: { maxTokens?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 30_000);
   try {
-    const sys =
-      'You are a precise layout analyzer. You receive a portrait product poster ' +
-      'image. Find the SINGLE largest clean, empty area suitable for placing a ' +
-      'square QR sticker — an area with no text, icons, cards, or busy detail. ' +
-      'Respond with ONLY minified JSON: {"x":<0..1>,"y":<0..1>,"w":<0..1>,"h":<0..1>} ' +
-      'where x,y is the TOP-LEFT corner as a fraction of image width/height and w,h ' +
-      'are its width/height fractions. No prose, no code fences.';
-    const user =
-      `The empty area is most likely toward the ${styleHint} of the poster. Return the ` +
-      'box for that area. If unsure, return the calmest large region you can find.';
-
-    const raw = await aiChat(
-      baseUrl,
-      apiKey,
-      [
-        { role: 'system', content: sys },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: user },
-            { type: 'image_url', image_url: { url: imageUrl } },
-          ],
-        },
-      ],
-      { maxTokens: 200 },
+    const response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      signal: ctl.signal,
+      headers: {
+        Authorization: `Bearer ${env('OPENROUTER_API_KEY')}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://posterlytics.app',
+        'X-Title': 'Posterlytics',
+      },
+      body: JSON.stringify({
+        model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o',
+        messages,
+        max_completion_tokens: opts.maxTokens ?? 1200,
+      }),
+    });
+    if (!response.ok) throw await upstreamFailure('openrouter_chat', response);
+    const result = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = result.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new UpstreamError('openrouter_chat_empty', 'OpenRouter returned no text content.', 502, true);
+    }
+    return content;
+  } catch (error) {
+    if (error instanceof UpstreamError) throw error;
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new UpstreamError('openrouter_chat_timeout', 'OpenRouter chat request timed out.', 504, true);
+    }
+    throw new UpstreamError(
+      'openrouter_chat_network',
+      error instanceof Error ? error.message : String(error),
+      0,
+      true,
     );
-
-    const j = extractJson(raw) as Record<string, unknown>;
-    const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : NaN);
-    let x = num(j.x), y = num(j.y), w = num(j.w), h = num(j.h);
-    if ([x, y, w, h].some((n) => Number.isNaN(n))) return null;
-
-    // Clamp into bounds, keep the box inside the image.
-    const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
-    x = clamp01(x); y = clamp01(y); w = clamp01(w); h = clamp01(h);
-    if (x + w > 1) w = 1 - x;
-    if (y + h > 1) h = 1 - y;
-
-    // Lenient size gate: reject only pathological/degenerate boxes. The frontend
-    // positions the QR from the box CENTER and sizes it mostly from width, so a
-    // short (low-h) gap — common for the SaaS CTA band — is still usable.
-    if (w < 0.08 || h < 0.04 || w > 0.6 || h > 0.6) return null;
-    return { x, y, w, h };
-  } catch {
-    return null; // proxy rejected multimodal content / junk output / parse failure
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -282,34 +304,58 @@ All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and l
 Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, watermarks, and a busy/cluttered bottom edge.`;
 }
 
-// Call the InsForge AI image proxy. Returns a base64 data URL. `referenceImages`
-// (optional) are URLs passed to the proxy's `images:[{url}]` field so an
-// image-capable model (gemini) can condition on them — used to paint the real
-// brand logo into the poster. Omitted entirely when empty (identical request to
-// text-only), so the feature degrades gracefully when no logo is available.
 export async function aiImage(
-  baseUrl: string,
-  apiKey: string,
   prompt: string,
   aspectRatio = '4:5',
   referenceImages: string[] = [],
 ): Promise<string> {
-  const refs = referenceImages.filter(Boolean);
-  const r = await fetch(`${baseUrl}/api/ai/image/generation`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image',
-      prompt,
-      image_config: { aspect_ratio: aspectRatio },
-      ...(refs.length ? { images: refs.map((url) => ({ url })) } : {}),
-    }),
-  });
-  if (!r.ok) throw new Error(`AI image failed: ${r.status} ${await r.text()}`);
-  const j = await r.json();
-  const url = j?.images?.[0]?.imageUrl;
-  if (!url) throw new Error('AI image response had no imageUrl');
-  return url;
+  const content: unknown[] = [{ type: 'text', text: prompt }];
+  for (const url of referenceImages.filter(Boolean).slice(0, 6)) {
+    content.push({ type: 'image_url', image_url: { url } });
+  }
+
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => ctl.abort(), 90_000);
+  try {
+    const response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      signal: ctl.signal,
+      headers: {
+        Authorization: `Bearer ${env('OPENROUTER_API_KEY')}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://posterlytics.app',
+        'X-Title': 'Posterlytics',
+      },
+      body: JSON.stringify({
+        model: Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image',
+        modalities: ['image', 'text'],
+        messages: [{ role: 'user', content }],
+        image_config: { aspect_ratio: aspectRatio },
+      }),
+    });
+    if (!response.ok) throw await upstreamFailure('openrouter_image', response);
+    const result = await response.json() as {
+      choices?: Array<{ message?: { images?: Array<{ image_url?: { url?: string } }> } }>;
+    };
+    const url = result.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    if (!url) {
+      throw new UpstreamError('openrouter_image_empty', 'OpenRouter returned no generated image.', 502, true);
+    }
+    return url;
+  } catch (error) {
+    if (error instanceof UpstreamError) throw error;
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new UpstreamError('openrouter_image_timeout', 'OpenRouter image request timed out.', 504, true);
+    }
+    throw new UpstreamError(
+      'openrouter_image_network',
+      error instanceof Error ? error.message : String(error),
+      0,
+      true,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // Convert a base64 data URL to a Blob (for Storage upload).
@@ -322,6 +368,31 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
+export async function imageSourceToBlob(source: string): Promise<Blob> {
+  if (source.startsWith('data:')) return dataUrlToBlob(source);
+
+  const ctl = new AbortController();
+  // The service warms Chromium before opening its port. Leave enough room for
+  // a cold compute boot plus the service's bounded 12-second page capture.
+  const timeout = setTimeout(() => ctl.abort(), 60_000);
+  try {
+    const response = await fetch(source, { signal: ctl.signal });
+    if (!response.ok) throw await upstreamFailure('generated_image_download', response);
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/') || blob.size === 0 || blob.size > 20_000_000) {
+      throw new UpstreamError(
+        'generated_image_invalid',
+        'Generated image payload was empty, too large, or not an image.',
+        502,
+        true,
+      );
+    }
+    return blob;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -329,71 +400,31 @@ export function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-// =====================================================================
-// Agentic failure traces (persist request/response when a step fails/degrades)
-// =====================================================================
-
-// Clamp any value to a bounded, JSON-safe shape so a trace row never bloats.
-// Strings longer than `cap` are truncated with a "…[+N chars]" marker; objects
-// are walked and each string field clamped; the whole thing is size-guarded by
-// re-clamping the serialized form. Pure — unit-tested.
-export function truncateForTrace(value: unknown, cap = 12_000): unknown {
-  const clampStr = (s: string): string =>
-    s.length > cap ? `${s.slice(0, cap)}…[+${s.length - cap} chars]` : s;
-
-  const walk = (v: unknown, depth: number): unknown => {
-    if (v === null || v === undefined) return v ?? null;
-    if (typeof v === 'string') return clampStr(v);
-    if (typeof v === 'number' || typeof v === 'boolean') return v;
-    if (depth >= 6) return clampStr(String(v));
-    if (Array.isArray(v)) return v.slice(0, 50).map((x) => walk(x, depth + 1));
-    if (typeof v === 'object') {
-      const out: Record<string, unknown> = {};
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-        out[k] = walk(val, depth + 1);
-      }
-      return out;
-    }
-    return clampStr(String(v));
-  };
-
-  return walk(value, 0);
-}
-
-export type TraceStep = 'analyze' | 'designer' | 'hero' | 'capture';
-export type TraceStatus = 'failed' | 'degraded';
-
-// Best-effort insert of one agent_traces row. Owner RLS (the auth-scoped client
-// already carries the caller's bearer token). SWALLOWS its own errors — a failed
-// trace-write must never mask the real error or throw into the pipeline.
-export async function logTrace(
-  // deno-lint-ignore no-explicit-any
-  client: any,
-  entry: {
-    campaignId: string;
-    userId: string;
-    step: TraceStep;
-    status: TraceStatus;
-    detail?: string;
-    request?: unknown;
-    response?: unknown;
-  },
-): Promise<void> {
-  try {
-    await client.database.from('agent_traces').insert([
-      {
-        campaign_id: entry.campaignId,
-        user_id: entry.userId,
-        step: entry.step,
-        status: entry.status,
-        detail: entry.detail ?? null,
-        request: entry.request === undefined ? null : truncateForTrace(entry.request),
-        response: entry.response === undefined ? null : truncateForTrace(entry.response),
-      },
-    ]);
-  } catch {
-    // Never let observability break the pipeline.
-  }
+export function logPipelineEvent(entry: {
+  source: 'analyze' | 'designer' | 'hero' | 'capture';
+  campaignId: string;
+  status: 'failed' | 'degraded';
+  code: string;
+  detail: string;
+  error?: unknown;
+  durationMs?: number;
+}): void {
+  const error = entry.error === undefined ? undefined : errorDetails(entry.error);
+  const line = JSON.stringify({
+    event: 'poster_generation',
+    timestamp: new Date().toISOString(),
+    source: entry.source,
+    campaign_id: entry.campaignId,
+    severity: entry.status === 'failed' ? 'error' : 'warning',
+    status: entry.status,
+    code: entry.code,
+    detail: entry.detail,
+    retryable: error?.retryable ?? false,
+    upstream_status: error?.upstream_status,
+    duration_ms: entry.durationMs,
+  });
+  if (entry.status === 'failed') console.error(line);
+  else console.warn(line);
 }
 
 // Extract the first balanced JSON object from a string (handles models that
@@ -455,9 +486,8 @@ export interface EventPosterSpec {
   urls: string;
 }
 
-// Host allowlist for any server-side Luma fetch (SSRF guard): luma.com / lu.ma
-// and their subdomains only. Case-insensitive. Used by both `event-preview`
-// (wizard pre-fill) and `sync-event` (refresh) before fetching a caller/stored URL.
+// Host allowlist for legacy event regeneration (SSRF guard): luma.com / lu.ma
+// and their subdomains only. Case-insensitive.
 export function isLumaHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   return (
@@ -754,13 +784,6 @@ function clock(hour: number, minute: number): string {
   return minute === 0 ? `${h12} ${ampm}` : `${h12}:${String(minute).padStart(2, '0')} ${ampm}`;
 }
 
-// =====================================================================
-// Programmatic design tokens (capture-service → normalized DesignTokens)
-// Canonical copy of src/lib/{colorUtils,designTokens}.ts. The Deno bundle
-// can't import across the SPA boundary, so this is mirrored (same pattern as
-// QrZone). The SPA copy carries the unit tests; keep the two in sync.
-// =====================================================================
-
 export type RGB = [number, number, number];
 
 export interface DesignTokens {
@@ -771,20 +794,6 @@ export interface DesignTokens {
   spacing: number[];
   button: { bg: string; color: string; radius: number; paddingX: number; paddingY: number; weight: number; shadow?: string } | null;
   fontLinks: string[];
-}
-
-// Compact wire shape returned by the capture-service (all-optional / loose).
-export interface RawTokens {
-  fonts?: Array<{ value: string; count: number; role: string }>;
-  fontSizes?: number[];
-  fontWeights?: number[];
-  colors?: Array<{ value: string; count: number; role: string }>;
-  radii?: number[];
-  shadows?: string[];
-  spacing?: number[];
-  button?: { bg?: string; color?: string; radius?: number; paddingX?: number; paddingY?: number; weight?: number; shadow?: string } | null;
-  fontLinks?: string[];
-  meta?: unknown;
 }
 
 export function parseColor(input: string | undefined | null): RGB | null {
@@ -812,134 +821,67 @@ export function toHex(rgb: RGB): string {
   return '#' + rgb.map((c) => clamp255(c).toString(16).padStart(2, '0')).join('');
 }
 
-export function relativeLuminance(rgb: RGB): number {
-  return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+export interface CaptureResult {
+  tokens: DesignTokens | null;
+  screenshotDataUrl: string | null;
+  error: { code: string; message: string; retryable: boolean } | null;
 }
 
-export function vividness(rgb: RGB): number {
-  const max = Math.max(...rgb), min = Math.min(...rgb);
-  const sat = max === 0 ? 0 : (max - min) / max;
-  const lum = relativeLuminance(rgb);
-  const lumOk = lum > 0.18 && lum < 0.9 ? 1 : 0.25;
-  return sat * lumOk;
-}
-
-const GENERIC_FONTS = new Set(['system-ui', '-apple-system', 'sans-serif', 'serif', 'monospace', 'inherit', 'blinkmacsystemfont']);
-
-function firstNonGenericFont(fonts: Array<{ value: string; role: string }>, role: string): string {
-  const inRole = fonts.filter((f) => f.role === role && f.value);
-  const named = inRole.find((f) => !GENERIC_FONTS.has(f.value.toLowerCase()));
-  return (named ?? inRole[0])?.value ?? '';
-}
-
-function pickBy<T extends { rgb: RGB }>(entries: T[], score: (e: T) => number): RGB | null {
-  let best: RGB | null = null, bestScore = -Infinity;
-  for (const e of entries) {
-    const s = score(e);
-    if (s > bestScore) { bestScore = s; best = e.rgb; }
-  }
-  return best;
-}
-
-function dedupeHex(rgbs: RGB[]): string[] {
-  const seen = new Set<string>(); const out: string[] = [];
-  for (const rgb of rgbs) {
-    const hex = toHex(rgb);
-    if (!seen.has(hex)) { seen.add(hex); out.push(hex); }
-    if (out.length >= 10) break;
-  }
-  return out;
-}
-
-function assignColors(raw: RawTokens): DesignTokens['colors'] {
-  const entries = (raw.colors ?? [])
-    .map((c) => ({ rgb: parseColor(c.value), count: c.count ?? 1, role: c.role ?? 'other' }))
-    .filter((c): c is { rgb: RGB; count: number; role: string } => c.rgb !== null);
-  const palette = dedupeHex(entries.map((e) => e.rgb));
-  const bgC = entries.filter((e) => e.role === 'bg');
-  const bg = pickBy(bgC.length ? bgC : entries, (e) => relativeLuminance(e.rgb) * Math.log2(e.count + 2)) ?? [255, 255, 255];
-  const textC = entries.filter((e) => e.role === 'text');
-  const text = pickBy(textC.length ? textC : entries, (e) => (1 - relativeLuminance(e.rgb)) * Math.log2(e.count + 2)) ?? [17, 24, 39];
-  const brandC = entries.filter((e) => e.role === 'button-bg' || e.role === 'link' || e.role === 'border');
-  const primary = pickBy(brandC.length ? brandC : entries, (e) => (vividness(e.rgb) + 0.15) * Math.log2(e.count + 2)) ?? [31, 41, 55];
-  const accent = pickBy(entries, (e) => vividness(e.rgb)) ?? primary;
-  return { bg: toHex(bg), text: toHex(text), primary: toHex(primary), accent: toHex(accent), palette };
-}
-
-function cleanNums(arr: number[] | undefined, limit: number): number[] {
-  return [...new Set((arr ?? []).filter((n) => Number.isFinite(n) && n > 0).map((n) => Math.round(n)))]
-    .sort((a, b) => a - b).slice(0, limit);
-}
-
-function numOr(n: number | undefined, fallback: number): number {
-  return Number.isFinite(n) ? Math.round(n as number) : fallback;
-}
-
-function normHex(c: string | undefined): string | null {
-  const rgb = parseColor(c);
-  return rgb ? toHex(rgb) : null;
-}
-
-// RawTokens -> bounded, role-assigned DesignTokens. Returns null for an empty
-// capture so callers fall back to legacy regex mining.
-export function normalizeDesignTokens(raw: RawTokens | null | undefined): DesignTokens | null {
-  if (!raw || (!raw.colors?.length && !raw.fonts?.length)) return null;
-  const fonts = (raw.fonts ?? []).filter((f) => f && f.value);
-  const headingFamily = firstNonGenericFont(fonts, 'heading');
-  const bodyFamily = firstNonGenericFont(fonts, 'body');
-  const button = raw.button
-    ? {
-        bg: normHex(raw.button.bg) ?? '',
-        color: normHex(raw.button.color) ?? '',
-        radius: numOr(raw.button.radius, 0),
-        paddingX: numOr(raw.button.paddingX, 0),
-        paddingY: numOr(raw.button.paddingY, 0),
-        weight: numOr(raw.button.weight, 600),
-        shadow: raw.button.shadow && raw.button.shadow !== 'none' ? raw.button.shadow : undefined,
-      }
-    : null;
-  return {
-    typography: {
-      headingFamily,
-      bodyFamily: bodyFamily || headingFamily,
-      scale: cleanNums(raw.fontSizes, 8),
-      weights: cleanNums(raw.fontWeights, 6),
-    },
-    colors: assignColors(raw),
-    radii: cleanNums(raw.radii, 5),
-    shadows: (raw.shadows ?? []).filter((s) => s && s !== 'none').slice(0, 4),
-    spacing: cleanNums(raw.spacing, 6),
-    button,
-    fontLinks: [...new Set((raw.fontLinks ?? []).filter(Boolean))].slice(0, 8),
-  };
-}
-
-// Call the Playwright capture-service for a URL. Best-effort: returns null on any
-// failure (missing config, network, non-200, bad payload) so analyze degrades to
-// its legacy regex extraction. Never throws.
 export async function captureSite(
   url: string,
-): Promise<{ tokens: DesignTokens | null; rawTokens: RawTokens | null; screenshotDataUrl: string | null } | null> {
+): Promise<CaptureResult> {
   const serviceUrl = Deno.env.get('CAPTURE_SERVICE_URL');
   const token = Deno.env.get('CAPTURE_TOKEN');
-  if (!serviceUrl || !token) return null;
+  if (!serviceUrl || !token) {
+    return {
+      tokens: null,
+      screenshotDataUrl: null,
+      error: { code: 'capture_unconfigured', message: 'Capture service is not configured.', retryable: false },
+    };
+  }
+
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => ctl.abort(), 15_000);
   try {
-    const ctl = new AbortController();
-    const to = setTimeout(() => ctl.abort(), 20000);
-    const r = await fetch(`${serviceUrl.replace(/\/$/, '')}/capture`, {
+    const response = await fetch(`${serviceUrl.replace(/\/$/, '')}/capture`, {
       method: 'POST',
       signal: ctl.signal,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    clearTimeout(to);
-    if (!r.ok) return null;
-    const j = await r.json() as { raw_tokens?: RawTokens; screenshot_b64?: string | null };
-    const rawTokens = j.raw_tokens ?? null;
-    const tokens = normalizeDesignTokens(rawTokens);
-    const screenshotDataUrl = j.screenshot_b64 ? `data:image/jpeg;base64,${j.screenshot_b64}` : null;
-    return { tokens, rawTokens, screenshotDataUrl };
-  } catch {
-    return null;
+    const result = await response.json().catch(() => ({})) as {
+      tokens?: DesignTokens | null;
+      screenshot_b64?: string | null;
+      error?: { code?: string; message?: string; retryable?: boolean };
+    };
+    if (!response.ok) {
+      return {
+        tokens: null,
+        screenshotDataUrl: null,
+        error: {
+          code: result.error?.code ?? 'capture_http_error',
+          message: result.error?.message ?? `Capture service failed (${response.status}).`,
+          retryable: result.error?.retryable ?? response.status >= 500,
+        },
+      };
+    }
+    return {
+      tokens: result.tokens ?? null,
+      screenshotDataUrl: result.screenshot_b64 ? `data:image/jpeg;base64,${result.screenshot_b64}` : null,
+      error: null,
+    };
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === 'AbortError';
+    return {
+      tokens: null,
+      screenshotDataUrl: null,
+      error: {
+        code: timedOut ? 'capture_timeout' : 'capture_network_error',
+        message: timedOut ? 'Capture request timed out.' : (error instanceof Error ? error.message : String(error)),
+        retryable: true,
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
   }
 }

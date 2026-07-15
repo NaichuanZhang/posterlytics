@@ -23,11 +23,10 @@ export function AnalyticsPage() {
 
   const totals = stats.reduce(
     (acc, s) => ({
-      scans: acc.scans + s.scans,
+      visits: acc.visits + s.visits,
       unique: acc.unique + s.unique_visitors,
-      conversions: acc.conversions + s.conversions,
     }),
-    { scans: 0, unique: 0, conversions: 0 },
+    { visits: 0, unique: 0 },
   )
 
   return (
@@ -37,17 +36,12 @@ export function AnalyticsPage() {
         <button className="btn secondary sm" onClick={refreshAll}>↻ Refresh</button>
       </div>
       <p className="page-sub">
-        <Link to={`/campaigns/${campaign.id}`}>← Back to poster</Link> · Which placement actually drove conversions.
+        <Link to={`/campaigns/${campaign.id}`}>← Back to poster</Link> · Compare visits across placements.
       </p>
 
       <div className="grid cols-2" style={{ marginBottom: 22 }}>
-        <Stat label="Total scans" value={totals.scans} />
+        <Stat label="Total visits" value={totals.visits} />
         <Stat label="Unique visitors" value={totals.unique} />
-        <Stat label="Conversions" value={totals.conversions} />
-        <Stat
-          label="Overall conv. rate"
-          value={totals.unique ? `${Math.round((totals.conversions / totals.unique) * 100)}%` : '—'}
-        />
       </div>
 
       <div className="card">

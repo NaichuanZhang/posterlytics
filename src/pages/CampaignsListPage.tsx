@@ -4,12 +4,10 @@ import { insforge } from '../lib/insforge'
 import type { Campaign } from '../lib/types'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/ui/Spinner'
-import { useReveal } from '../hooks/useReveal'
 
 export function CampaignsListPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
-  const revealRef = useReveal<HTMLDivElement>([campaigns.length])
 
   useEffect(() => {
     insforge.database
@@ -28,7 +26,7 @@ export function CampaignsListPage() {
         <div className="row between wrap" style={{ gap: 16 }}>
           <div>
             <span className="eyebrow">Your campaigns</span>
-            <h1 style={{ margin: '12px 0 6px' }}>Which placement actually converts?</h1>
+            <h1 style={{ margin: '12px 0 6px' }}>See where every visit came from</h1>
             <p style={{ margin: 0 }}>Every campaign makes an on-brand poster and mints a tracked QR per placement.</p>
           </div>
           <Link to="/campaigns/new" className="btn">
@@ -50,14 +48,14 @@ export function CampaignsListPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid cols-2" ref={revealRef}>
+        <div className="grid cols-2">
           {campaigns.map((c) => {
             const thumb = c.brand_assets?.primary_image_url || c.hero_image_url || ''
             return (
               <Link
                 key={c.id}
                 to={`/campaigns/${c.id}`}
-                className="card reveal"
+                className="card"
                 style={{ textDecoration: 'none', color: 'inherit', display: 'flex', gap: 14 }}
               >
                 <div

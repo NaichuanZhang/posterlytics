@@ -4,7 +4,7 @@
 //
 // Usage: node functions/build.mjs            (build all)
 //        node functions/build.mjs view hero  (build a subset)
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -19,10 +19,19 @@ const shared = readFileSync(join(dir, '_shared.ts'), 'utf8')
 const SHARED_BANNER =
   '// === inlined from _shared.ts (do not edit; run functions/build.mjs) ===\n';
 
-const only = process.argv.slice(2);
-const slugs = readdirSync(dir)
+const sourceSlugs = readdirSync(dir)
   .filter((f) => f.endsWith('.ts') && !f.startsWith('_'))
-  .map((f) => f.replace(/\.ts$/, ''))
+  .map((f) => f.replace(/\.ts$/, ''));
+
+for (const file of readdirSync(distDir).filter((f) => f.endsWith('.ts'))) {
+  if (!sourceSlugs.includes(file.replace(/\.ts$/, ''))) {
+    rmSync(join(distDir, file));
+    console.log(`removed orphaned dist/${file}`);
+  }
+}
+
+const only = process.argv.slice(2);
+const slugs = sourceSlugs
   .filter((s) => only.length === 0 || only.includes(s));
 
 for (const slug of slugs) {

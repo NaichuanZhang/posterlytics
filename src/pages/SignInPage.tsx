@@ -46,7 +46,7 @@ export function SignInPage() {
             Poster<span style={{ color: 'var(--primary)' }}>lytics</span>
           </div>
           <p className="muted" style={{ marginTop: 6, fontSize: '0.9rem' }}>
-            On-brand product posters that prove which placement converts.
+            On-brand product posters with visits attributed to each placement.
           </p>
         </div>
 

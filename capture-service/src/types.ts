@@ -65,6 +65,35 @@ export interface RawTokens {
   meta: { url: string; finalUrl: string; title: string; viewport: { width: number; height: number } };
 }
 
+export interface DesignTokens {
+  typography: {
+    headingFamily: string;
+    bodyFamily: string;
+    scale: number[];
+    weights: number[];
+  };
+  colors: {
+    bg: string;
+    text: string;
+    primary: string;
+    accent: string;
+    palette: string[];
+  };
+  radii: number[];
+  shadows: string[];
+  spacing: number[];
+  button: {
+    bg: string;
+    color: string;
+    radius: number;
+    paddingX: number;
+    paddingY: number;
+    weight: number;
+    shadow?: string;
+  } | null;
+  fontLinks: string[];
+}
+
 // What the in-browser collector returns (samples + page-level extras).
 export interface BrowserCollection {
   samples: ElementSample[];
@@ -73,9 +102,16 @@ export interface BrowserCollection {
 }
 
 export interface CaptureResponse {
-  raw_tokens: RawTokens;
+  tokens: DesignTokens | null;
   screenshot_b64: string | null;
   final_url: string;
   title: string;
-  error?: string;
+}
+
+export interface CaptureErrorBody {
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+  };
 }

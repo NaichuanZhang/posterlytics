@@ -1,0 +1,15 @@
+.agents/
+.claude/
+capture-service/
+db/
+docs/
+example-posters/
+functions/
+migrations/
+public/shots/
+tests/
+AGENTS.md
+CLAUDE.md
+README.md
+skills-lock.json
+*.tsbuildinfo

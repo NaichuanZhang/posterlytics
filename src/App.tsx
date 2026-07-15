@@ -1,8 +1,7 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthProvider'
 import { RequireAuth } from './auth/RequireAuth'
 import { Spinner } from './components/ui/Spinner'
-import { LandingPage } from './pages/LandingPage'
 import { SignInPage } from './pages/SignInPage'
 import { CampaignsListPage } from './pages/CampaignsListPage'
 import { CampaignWizardPage } from './pages/CampaignWizardPage'
@@ -10,12 +9,10 @@ import { PosterEditorPage } from './pages/PosterEditorPage'
 import { PlacementsPage } from './pages/PlacementsPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
 
-// `/` shows the marketing landing page to logged-out visitors and the campaigns
-// dashboard to signed-in users.
 function HomeRoute() {
   const { user, loading } = useAuth()
   if (loading) return <Spinner full />
-  return user ? <CampaignsListPage /> : <LandingPage />
+  return user ? <CampaignsListPage /> : <Navigate to="/signin" replace />
 }
 
 export default function App() {
