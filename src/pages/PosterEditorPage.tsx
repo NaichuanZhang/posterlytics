@@ -15,6 +15,7 @@ import { buildViewUrl } from '../lib/viewUrl'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { deleteReferenceImages, uploadReferenceImages } from '../lib/referenceStorage'
 import { normalizeReferenceContext, normalizeReferenceImages } from '../lib/references'
+import { getDeviceColorScheme } from '../lib/colorScheme'
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -409,6 +410,9 @@ function Row({ label, value }: { label: string; value?: string | null }) {
 }
 
 async function invokeGenerationFunction(slug: 'analyze' | 'designer' | 'hero', campaignId: string) {
-  const { error } = await insforge.functions.invoke(slug, { body: { campaignId } })
+  const body = slug === 'analyze'
+    ? { campaignId, colorScheme: getDeviceColorScheme() }
+    : { campaignId }
+  const { error } = await insforge.functions.invoke(slug, { body })
   if (error) throw new Error(error.message ?? `${slug} failed`)
 }

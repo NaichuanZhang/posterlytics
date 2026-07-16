@@ -37,7 +37,7 @@ The CLI may report a **deploy timeout** while the deploy actually succeeded — 
 
 ### Capture service (`capture-service/`, InsForge compute / Fly)
 
-A standalone Node + Playwright container — Deno edge functions can't run a browser. It exposes `POST /capture` (bearer-auth) → programmatic design tokens + screenshot. It enforces a **12-second capture deadline** (`server.ts`) and **blocks private-network targets** (`networkSafety.ts`) — keep both when touching capture code. Requires the **latest** CLI (`compute` is absent from older pinned versions like the homebrew `0.1.40`):
+A standalone Node + Playwright + Sharp container — Deno edge functions can't run a browser. It exposes `POST /capture` (bearer-auth) with `{ url, color_scheme? }` and returns visible-DOM design tokens plus a compressed three-frame style board in the backward-compatible `screenshot_b64` field. It enforces a **12-second capture deadline** (`server.ts`) and **blocks private-network targets** (`networkSafety.ts`) — keep both when touching capture code. Requires the **latest** CLI (`compute` is absent from older pinned versions like the homebrew `0.1.40`):
 
 ```bash
 npx -y @insforge/cli@latest compute deploy ./capture-service --name posterlytics-capture --port 8080 \
@@ -74,15 +74,15 @@ Two cooperating halves: a **Vite + React + TS SPA** (`src/`) and **Deno edge fun
 ### Edge functions (`functions/`)
 Each `.ts` (except `_shared.ts`, `build.mjs`) is one deployable function. **Subhosting uploads a single file and cannot resolve sibling imports**, so `build.mjs` inlines `_shared.ts` into each (stripping `export`/the import line) → `functions/dist/<slug>.ts`. **Always edit `functions/<slug>.ts` and rebuild — never edit `functions/dist/`.**
 
-- `analyze` — scrapes the product site, re-hosts brand assets, calls the capture service for `design_tokens` and a screenshot, and calls OpenRouter for `brand_essence`, `poster_content`, and `style_profile`. Historical event rows use the retained bounded Luma parser. Auth-scoped.
-- `designer` — designs a bespoke poster layout (`poster_layout`) from `poster_content`/`style_profile`; `hero` then paints from it. Runs for every product campaign (the only mode). Auth-scoped.
-- `hero` — paints the AI illustration poster (2:3): products compile `poster_layout` via the pure `compileLayoutPrompt` (with a minimal generic-editorial fallback layout when the designer step failed), events use a bespoke event prompt. Persists `hero_image_url`/`hero_image_key`. Auth-scoped.
+- `analyze` — scrapes product copy/assets, captures the creator's light/dark page variant, sends the style board as primary multimodal evidence, and persists richer optional `style_profile`/`design_tokens` JSON. Raw HTML color mining is capture-failure-only. A new board is persisted before the campaign pointer changes; the prior object is removed only after that update succeeds. Historical event rows use the retained bounded Luma parser. Auth-scoped.
+- `designer` — designs a source-grounded, 3-7-zone poster layout (`poster_layout`) from the style board, weighted palette, source density, `poster_content`, and `style_profile`; `hero` then paints from it. Runs for every product campaign (the only mode). Auth-scoped.
+- `hero` — paints the AI illustration poster (2:3): product references are ordered style board, user images, logo, then product assets, capped at six and labeled by purpose. Products compile `poster_layout` via the pure `compileLayoutPrompt`; events retain their bespoke prompt/reference path. Persists `hero_image_url`/`hero_image_key`. Auth-scoped.
 - `view` — the public QR target. It logs one visit through `log_visit`, then redirects to `destination_url`. `link_status` distinguishes missing and unpublished codes without exposing draft data.
 
 Two client factories in `_shared.ts`: `createAnonClient()` for `view` and `createUserClient(req)` for authenticated generation. Shared helpers include OpenRouter calls, capture, image upload conversion, poster-layout normalization, bounded legacy-event parsing, and structured `logPipelineEvent` JSON logs. **No raw IP is stored**; `visitorHash` hashes a first-party cookie identifier with a secret salt.
 
 ### Programmatic style vs agentic poster (separation)
-**Programmatic, deterministic, testable**: the capture-service reads real computed styles → `RawTokens`; `normalizeDesignTokens` → `DesignTokens`; `analyze` derives `style_profile` from them. No LLM touches color/font extraction. **Agentic, LLM**: `analyze`/`designer` author the poster copy and layout, and `hero` paints the illustration. The seam between them is always a pure function (normalize).
+**Programmatic, deterministic, testable**: the capture-service samples visible computed styles across three frames, merges a style board, clusters its weighted pixels, and normalizes `RawTokens` into `DesignTokens`. No LLM authors color/font extraction. **Agentic, LLM**: `analyze` describes observed visual treatment and authors copy, `designer` adapts that evidence into a poster layout, and `hero` paints it. The seams are pure normalizers and prompt compilers.
 
 ### AI
 `aiChat` and `aiImage` call OpenRouter directly from edge functions. `OPENROUTER_API_KEY` is server-only; model defaults can be overridden with `OPENROUTER_CHAT_MODEL` and `OPENROUTER_IMAGE_MODEL`. Generated images are copied into InsForge Storage before their URLs are persisted.

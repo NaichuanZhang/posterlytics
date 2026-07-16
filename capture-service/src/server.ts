@@ -2,14 +2,19 @@
 //   GET  /healthz   -> 200 "ok"            (compute liveness)
 //   POST /capture   -> { tokens, screenshot_b64, final_url, title }
 //     Auth: Authorization: Bearer <CAPTURE_TOKEN>
-//     Body: { "url": "https://..." }
+//     Body: { "url": "https://...", "color_scheme"?: "light" | "dark" }
 //
 // Only the `analyze` edge function calls this, presenting the shared bearer
 // token. The container holds NO InsForge credentials by design — it returns
-// the screenshot as base64 and `analyze` (which has API_KEY) stores it.
+// the style board as base64 and `analyze` stores it.
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { captureUrl, warmBrowser } from './capture.js';
+import {
+  InvalidColorSchemeError,
+  normalizeColorScheme,
+  type ColorScheme,
+} from './captureOptions.js';
 import { UnsafeTargetError } from './networkSafety.js';
 import type { CaptureErrorBody, CaptureResponse } from './types.js';
 
@@ -67,7 +72,7 @@ function authorized(req: IncomingMessage): boolean {
   return header === `Bearer ${CAPTURE_TOKEN}`;
 }
 
-async function captureWithDeadline(url: string): Promise<CaptureResponse> {
+async function captureWithDeadline(url: string, colorScheme: ColorScheme): Promise<CaptureResponse> {
   const controller = new AbortController();
   let timeout: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
@@ -78,7 +83,7 @@ async function captureWithDeadline(url: string): Promise<CaptureResponse> {
   });
 
   try {
-    return await Promise.race([captureUrl(url, controller.signal), deadline]);
+    return await Promise.race([captureUrl(url, colorScheme, controller.signal), deadline]);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -96,19 +101,24 @@ const server = createServer(async (req, res) => {
       }
 
       let url: string;
+      let colorScheme: ColorScheme;
       try {
         const parsed = JSON.parse((await readBody(req)) || '{}');
         url = String(parsed.url || '').trim();
+        colorScheme = normalizeColorScheme(parsed.color_scheme);
       } catch (error) {
         if (error instanceof BodyTooLargeError) {
           return sendError(res, 413, 'body_too_large', error.message);
+        }
+        if (error instanceof InvalidColorSchemeError) {
+          return sendError(res, 400, 'invalid_color_scheme', error.message);
         }
         return sendError(res, 400, 'invalid_json', 'The request body must be valid JSON.');
       }
       if (!url) return sendError(res, 400, 'missing_url', 'The request must include a URL.');
 
       try {
-        const result = await captureWithDeadline(url);
+        const result = await captureWithDeadline(url, colorScheme);
         return send(res, 200, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

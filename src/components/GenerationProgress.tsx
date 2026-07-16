@@ -32,7 +32,7 @@ interface Props {
   layout?: PosterLayout | null
 }
 
-// The poster-generation loading screen: shows the captured site screenshot and a
+// The poster-generation loading screen: shows the captured site style board and a
 // live step list (analyze → designer → hero), revealing each agent's
 // real prompt as it finishes. Purely presentational — the wizard owns the state.
 export function GenerationProgress({ headline, screenshotUrl, steps, layout }: Props) {
@@ -49,7 +49,7 @@ export function GenerationProgress({ headline, screenshotUrl, steps, layout }: P
       <div className="genprog-grid">
         <div className="genprog-shot">
           {screenshotUrl ? (
-            <img src={screenshotUrl} alt="Your website" />
+            <img src={screenshotUrl} alt="Website style board" />
           ) : (
             <div className="genprog-shot-empty muted">Capturing your site…</div>
           )}

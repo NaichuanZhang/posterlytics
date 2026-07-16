@@ -21,6 +21,17 @@ export type ColorRole =
   | 'other';
 
 export type FontRole = 'heading' | 'body' | 'other';
+export type VisualTheme = 'light' | 'dark' | 'mixed';
+
+export interface VisualPaletteColor {
+  color: string;
+  proportion: number;
+}
+
+export interface PixelEvidence {
+  visualPalette: VisualPaletteColor[];
+  theme: VisualTheme;
+}
 
 // One raw computed-style reading for a single element, collected in-browser.
 export interface ElementSample {
@@ -40,6 +51,10 @@ export interface ElementSample {
   paddingY: number; // (top+bottom)/2 px
   isLink: boolean;
 }
+
+export type BrowserElementSample = Omit<ElementSample, 'area'> & {
+  bounds: { left: number; top: number; right: number; bottom: number };
+};
 
 // Compact, frequency-aggregated tokens the container returns over the wire.
 export interface RawTokens {
@@ -78,6 +93,8 @@ export interface DesignTokens {
     primary: string;
     accent: string;
     palette: string[];
+    visualPalette?: VisualPaletteColor[];
+    theme?: VisualTheme;
   };
   radii: number[];
   shadows: string[];
@@ -96,13 +113,15 @@ export interface DesignTokens {
 
 // What the in-browser collector returns (samples + page-level extras).
 export interface BrowserCollection {
-  samples: ElementSample[];
+  samples: BrowserElementSample[];
   fontLinks: string[];
   title: string;
 }
 
 export interface CaptureResponse {
   tokens: DesignTokens | null;
+  // Backward-compatible wire name. The bytes now contain a vertically merged
+  // multi-frame style board rather than one above-the-fold screenshot.
   screenshot_b64: string | null;
   final_url: string;
   title: string;

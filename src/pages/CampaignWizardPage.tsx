@@ -7,6 +7,7 @@ import { Layout } from '../components/Layout'
 import { insforge } from '../lib/insforge'
 import { uploadReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import { normalizeReferenceContext } from '../lib/references'
+import { getDeviceColorScheme } from '../lib/colorScheme'
 import type { PosterLayout, ReferenceImage } from '../lib/types'
 
 type Phase = 'form' | 'creating' | 'analyzing' | 'generating' | 'error'
@@ -117,7 +118,7 @@ export function CampaignWizardPage() {
     patchStep('analyze', { status: 'running' })
     try {
       const { data, error: analyzeError } = await insforge.functions.invoke('analyze', {
-        body: { campaignId },
+        body: { campaignId, colorScheme: getDeviceColorScheme() },
       })
       if (analyzeError) throw new Error(analyzeError.message ?? 'Analysis failed')
       const result = data as { screenshot_url?: string | null; prompt?: AgentPrompt } | null

@@ -7,16 +7,20 @@ import {
   captureSite,
   dataUrlToBlob,
   inlineReferenceImages,
+  normalizeCaptureColorScheme,
+  normalizeStyleProfile,
   parseColor,
   toHex,
   logPipelineEvent,
   userContentWithImages,
+  userContentWithImageReferences,
   extractEventDetails,
   fetchLumaHtml,
   formatEventLines,
   isLumaHost,
   type DesignTokens,
   type EventDetails,
+  type TypedImageReference,
 } from './_shared.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
@@ -35,18 +39,22 @@ export default async function (req: Request): Promise<Response> {
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
 
-  let body: { campaignId?: string };
+  let body: { campaignId?: string; colorScheme?: unknown };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'bad json' }, 400);
   }
   if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
+  const colorScheme = normalizeCaptureColorScheme(body.colorScheme);
+  if (!colorScheme) {
+    return jsonResponse({ error: 'colorScheme must be "light" or "dark"' }, 400);
+  }
 
   // Load the campaign (owner RLS guarantees it's the caller's).
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario, reference_context, reference_images')
+    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario, reference_context, reference_images, screenshot_url, screenshot_key')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -107,15 +115,13 @@ export default async function (req: Request): Promise<Response> {
 
   // 2. Extract real assets + meta from the HTML.
   const assets = extractAssets(scrapeHtml, productUrl);
-  // Mine the site's REAL vivid colors from raw CSS (cheap fallback seed).
-  const regexColors = extractColors(scrapeHtml);
 
   // 2b. Programmatic style capture via the headless-browser service: real
-  // computed fonts/colors/radii/shadows/spacing + a screenshot. Best-effort —
+  // computed fonts/colors/radii/shadows/spacing + a style board. Best-effort —
   // null when the service is unconfigured/unreachable, in which case we fall
   // back to the regex-mined colors below. (Capture happens here so its palette
   // can seed the model and its tokens are persisted.)
-  const capture = await captureSite(productUrl);
+  const capture = await captureSite(productUrl, colorScheme);
   if (capture.error) {
     logPipelineEvent({
       source: 'capture',
@@ -127,16 +133,20 @@ export default async function (req: Request): Promise<Response> {
     });
   }
   const design_tokens: DesignTokens | null = capture.tokens;
-  // Prefer the programmatic palette (computed, role-aware) over regex mining;
-  // fall back to regex colors when capture is unavailable.
+  // A successful browser capture is self-contained evidence: only viewport-
+  // visible computed DOM colors and style-board pixels are used. Raw HTML color
+  // mining is retained strictly for a capture failure/unconfigured fallback.
+  const captureSucceeded = capture.error === null;
+  const hasCapturedEvidence = !!design_tokens || !!capture.styleBoardDataUrl;
+  const fallbackHtmlColors = captureSucceeded ? [] : extractColors(scrapeHtml);
   const siteColors = design_tokens
     ? dedupeColors([
+        ...(design_tokens.colors.visualPalette ?? []).map((entry) => entry.color),
         design_tokens.colors.accent,
         design_tokens.colors.primary,
         ...design_tokens.colors.palette,
-        ...regexColors,
       ])
-    : regexColors;
+    : fallbackHtmlColors;
 
   // Re-host logo + up to 2 product images into the public assets bucket so the
   // poster never hot-links the origin (CORS-clean export, survives churn).
@@ -174,29 +184,67 @@ export default async function (req: Request): Promise<Response> {
   }
   brand_assets.primary_image_url = brand_assets.images[0]?.url;
 
-  // Upload the captured screenshot (a JPEG data URL) to the public assets bucket
-  // so it's URL-addressable (generation loading UI, future vision passes).
-  let screenshot_url: string | null = null;
-  let screenshot_key: string | null = null;
-  if (capture.screenshotDataUrl) {
+  // Upload a new style board under a fresh key. The campaign continues to point
+  // at the previous board until its full analysis update succeeds.
+  const previousScreenshotUrl = String(
+    (campaign as Record<string, unknown>).screenshot_url ?? '',
+  ) || null;
+  const previousScreenshotKey = String(
+    (campaign as Record<string, unknown>).screenshot_key ?? '',
+  ) || null;
+  let screenshot_url: string | null = previousScreenshotUrl;
+  let screenshot_key: string | null = previousScreenshotKey;
+  let uploadedStyleBoardKey: string | null = null;
+  if (capture.styleBoardDataUrl) {
     try {
-      const blob = dataUrlToBlob(capture.screenshotDataUrl);
-      const { data } = await client.storage
+      const blob = dataUrlToBlob(capture.styleBoardDataUrl);
+      const { data, error } = await client.storage
         .from('assets')
-        .upload(`screenshot/${campaign.id}/${crypto.randomUUID().slice(0, 8)}.jpg`, blob);
-      if (data) {
+        .upload(`style-board/${campaign.id}/${crypto.randomUUID().slice(0, 8)}.jpg`, blob);
+      if (!error && data) {
         screenshot_url = data.url;
         screenshot_key = data.key;
+        uploadedStyleBoardKey = data.key;
+      } else if (error) {
+        logPipelineEvent({
+          source: 'analyze',
+          campaignId: campaign.id,
+          status: 'degraded',
+          code: 'style_board_upload_failed',
+          detail: 'Fresh style board could not be persisted; retaining the previous stored board.',
+          error,
+        });
       }
-    } catch {
-      screenshot_url = null;
+    } catch (error) {
+      logPipelineEvent({
+        source: 'analyze',
+        campaignId: campaign.id,
+        status: 'degraded',
+        code: 'style_board_upload_failed',
+        detail: 'Fresh style board could not be persisted; retaining the previous stored board.',
+        error,
+      });
     }
   }
 
+  const discardUploadedStyleBoard = async () => {
+    if (uploadedStyleBoardKey) {
+      await client.storage.from('assets').remove(uploadedStyleBoardKey).catch(() => {});
+    }
+  };
+  const removePreviousStyleBoard = async () => {
+    if (
+      uploadedStyleBoardKey &&
+      previousScreenshotKey &&
+      previousScreenshotKey !== uploadedStyleBoardKey
+    ) {
+      await client.storage.from('assets').remove(previousScreenshotKey).catch(() => {});
+    }
+  };
+
   // 3. gpt-4o → poster_content + style_profile + brand_essence. The `designer`
   // agent then designs the bespoke layout from these and `hero` paints it;
-  // brand_essence is a word-portrait that lets the image model (which gets text
-  // only) infuse the real brand.
+  // brand_essence is a word-portrait that supplements the visual references.
   const visibleText = stripToText(scrapeHtml).slice(0, 8000);
 
   // The event scenario uses its own prompt + spec normalizer (poster_spec becomes
@@ -226,6 +274,7 @@ export default async function (req: Request): Promise<Response> {
       })
       .eq('id', campaign.id);
     if (upErrEv) {
+      await discardUploadedStyleBoard();
       logPipelineEvent({
         source: 'analyze', campaignId: campaign.id, status: 'failed',
         code: 'campaign_persist_failed',
@@ -234,6 +283,7 @@ export default async function (req: Request): Promise<Response> {
       });
       return jsonResponse({ error: upErrEv.message }, 500);
     }
+    await removePreviousStyleBoard();
     return jsonResponse({
       scenario: 'event',
       event_details,
@@ -253,32 +303,69 @@ export default async function (req: Request): Promise<Response> {
   // by `hero` — analyze only produces faithful brand context + structured copy.
   // (The fixed cozy/saas template modes were removed; designer is the one path.)
   const sys =
-    'You are a senior product marketer and brand designer. Given a product website and its GTM inputs, produce a ' +
-    'faithful style profile, structured product copy, and a brand word-portrait — a separate agent designs the ' +
-    'poster layout from them. Output STRICT JSON only — no prose, no code fences.\n' +
+    'You are a senior product marketer and visual-evidence analyst. Given a product website, a multi-frame source ' +
+    'style board, and GTM inputs, describe only visual characteristics actually observed, then produce structured ' +
+    'copy and a brand word-portrait. The first attached image, when present, is the PRIMARY brand evidence. Adapt ' +
+    'the evidence for a poster later; do not copy navigation or website controls. Never infer a visual medium from ' +
+    'the product category: for example, do not automatically choose risograph for a game. Output STRICT JSON only ' +
+    '— no prose, no code fences.\n' +
     'Schema: {' +
-    '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex"},' +
-    '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words","layout_hint":"one phrase"},' +
+    '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex",' +
+    '"secondary":"#hex optional","supporting":["#hex"],' +
+    '"proportions":[{"color":"#hex","proportion":0.0}]},' +
+    '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words",' +
+    '"layout_hint":"one phrase","imagery":"observed image subject and treatment",' +
+    '"typography_treatment":"observed type character, scale and hierarchy",' +
+    '"lighting":"observed lighting and contrast","texture":"observed surface/finish",' +
+    '"motifs":["observed recurring shapes or symbols"],"composition":"observed hierarchy and spatial rhythm",' +
+    '"density":"sparse|balanced|dense"},' +
     '"poster_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
     '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
     '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
     'UI vibe, signature colors (name the hex), and overall feel",' +
     '"qr_label":"<=4 words for the scan caption, e.g. Scan to Start"}\n' +
-    'Keep all copy SHORT and legible. CRITICAL — the style_profile.palette MUST reflect the brand\'s REAL ' +
-    'colors. You are given the actual hex colors mined from the site\'s own CSS (most-used first); use the most ' +
-    'prominent vivid one as the "accent" and the brand\'s dominant dark/brand tone as "primary". Do NOT substitute a ' +
-    'generic SaaS blue or any color that is not on the site. Only fall back to tasteful defaults if no site colors ' +
-    `are provided. Detected theme-color (if any): ${assets.themeColor || 'none'}.`;
+    'Keep all copy SHORT and legible. The palette and usage proportions MUST reflect the supplied deterministic ' +
+    'capture evidence. Preserve dominant neutrals and restrained accents instead of amplifying every vivid pixel. ' +
+    'Do not substitute generic SaaS blue or introduce colors absent from the evidence. Classify density from the ' +
+    'observed page hierarchy, not from how much marketing copy is available.';
+  const capturedPalette = design_tokens?.colors.visualPalette ?? [];
+  const paletteEvidence = capturedPalette.length
+    ? capturedPalette
+        .map((entry) => `${entry.color} ${(entry.proportion * 100).toFixed(1)}%`)
+        .join(', ')
+    : siteColors.join(', ');
+  const evidenceSource = hasCapturedEvidence
+    ? 'browser-visible DOM plus weighted style-board pixels'
+    : captureSucceeded
+      ? 'browser capture succeeded but yielded no usable visual palette'
+      : `raw HTML color fallback${assets.themeColor ? ` (theme-color ${assets.themeColor})` : ''}`;
   const user =
     `PRODUCT NAME: ${campaign.product_name}\n` +
     `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
     `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
     `PRODUCT URL: ${productUrl}\n` +
-    `REAL BRAND COLORS mined from the site CSS (most-used first, use these for the palette): ${siteColors.length ? siteColors.join(', ') : '(none found — infer tasteful defaults)'}\n\n` +
+    `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
+    `CAPTURED PAGE THEME: ${design_tokens?.colors.theme ?? '(unclassified)'}\n` +
+    `WEIGHTED COLOR USAGE (preserve these proportions): ${paletteEvidence || '(none found — infer restrained defaults)'}\n` +
+    `VISIBLE DOM COLOR ROLES: bg ${design_tokens?.colors.bg ?? '(unknown)'}, text ${design_tokens?.colors.text ?? '(unknown)'}, primary ${design_tokens?.colors.primary ?? '(unknown)'}, accent ${design_tokens?.colors.accent ?? '(unknown)'}\n\n` +
     `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}\n\n` +
     `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
-    `The user supplied ${referenceImages.length} supporting image(s). Treat them as visual references, not text to reproduce verbatim.`;
-  const userContent = userContentWithImages(user, referenceImages);
+    `The user supplied ${referenceImages.length} supporting image(s). Treat them as secondary visual references, not text to reproduce verbatim.`;
+  const analysisReferences: TypedImageReference[] = [
+    ...(capture.styleBoardDataUrl
+      ? [{
+          kind: 'style-board' as const,
+          url: capture.styleBoardDataUrl,
+          purpose: 'Primary source evidence: three page viewports showing palette proportions, typography, imagery, lighting, motifs, hierarchy, and density.',
+        }]
+      : []),
+    ...referenceImages.map((url, index) => ({
+      kind: 'user-reference' as const,
+      url,
+      purpose: `User-supplied creative reference ${index + 1}; use only where it agrees with or intentionally supplements the source page.`,
+    })),
+  ];
+  const userContent = userContentWithImageReferences(user, analysisReferences, 6);
 
   let parsed: ParsedContent;
   try {
@@ -330,6 +417,7 @@ export default async function (req: Request): Promise<Response> {
     })
     .eq('id', campaign.id);
   if (upErr) {
+    await discardUploadedStyleBoard();
     logPipelineEvent({
       source: 'analyze',
       campaignId: campaign.id,
@@ -340,6 +428,7 @@ export default async function (req: Request): Promise<Response> {
     });
     return jsonResponse({ error: upErr.message }, 500);
   }
+  await removePreviousStyleBoard();
 
   return jsonResponse({
     style_profile: parsed.style_profile,
@@ -356,7 +445,8 @@ export default async function (req: Request): Promise<Response> {
 }
 
 // Dedupe a list of color strings (any format), preserving order, dropping blanks
-// and exact-rgb duplicates. Used to merge the captured palette with regex colors.
+// and exact-rgb duplicates. Capture evidence is ordered by pixel usage; this is
+// also used for the raw-HTML fallback when browser capture is unavailable.
 function dedupeColors(colors: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -535,29 +625,87 @@ function normalize(
   siteColors: string[] = [],
   tokens: DesignTokens | null = null,
 ): ParsedContent {
-  const o = (raw ?? {}) as Record<string, Record<string, unknown>>;
-  const sp = o.style_profile ?? {};
-  const lc = o.poster_content ?? {};
+  const recordOf = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  const o = recordOf(raw);
+  const sp = recordOf(o.style_profile);
+  const lc = recordOf(o.poster_content);
   const product = c.product_name;
   const tagline = c.tagline || '';
 
-  // Accent correction: the poster's whole color identity is the accent. If the
-  // model returned an accent that ISN'T a real site color but the site has vivid
-  // colors, snap to the most-used mined color so the poster stays on-brand.
-  const modelPalette = (sp.palette ?? {}) as Record<string, string>;
-  // The most-used vivid color mined from the site IS the brand accent, by
-  // definition — prefer it over the model's guess (the model often picks a lesser
-  // on-page color or a generic blue). Only fall back to the model/default when the
-  // site yielded no usable colors. The programmatic capture (when present) is the
-  // strongest signal of all, so its computed accent/primary win outright.
+  const modelPalette = recordOf(sp.palette);
+  const modelFonts = recordOf(sp.fonts);
+  // Deterministic capture roles win over model guesses. The weighted palette is
+  // kept separately so a tiny accent never becomes the poster's dominant field.
   const topSiteColor = siteColors.find(isVivid);
-  const modelAccent = modelPalette.accent;
+  const modelAccent = typeof modelPalette.accent === 'string' ? modelPalette.accent : undefined;
   const accent =
     (isVivid(tokens?.colors.accent) ? tokens!.colors.accent : null) ??
     topSiteColor ??
     (isVivid(modelAccent) ? modelAccent : '#10b981');
-  // Primary: captured computed color wins, then model's, else a dark default.
-  const primary = tokens?.colors.primary || modelPalette.primary || '#1f2937';
+  const primary = tokens?.colors.primary ||
+    (typeof modelPalette.primary === 'string' ? modelPalette.primary : '') ||
+    '#1f2937';
+  const bg = tokens?.colors.bg ||
+    (typeof modelPalette.bg === 'string' ? modelPalette.bg : '') ||
+    '#ffffff';
+  const text = tokens?.colors.text ||
+    (typeof modelPalette.text === 'string' ? modelPalette.text : '') ||
+    '#111827';
+  const visualPalette = tokens?.colors.visualPalette ?? [];
+  const roleColors = new Set(dedupeColors([primary, bg, text, accent]));
+  const supplementalColors = dedupeColors(visualPalette.map((entry) => entry.color))
+    .filter((color) => !roleColors.has(color));
+  const modelSupporting = asArray(modelPalette.supporting);
+  const secondary = supplementalColors[0] ||
+    (typeof modelPalette.secondary === 'string' ? modelPalette.secondary : '');
+  const supporting = dedupeColors([
+    ...supplementalColors.slice(1),
+    ...modelSupporting,
+  ]).filter((color) => color !== secondary).slice(0, 5);
+  const capturedHeading = fontStack(tokens?.typography.headingFamily);
+  const capturedBody = fontStack(tokens?.typography.bodyFamily);
+  const styleProfile = normalizeStyleProfile({
+    ...sp,
+    palette: {
+      ...modelPalette,
+      primary,
+      bg,
+      text,
+      accent,
+      ...(secondary ? { secondary } : {}),
+      ...(supporting.length ? { supporting } : {}),
+      proportions: visualPalette.length ? visualPalette : modelPalette.proportions,
+    },
+    fonts: {
+      ...modelFonts,
+      heading: capturedHeading ??
+        (typeof modelFonts.heading === 'string' ? modelFonts.heading : 'system-ui, sans-serif'),
+      body: capturedBody ??
+        (typeof modelFonts.body === 'string' ? modelFonts.body : 'system-ui, sans-serif'),
+    },
+  }, {
+    palette: { primary, bg, text, accent },
+    fonts: {
+      heading: capturedHeading ?? 'system-ui, sans-serif',
+      body: capturedBody ?? capturedHeading ?? 'system-ui, sans-serif',
+    },
+    tone: 'modern',
+    imagery: 'source-faithful product imagery adapted to a poster composition',
+    typography_treatment: 'source-derived type character with a clear poster-scale hierarchy',
+    lighting: tokens?.colors.theme === 'dark'
+      ? 'source-matched dark-field lighting and contrast'
+      : tokens?.colors.theme === 'light'
+        ? 'source-matched light-field lighting and contrast'
+        : 'source-matched lighting and contrast',
+    texture: 'preserve the source page surface finish without adding an unrelated print effect',
+    composition: typeof sp.layout_hint === 'string' && sp.layout_hint
+      ? sp.layout_hint
+      : 'poster adaptation of the source page hierarchy',
+    density: 'balanced',
+  });
 
   // The layout itself is designed later by the `designer` function; the product
   // poster_spec carries only what the SPA band reads (qr_label) + the urls line.
@@ -579,21 +727,7 @@ function normalize(
   };
 
   return {
-    style_profile: {
-      palette: {
-        primary,
-        bg: tokens?.colors.bg || modelPalette.bg || '#ffffff',
-        text: tokens?.colors.text || modelPalette.text || '#111827',
-        accent,
-      },
-      fonts: {
-        // Captured computed font families win; the model is the fallback.
-        heading: fontStack(tokens?.typography.headingFamily) ?? (sp.fonts as Record<string, string>)?.heading ?? 'system-ui, sans-serif',
-        body: fontStack(tokens?.typography.bodyFamily) ?? (sp.fonts as Record<string, string>)?.body ?? 'system-ui, sans-serif',
-      },
-      tone: (sp.tone as string) ?? 'modern',
-      layout_hint: (sp.layout_hint as string) ?? '',
-    },
+    style_profile: styleProfile,
     poster_copy: posterCopy,
     poster_content: {
       headline: contentHeadline,
@@ -603,7 +737,9 @@ function normalize(
       features: contentFeatures,
       cta: contentCta,
     },
-    brand_essence: String(o.brand_essence ?? `${product}: clean modern product, friendly approachable feel`).slice(0, 400),
+    brand_essence: String(
+      o.brand_essence ?? `${product}: source-faithful visual identity using its observed palette and type character`,
+    ).slice(0, 800),
     poster_spec,
   };
 }

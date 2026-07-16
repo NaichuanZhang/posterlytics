@@ -1,4 +1,4 @@
-import type { ColorRole, DesignTokens, RawTokens } from './types.js';
+import type { ColorRole, DesignTokens, PixelEvidence, RawTokens } from './types.js';
 
 type RGB = [number, number, number];
 
@@ -12,8 +12,12 @@ const GENERIC_FONTS = new Set([
   'blinkmacsystemfont',
 ]);
 
-export function normalizeDesignTokens(raw: RawTokens | null | undefined): DesignTokens | null {
-  if (!raw || (!raw.colors?.length && !raw.fonts?.length)) return null;
+export function normalizeDesignTokens(
+  raw: RawTokens | null | undefined,
+  pixelEvidence?: PixelEvidence,
+): DesignTokens | null {
+  if (!raw) return null;
+  if (!raw.colors?.length && !raw.fonts?.length && !pixelEvidence?.visualPalette.length) return null;
 
   const fonts = (raw.fonts ?? []).filter((font) => font?.value);
   const headingFamily = firstNonGenericFont(fonts, 'heading');
@@ -30,6 +34,9 @@ export function normalizeDesignTokens(raw: RawTokens | null | undefined): Design
       }
     : null;
 
+  const assignedColors = assignColors(raw, pixelEvidence);
+  const visualColors = pixelEvidence?.visualPalette.map((entry) => entry.color) ?? [];
+
   return {
     typography: {
       headingFamily,
@@ -37,7 +44,14 @@ export function normalizeDesignTokens(raw: RawTokens | null | undefined): Design
       scale: cleanNums(raw.fontSizes, 8),
       weights: cleanNums(raw.fontWeights, 6),
     },
-    colors: assignColors(raw),
+    colors: {
+      ...assignedColors,
+      palette: dedupeStrings([...visualColors, ...assignedColors.palette]).slice(0, 10),
+      ...(pixelEvidence?.visualPalette.length
+        ? { visualPalette: pixelEvidence.visualPalette }
+        : {}),
+      ...(pixelEvidence?.theme ? { theme: pixelEvidence.theme } : {}),
+    },
     radii: cleanNums(raw.radii, 5),
     shadows: (raw.shadows ?? []).filter((shadow) => shadow && shadow !== 'none').slice(0, 4),
     spacing: cleanNums(raw.spacing, 6),
@@ -55,7 +69,10 @@ function firstNonGenericFont(
   return (named ?? inRole[0])?.value ?? '';
 }
 
-function assignColors(raw: RawTokens): DesignTokens['colors'] {
+function assignColors(
+  raw: RawTokens,
+  pixelEvidence?: PixelEvidence,
+): DesignTokens['colors'] {
   const entries = (raw.colors ?? [])
     .map((color) => ({
       rgb: parseColor(color.value),
@@ -66,14 +83,27 @@ function assignColors(raw: RawTokens): DesignTokens['colors'] {
 
   const palette = dedupeHex(entries.map((entry) => entry.rgb));
   const backgrounds = entries.filter((entry) => entry.role === 'bg');
+  const theme = pixelEvidence?.theme ?? 'mixed';
   const bg = pickBy(
     backgrounds.length ? backgrounds : entries,
-    (entry) => relativeLuminance(entry.rgb) * Math.log2(entry.count + 2),
+    (entry) => {
+      const luminance = relativeLuminance(entry.rgb);
+      const usage = Math.log2(entry.count + 2);
+      if (theme === 'dark') return (1 - luminance) * usage;
+      if (theme === 'light') return luminance * usage;
+      return usage;
+    },
   ) ?? [255, 255, 255];
   const textColors = entries.filter((entry) => entry.role === 'text');
   const text = pickBy(
     textColors.length ? textColors : entries,
-    (entry) => (1 - relativeLuminance(entry.rgb)) * Math.log2(entry.count + 2),
+    (entry) => {
+      const luminance = relativeLuminance(entry.rgb);
+      const usage = Math.log2(entry.count + 2);
+      if (theme === 'dark') return luminance * usage;
+      if (theme === 'light') return (1 - luminance) * usage;
+      return Math.abs(luminance - relativeLuminance(bg)) * usage;
+    },
   ) ?? [17, 24, 39];
   const brandColors = entries.filter((entry) =>
     entry.role === 'button-bg' || entry.role === 'link' || entry.role === 'border'
@@ -82,7 +112,17 @@ function assignColors(raw: RawTokens): DesignTokens['colors'] {
     brandColors.length ? brandColors : entries,
     (entry) => (vividness(entry.rgb) + 0.15) * Math.log2(entry.count + 2),
   ) ?? [31, 41, 55];
-  const accent = pickBy(entries, (entry) => vividness(entry.rgb)) ?? primary;
+  const visualEntries = (pixelEvidence?.visualPalette ?? [])
+    .map((entry) => ({
+      rgb: parseColor(entry.color),
+      count: Math.max(1, Math.round(entry.proportion * 100_000)),
+      role: 'other' as ColorRole,
+    }))
+    .filter((entry): entry is { rgb: RGB; count: number; role: ColorRole } => entry.rgb !== null);
+  const accent = pickBy(
+    [...entries, ...visualEntries],
+    (entry) => vividness(entry.rgb),
+  ) ?? primary;
 
   return {
     bg: toHex(bg),
@@ -153,6 +193,10 @@ function dedupeHex(values: RGB[]): string[] {
     if (output.length >= 10) break;
   }
   return output;
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function normalizeHex(value: string | undefined): string | null {

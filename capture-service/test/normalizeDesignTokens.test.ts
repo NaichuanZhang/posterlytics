@@ -64,3 +64,42 @@ test('dedupes bounded scales and normalizes button colors', () => {
   assert.equal(tokens.button?.bg, '#4f46e5');
   assert.equal(tokens.button?.color, '#ffffff');
 });
+
+test('includes weighted visual palette and captured theme', () => {
+  const tokens = normalizeDesignTokens(baseRaw, {
+    visualPalette: [
+      { color: '#101010', proportion: 0.7 },
+      { color: '#f97316', proportion: 0.08 },
+    ],
+    theme: 'dark',
+  });
+  assert.ok(tokens);
+  assert.equal(tokens.colors.visualPalette?.[0].proportion, 0.7);
+  assert.equal(tokens.colors.theme, 'dark');
+  assert.equal(tokens.colors.palette[0], '#101010');
+});
+
+test('dark capture assigns dark background and light text roles', () => {
+  const tokens = normalizeDesignTokens({
+    ...baseRaw,
+    colors: [
+      { value: 'rgb(5, 5, 5)', count: 9000, role: 'bg' },
+      { value: 'rgb(40, 40, 40)', count: 3000, role: 'bg' },
+      { value: 'rgb(250, 250, 250)', count: 7000, role: 'text' },
+      { value: 'rgb(170, 170, 170)', count: 2000, role: 'text' },
+      { value: 'rgb(30, 90, 220)', count: 500, role: 'link' },
+    ],
+  }, {
+    visualPalette: [
+      { color: '#050505', proportion: 0.8 },
+      { color: '#fafafa', proportion: 0.12 },
+      { color: '#f97316', proportion: 0.02 },
+    ],
+    theme: 'dark',
+  });
+  assert.ok(tokens);
+  assert.equal(tokens.colors.bg, '#050505');
+  assert.equal(tokens.colors.text, '#fafafa');
+  assert.equal(tokens.colors.accent, '#f97316');
+  assert.equal(tokens.colors.theme, 'dark');
+});

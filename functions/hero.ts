@@ -4,18 +4,20 @@ import {
   errorDetails,
   fetchImageAsDataUrl,
   imageSourceToBlob,
+  inlineImageReferences,
   inlineReferenceImages,
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
   logPipelineEvent,
   type PosterLayout,
+  type TypedImageReference,
 } from './_shared.ts';
 
 // `hero` renders the poster (2:3) as a single AI image. Products compile the
 // LLM-designed poster_layout (produced by the `designer` agent) into the prompt
 // via the pure compileLayoutPrompt(); events use their own bespoke event prompt.
-// The image model gets TEXT ONLY, so the brand is described in words. The
+// The image model gets a compiled prompt plus bounded visual references. The
 // artwork fills its complete 2:3 frame — the SPA shows it uncropped on an A4
 // sheet with the QR footer composited OUTSIDE the artwork. Stored in the public
 // assets bucket.
@@ -38,7 +40,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, hero_image_key, reference_context, reference_images')
+    .select('id, product_name, tagline, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, hero_image_key, screenshot_url, reference_context, reference_images')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
@@ -53,37 +55,123 @@ export default async function (req: Request): Promise<Response> {
   // inlined as raster data URLs: the provider fetches plain URLs itself and
   // rejects our CDN's binary/octet-stream content type (and SVG logos outright),
   // which 400s the whole generation.
-  const assets = ((campaign as Record<string, unknown>).brand_assets ?? {}) as { logo_url?: string };
+  const assets = ((campaign as Record<string, unknown>).brand_assets ?? {}) as {
+    logo_url?: string;
+    primary_image_url?: string;
+    images?: Array<{ url?: string }>;
+  };
   const userReferences = Array.isArray((campaign as Record<string, unknown>).reference_images)
     ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
         .map((image) => typeof image.url === 'string' ? image.url : '')
         .filter(Boolean)
         .slice(0, 5)
     : [];
-  const inlinedLogo = assets.logo_url ? await fetchImageAsDataUrl(assets.logo_url) : null;
-  const inlinedRefs = await inlineReferenceImages(userReferences, { maxImages: 5 });
-  if (assets.logo_url && !inlinedLogo) {
-    logPipelineEvent({
-      source: 'hero',
-      campaignId: campaign.id,
-      status: 'degraded',
-      code: 'logo_reference_skipped',
-      detail: 'Brand logo could not be inlined as a raster image (SVG or fetch failure); painting without it.',
+  let referenceImages: Array<TypedImageReference | string>;
+  let hasLogo = false;
+  let hasStyleBoard = false;
+  if (isEvent) {
+    // Preserve the historical event painter contract: logo first, then user
+    // references, with no source-board or product-asset additions.
+    const inlinedLogo = assets.logo_url ? await fetchImageAsDataUrl(assets.logo_url) : null;
+    const inlinedRefs = await inlineReferenceImages(userReferences, { maxImages: 5 });
+    if (assets.logo_url && !inlinedLogo) {
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        status: 'degraded',
+        code: 'logo_reference_skipped',
+        detail: 'Brand logo could not be inlined as a raster image (SVG or fetch failure); painting without it.',
+      });
+    }
+    if (inlinedRefs.length < userReferences.length) {
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        status: 'degraded',
+        code: 'reference_image_skipped',
+        detail: `${userReferences.length - inlinedRefs.length} of ${userReferences.length} reference image(s) could not be inlined; painting with the rest.`,
+      });
+    }
+    referenceImages = [...(inlinedLogo ? [inlinedLogo] : []), ...inlinedRefs].slice(0, 6);
+    hasLogo = !!inlinedLogo;
+  } else {
+    const screenshotUrl = typeof (campaign as Record<string, unknown>).screenshot_url === 'string'
+      ? String((campaign as Record<string, unknown>).screenshot_url)
+      : '';
+    const productUrls = [
+      assets.primary_image_url,
+      ...(assets.images ?? []).map((image) => image.url),
+    ].filter((url): url is string => !!url);
+    const candidates: TypedImageReference[] = [
+      ...(screenshotUrl
+        ? [{
+            kind: 'style-board' as const,
+            url: screenshotUrl,
+            purpose: 'Primary source evidence: preserve page palette proportions, type character, imagery treatment, lighting, texture, motifs, hierarchy, and density.',
+          }]
+        : []),
+      ...userReferences.map((url, index) => ({
+        kind: 'user-reference' as const,
+        url,
+        purpose: `User-supplied creative reference ${index + 1}; use for requested subject or direction after honoring the source style board.`,
+      })),
+      ...(assets.logo_url
+        ? [{
+            kind: 'logo' as const,
+            url: assets.logo_url,
+            purpose: 'Authentic brand logo; reproduce faithfully only if this reference remains attached.',
+          }]
+        : []),
+      ...productUrls.map((url, index) => ({
+        kind: 'product' as const,
+        url,
+        purpose: `Authentic product or brand image ${index + 1}; use its real subject and visual details without turning the poster into a UI screenshot.`,
+      })),
+    ];
+    const inlined = await inlineImageReferences(candidates, {
+      maxImages: 6,
+      maxCandidates: 12,
+      maxTotalBytes: 12_000_000,
     });
+    referenceImages = inlined;
+    hasLogo = inlined.some((reference) => reference.kind === 'logo');
+    hasStyleBoard = inlined.some((reference) => reference.kind === 'style-board');
+
+    if (screenshotUrl && !hasStyleBoard) {
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        status: 'degraded',
+        code: 'style_board_reference_skipped',
+        detail: 'Style board could not be attached to the painter because it failed to inline or exceeded the six-image limit.',
+      });
+    }
+    const attachedUsers = inlined.filter((reference) => reference.kind === 'user-reference').length;
+    if (attachedUsers < userReferences.length) {
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        status: 'degraded',
+        code: 'reference_image_skipped',
+        detail: `${userReferences.length - attachedUsers} of ${userReferences.length} user reference image(s) could not be attached; painting with the ordered remainder.`,
+      });
+    }
+    if (assets.logo_url && !hasLogo) {
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        status: 'degraded',
+        code: 'logo_reference_skipped',
+        detail: 'The authentic logo could not be attached or no capacity remained; the prompt forbids an invented symbol and uses the product name only.',
+      });
+    }
   }
-  if (inlinedRefs.length < userReferences.length) {
-    logPipelineEvent({
-      source: 'hero',
-      campaignId: campaign.id,
-      status: 'degraded',
-      code: 'reference_image_skipped',
-      detail: `${userReferences.length - inlinedRefs.length} of ${userReferences.length} reference image(s) could not be inlined; painting with the rest.`,
-    });
-  }
-  // hasLogo reflects what is ACTUALLY attached, so the prompt never promises a
-  // logo reference the model won't receive.
-  const referenceImages = [...(inlinedLogo ? [inlinedLogo] : []), ...inlinedRefs].slice(0, 6);
-  const prompt = buildPosterPrompt(campaign as Record<string, unknown>, style, !!inlinedLogo);
+  const prompt = buildPosterPrompt(
+    campaign as Record<string, unknown>,
+    style,
+    hasLogo,
+    hasStyleBoard,
+  );
 
   // Request 2:3 explicitly — aspect ratio only, never provider pixel dimensions
   // (AiPoster shows the full image uncropped above the external QR footer).
@@ -164,7 +252,12 @@ export default async function (req: Request): Promise<Response> {
 // LLM-designed poster_layout. If the layout is missing (designer step failed /
 // not yet run), fall back to a minimal generic editorial layout compiled from
 // the same brand context, so hero never hard-fails.
-function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: boolean): string {
+function buildPosterPrompt(
+  c: Record<string, unknown>,
+  style: string,
+  hasLogo: boolean,
+  hasStyleBoard = false,
+): string {
   const context = String(c.reference_context ?? '').trim().slice(0, 4000);
   const referenceCount = Array.isArray(c.reference_images) ? c.reference_images.length : 0;
   const referenceBlock =
@@ -176,6 +269,7 @@ function buildPosterPrompt(c: Record<string, unknown>, style: string, hasLogo: b
     product: String(c.product_name ?? 'the product'),
     essence: String(c.brand_essence ?? ''),
     hasLogo,
+    hasStyleBoard,
   };
   if (layout && Array.isArray(layout.zones) && layout.zones.length > 0) {
     return compileLayoutPrompt(layout, ctx) + referenceBlock;
@@ -190,7 +284,23 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
   const product = String(c.product_name ?? 'the product');
   const content = (c.poster_content ?? {}) as Record<string, unknown>;
   const copy = (c.poster_copy ?? {}) as Record<string, unknown>;
-  const sp = (c.style_profile ?? {}) as { palette?: Record<string, string> };
+  const sp = (c.style_profile ?? {}) as {
+    palette?: {
+      bg?: string;
+      text?: string;
+      primary?: string;
+      accent?: string;
+      secondary?: string;
+      supporting?: string[];
+      proportions?: Array<{ color: string; proportion: number }>;
+    };
+    imagery?: string;
+    typography_treatment?: string;
+    lighting?: string;
+    texture?: string;
+    motifs?: string[];
+    density?: 'sparse' | 'balanced' | 'dense';
+  };
   const pal = sp.palette ?? {};
   const headline = String(content.headline ?? copy.hook ?? product);
   const what = String(content.what_it_does ?? copy.what_it_does ?? c.tagline ?? '');
@@ -198,17 +308,29 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
   return {
     composition: 'balanced vertical editorial flow, oversized hero headline, clear hierarchy',
     mood: 'modern, clean, professional',
-    art_style: 'modern editorial graphic design, crisp vector shapes, soft shadows',
+    art_style: sp.texture || 'source-faithful editorial graphic design',
+    ...(sp.imagery ? { imagery: sp.imagery } : {}),
+    ...(sp.typography_treatment ? { typography_treatment: sp.typography_treatment } : {}),
+    ...(sp.lighting ? { lighting: sp.lighting } : {}),
+    ...(sp.texture ? { texture: sp.texture } : {}),
+    ...(sp.motifs?.length ? { motifs: sp.motifs } : {}),
+    density: sp.density || 'balanced',
     palette_roles: {
       bg: pal.bg || '#ffffff',
       text: pal.text || '#111827',
       primary: pal.primary || '#1f2937',
       accent: pal.accent || '#10b981',
+      ...(pal.secondary ? { secondary: pal.secondary } : {}),
+      ...(pal.supporting?.length ? { supporting: pal.supporting } : {}),
+      ...(pal.proportions?.length ? { proportions: pal.proportions } : {}),
     },
     zones: [
       { band: 'top', role: 'brand row', content: product, emphasis: 'low' },
       { band: 'upper', role: 'hero headline', content: headline, emphasis: 'high' },
       ...(what ? [{ band: 'mid' as const, role: 'supporting product detail', content: what, emphasis: 'med' as const }] : []),
+      ...(!what
+        ? [{ band: 'mid' as const, role: 'source-derived imagery focal area', content: '', emphasis: 'med' as const }]
+        : []),
       ...(features.length
         ? [{ band: 'lower' as const, role: 'feature row', content: features.join(' · '), emphasis: 'low' as const }]
         : []),

@@ -2,11 +2,22 @@
 
 export type CampaignStatus = 'draft' | 'analyzing' | 'published'
 
+export type VisualTheme = 'light' | 'dark' | 'mixed'
+export type VisualDensity = 'sparse' | 'balanced' | 'dense'
+
+export interface WeightedPaletteColor {
+  color: string
+  proportion: number
+}
+
 export interface Palette {
   primary: string
   bg: string
   text: string
   accent: string
+  secondary?: string
+  supporting?: string[]
+  proportions?: WeightedPaletteColor[]
 }
 
 export interface StyleProfile {
@@ -14,6 +25,13 @@ export interface StyleProfile {
   fonts: { heading: string; body: string }
   tone: string
   layout_hint?: string
+  imagery?: string
+  typography_treatment?: string
+  lighting?: string
+  texture?: string
+  motifs?: string[]
+  composition?: string
+  density?: VisualDensity
 }
 
 export interface PosterCopy {
@@ -66,7 +84,22 @@ export interface PosterLayout {
   composition: string
   mood: string
   art_style: string
-  palette_roles: { bg: string; surface?: string; text: string; primary: string; accent: string }
+  imagery?: string
+  typography_treatment?: string
+  lighting?: string
+  texture?: string
+  motifs?: string[]
+  density?: VisualDensity
+  palette_roles: {
+    bg: string
+    surface?: string
+    text: string
+    primary: string
+    accent: string
+    secondary?: string
+    supporting?: string[]
+    proportions?: WeightedPaletteColor[]
+  }
   zones: PosterLayoutZone[]
 }
 
@@ -90,6 +123,8 @@ export interface DesignTokens {
     primary: string // dominant brand / primary-action color
     accent: string // vivid accent
     palette: string[] // ranked distinct colors (hex)
+    visualPalette?: WeightedPaletteColor[] // pixel-weighted colors from the style board
+    theme?: VisualTheme
   }
   radii: number[] // representative border-radius scale, px
   shadows: string[] // a few representative box-shadow values

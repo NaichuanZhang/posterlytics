@@ -116,6 +116,87 @@ export function userContentWithImages(text: string, imageUrls: readonly string[]
   ];
 }
 
+export type ImageReferenceKind = 'style-board' | 'user-reference' | 'logo' | 'product';
+
+export interface TypedImageReference {
+  kind: ImageReferenceKind;
+  url: string;
+  purpose: string;
+}
+
+const IMAGE_REFERENCE_PRIORITY: Record<ImageReferenceKind, number> = {
+  'style-board': 0,
+  'user-reference': 1,
+  logo: 2,
+  product: 3,
+};
+
+export function orderImageReferences(
+  references: readonly TypedImageReference[],
+  maxImages = 6,
+): TypedImageReference[] {
+  const seen = new Set<string>();
+  return references
+    .map((reference, index) => ({ reference, index }))
+    .filter(({ reference }) => !!reference.url)
+    .sort((a, b) =>
+      IMAGE_REFERENCE_PRIORITY[a.reference.kind] - IMAGE_REFERENCE_PRIORITY[b.reference.kind] ||
+      a.index - b.index
+    )
+    .filter(({ reference }) => {
+      if (seen.has(reference.url)) return false;
+      seen.add(reference.url);
+      return true;
+    })
+    .slice(0, Math.max(0, maxImages))
+    .map(({ reference }) => reference);
+}
+
+export function userContentWithImageReferences(
+  text: string,
+  references: readonly TypedImageReference[],
+  maxImages = 6,
+): string | unknown[] {
+  const selected = orderImageReferences(references, maxImages);
+  if (selected.length === 0) return text;
+  return [
+    { type: 'text', text },
+    ...selected.flatMap((reference, index) => [
+      {
+        type: 'text',
+        text: `IMAGE ${index + 1} PURPOSE [${reference.kind.toUpperCase()}]: ${reference.purpose.slice(0, 240)}`,
+      },
+      { type: 'image_url', image_url: { url: reference.url } },
+    ]),
+  ];
+}
+
+export function imageGenerationContent(
+  prompt: string,
+  references: readonly (TypedImageReference | string)[],
+  maxImages = 6,
+): unknown[] {
+  const content: unknown[] = [{ type: 'text', text: prompt }];
+  if (references.every((reference) => typeof reference === 'string')) {
+    for (const url of (references as readonly string[]).filter(Boolean).slice(0, maxImages)) {
+      content.push({ type: 'image_url', image_url: { url } });
+    }
+    return content;
+  }
+
+  const typed = references.filter(
+    (reference): reference is TypedImageReference => typeof reference !== 'string',
+  );
+  for (const [index, reference] of orderImageReferences(typed, maxImages).entries()) {
+    content.push({
+      type: 'text',
+      text: `REFERENCE ${index + 1} [${reference.kind.toUpperCase()}]: ${reference.purpose.slice(0, 240)}`,
+    });
+    content.push({ type: 'image_url', image_url: { url: reference.url } });
+  }
+  return content;
+}
+
 // Detect a raster image mime from magic bytes. Content-type headers are
 // untrustworthy here — the storage CDN serves everything as
 // binary/octet-stream — and SVG/XML/text never match, which is the point:
@@ -194,6 +275,32 @@ export async function inlineReferenceImages(
   return inlined;
 }
 
+export async function inlineImageReferences(
+  references: readonly TypedImageReference[],
+  opts: { maxImages?: number; maxCandidates?: number; maxTotalBytes?: number } = {},
+): Promise<TypedImageReference[]> {
+  const {
+    maxImages = 6,
+    maxCandidates = 12,
+    maxTotalBytes = 12_000_000,
+  } = opts;
+  const candidates = orderImageReferences(references, maxCandidates);
+  const fetched = await Promise.all(candidates.map(async (reference) => ({
+    reference,
+    dataUrl: await fetchImageAsDataUrl(reference.url),
+  })));
+  const valid: TypedImageReference[] = [];
+  let total = 0;
+  for (const item of fetched) {
+    if (!item.dataUrl) continue;
+    const approxBytes = Math.floor(item.dataUrl.length * 0.75);
+    if (total + approxBytes > maxTotalBytes) continue;
+    total += approxBytes;
+    valid.push({ ...item.reference, url: item.dataUrl });
+  }
+  return orderImageReferences(valid, maxImages);
+}
+
 async function upstreamFailure(provider: string, response: Response): Promise<UpstreamError> {
   const body = (await response.text().catch(() => '')).slice(0, 500);
   const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
@@ -262,6 +369,102 @@ export async function aiChat(
 // =====================================================================
 
 export type LayoutBand = 'top' | 'upper' | 'mid' | 'lower';
+export type VisualDensity = 'sparse' | 'balanced' | 'dense';
+
+export interface WeightedPaletteColor {
+  color: string;
+  proportion: number;
+}
+
+export interface NormalizedStyleProfile {
+  palette: {
+    primary: string;
+    bg: string;
+    text: string;
+    accent: string;
+    secondary?: string;
+    supporting?: string[];
+    proportions?: WeightedPaletteColor[];
+  };
+  fonts: { heading: string; body: string };
+  tone: string;
+  layout_hint?: string;
+  imagery?: string;
+  typography_treatment?: string;
+  lighting?: string;
+  texture?: string;
+  motifs?: string[];
+  composition?: string;
+  density?: VisualDensity;
+}
+
+export function normalizeStyleProfile(
+  raw: unknown,
+  defaults: Partial<NormalizedStyleProfile> = {},
+): NormalizedStyleProfile {
+  const profile = (raw ?? {}) as Record<string, unknown>;
+  const palette = (profile.palette ?? {}) as Record<string, unknown>;
+  const defaultPalette = defaults.palette ?? {
+    primary: '#1f2937',
+    bg: '#ffffff',
+    text: '#111827',
+    accent: '#10b981',
+  };
+  const fonts = (profile.fonts ?? {}) as Record<string, unknown>;
+  const stringValue = (value: unknown, fallback = '', max = 240) =>
+    typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : fallback;
+  const optional = (value: unknown, fallback: string | undefined, max = 240) => {
+    const result = stringValue(value, fallback ?? '', max);
+    return result || undefined;
+  };
+  const density = ['sparse', 'balanced', 'dense'].includes(profile.density as string)
+    ? (profile.density as VisualDensity)
+    : defaults.density;
+  const motifs = boundedStringList(profile.motifs ?? defaults.motifs, 6, 100);
+  const supporting = boundedColors(palette.supporting ?? defaultPalette.supporting, 6);
+  const proportions = normalizeWeightedPalette(
+    palette.proportions ?? palette.usage_proportions ?? defaultPalette.proportions,
+  );
+  const secondary = normalizeColorValue(palette.secondary) ??
+    normalizeColorValue(defaultPalette.secondary);
+
+  return {
+    palette: {
+      primary: normalizeColorValue(palette.primary) ?? defaultPalette.primary ?? '#1f2937',
+      bg: normalizeColorValue(palette.bg) ?? defaultPalette.bg ?? '#ffffff',
+      text: normalizeColorValue(palette.text) ?? defaultPalette.text ?? '#111827',
+      accent: normalizeColorValue(palette.accent) ?? defaultPalette.accent ?? '#10b981',
+      ...(secondary ? { secondary } : {}),
+      ...(supporting.length ? { supporting } : {}),
+      ...(proportions.length ? { proportions } : {}),
+    },
+    fonts: {
+      heading: stringValue(fonts.heading, defaults.fonts?.heading ?? 'system-ui, sans-serif', 180),
+      body: stringValue(fonts.body, defaults.fonts?.body ?? 'system-ui, sans-serif', 180),
+    },
+    tone: stringValue(profile.tone, defaults.tone ?? 'modern', 120),
+    ...(optional(profile.layout_hint, defaults.layout_hint, 240)
+      ? { layout_hint: optional(profile.layout_hint, defaults.layout_hint, 240) }
+      : {}),
+    ...(optional(profile.imagery, defaults.imagery)
+      ? { imagery: optional(profile.imagery, defaults.imagery) }
+      : {}),
+    ...(optional(profile.typography_treatment, defaults.typography_treatment)
+      ? { typography_treatment: optional(profile.typography_treatment, defaults.typography_treatment) }
+      : {}),
+    ...(optional(profile.lighting, defaults.lighting)
+      ? { lighting: optional(profile.lighting, defaults.lighting) }
+      : {}),
+    ...(optional(profile.texture, defaults.texture)
+      ? { texture: optional(profile.texture, defaults.texture) }
+      : {}),
+    ...(motifs.length ? { motifs } : {}),
+    ...(optional(profile.composition, defaults.composition)
+      ? { composition: optional(profile.composition, defaults.composition) }
+      : {}),
+    ...(density ? { density } : {}),
+  };
+}
 
 export interface PosterLayoutZone {
   band: LayoutBand;
@@ -275,7 +478,22 @@ export interface PosterLayout {
   composition: string; // e.g. "asymmetric, oversized hero top-left"
   mood: string; // e.g. "editorial, calm, premium"
   art_style: string; // visual medium/treatment, e.g. "flat vector + soft gradients"
-  palette_roles: { bg: string; surface?: string; text: string; primary: string; accent: string };
+  imagery?: string;
+  typography_treatment?: string;
+  lighting?: string;
+  texture?: string;
+  motifs?: string[];
+  density?: VisualDensity;
+  palette_roles: {
+    bg: string;
+    surface?: string;
+    text: string;
+    primary: string;
+    accent: string;
+    secondary?: string;
+    supporting?: string[];
+    proportions?: WeightedPaletteColor[];
+  };
   zones: PosterLayoutZone[]; // top→lower; the artwork fills the full 2:3 frame (QR footer is outside it)
 }
 
@@ -285,7 +503,16 @@ const LAYOUT_BANDS: LayoutBand[] = ['top', 'upper', 'mid', 'lower'];
 // defaults from the campaign style_profile when the model omits them. Pure.
 export function normalizePosterLayout(
   raw: unknown,
-  palette: { bg?: string; text?: string; primary?: string; accent?: string } = {},
+  palette: {
+    bg?: string;
+    text?: string;
+    primary?: string;
+    accent?: string;
+    secondary?: string;
+    supporting?: string[];
+    proportions?: WeightedPaletteColor[];
+  } = {},
+  direction: Partial<NormalizedStyleProfile> = {},
 ): PosterLayout {
   const o = (raw ?? {}) as Record<string, unknown>;
   const pr = (o.palette_roles ?? {}) as Record<string, unknown>;
@@ -293,7 +520,7 @@ export function normalizePosterLayout(
 
   const zonesRaw = Array.isArray(o.zones) ? o.zones : [];
   const zones: PosterLayoutZone[] = zonesRaw
-    .slice(0, 8)
+    .slice(0, 7)
     .map((z) => {
       const x = (z ?? {}) as Record<string, unknown>;
       const band = LAYOUT_BANDS.includes(x.band as LayoutBand) ? (x.band as LayoutBand) : 'mid';
@@ -312,20 +539,109 @@ export function normalizePosterLayout(
       };
     })
     .filter((z) => z.role || z.content);
+  const density = ['sparse', 'balanced', 'dense'].includes(o.density as string)
+    ? (o.density as VisualDensity)
+    : direction.density ?? 'balanced';
+  const motifs = boundedStringList(o.motifs ?? direction.motifs, 6, 100);
+  const imagery = str(o.imagery, direction.imagery ?? '').slice(0, 240);
+  const typographyTreatment = str(
+    o.typography_treatment,
+    direction.typography_treatment ?? '',
+  ).slice(0, 240);
+  const lighting = str(o.lighting, direction.lighting ?? '').slice(0, 200);
+  const texture = str(o.texture, direction.texture ?? '').slice(0, 200);
+  const supporting = boundedColors(
+    palette.supporting?.length ? palette.supporting : pr.supporting,
+    6,
+  );
+  const proportions = normalizeWeightedPalette(
+    palette.proportions?.length ? palette.proportions : pr.proportions,
+  );
+  const secondary = str(palette.secondary, str(pr.secondary));
 
   return {
     composition: str(o.composition, 'balanced vertical flow, clear hierarchy top to bottom').slice(0, 240),
     mood: str(o.mood, 'modern, clean, professional').slice(0, 120),
     art_style: str(o.art_style, 'modern editorial graphic design, crisp vector shapes, soft shadows').slice(0, 200),
+    ...(imagery ? { imagery } : {}),
+    ...(typographyTreatment ? { typography_treatment: typographyTreatment } : {}),
+    ...(lighting ? { lighting } : {}),
+    ...(texture ? { texture } : {}),
+    ...(motifs.length ? { motifs } : {}),
+    density,
     palette_roles: {
       bg: str(pr.bg, palette.bg || '#ffffff'),
       ...(str(pr.surface) ? { surface: str(pr.surface) } : {}),
       text: str(pr.text, palette.text || '#111827'),
       primary: str(pr.primary, palette.primary || '#1f2937'),
       accent: str(pr.accent, palette.accent || '#10b981'),
+      ...(secondary ? { secondary } : {}),
+      ...(supporting.length ? { supporting } : {}),
+      ...(proportions.length ? { proportions } : {}),
     },
     zones,
   };
+}
+
+export function ensurePosterLayoutZones(
+  layout: PosterLayout,
+  fallbackZones: readonly PosterLayoutZone[],
+  minimum = 3,
+): PosterLayout {
+  if (layout.zones.length >= minimum) return layout;
+  const zones = [...layout.zones];
+  const keys = new Set(zones.map((zone) => `${zone.role}\u0000${zone.content}`));
+  for (const fallback of fallbackZones) {
+    if (zones.length >= minimum || zones.length >= 7) break;
+    const key = `${fallback.role}\u0000${fallback.content}`;
+    if (keys.has(key) || (!fallback.role && !fallback.content)) continue;
+    zones.push({ ...fallback });
+    keys.add(key);
+  }
+  return { ...layout, zones };
+}
+
+function boundedStringList(value: unknown, limit: number, maxLength: number): string[] {
+  const values = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+  return [...new Set(
+    values
+      .map((item) => typeof item === 'string' ? item.trim().slice(0, maxLength) : '')
+      .filter(Boolean),
+  )].slice(0, limit);
+}
+
+function boundedColors(value: unknown, limit: number): string[] {
+  return [...new Set(
+    boundedStringList(value, limit * 2, 32)
+      .map((color) => normalizeColorValue(color))
+      .filter((color): color is string => !!color),
+  )].slice(0, limit);
+}
+
+function normalizeWeightedPalette(value: unknown): WeightedPaletteColor[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const normalized: WeightedPaletteColor[] = [];
+  for (const item of value) {
+    const entry = (item ?? {}) as Record<string, unknown>;
+    const color = normalizeColorValue(entry.color);
+    let proportion = Number(entry.proportion);
+    if (!color || !Number.isFinite(proportion) || proportion <= 0 || seen.has(color)) continue;
+    if (proportion > 1) proportion /= 100;
+    seen.add(color);
+    normalized.push({
+      color,
+      proportion: Math.round(Math.min(1, proportion) * 10_000) / 10_000,
+    });
+    if (normalized.length >= 10) break;
+  }
+  return normalized;
+}
+
+function normalizeColorValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const rgb = parseColor(value);
+  return rgb ? toHex(rgb) : null;
 }
 
 // Compile a PosterLayout into a text-to-image prompt. PURE + deterministic — the
@@ -335,7 +651,7 @@ export function normalizePosterLayout(
 // the SPA composites the QR footer OUTSIDE the artwork on the A4 sheet.
 export function compileLayoutPrompt(
   layout: PosterLayout,
-  ctx: { product: string; essence: string; hasLogo?: boolean },
+  ctx: { product: string; essence: string; hasLogo?: boolean; hasStyleBoard?: boolean },
 ): string {
   const p = layout.palette_roles;
   const bandLabel: Record<LayoutBand, string> = {
@@ -357,38 +673,64 @@ export function compileLayoutPrompt(
 
   const logoLine = ctx.hasLogo
     ? '\nA reference image of the brand LOGO is provided alongside this prompt — reproduce it FAITHFULLY (exact shape, proportions, and colors) in the top brand row. Do not redraw, restyle, or distort it.\n'
+    : '\nNo authentic logo image is attached. If the layout calls for a brand identifier, render only the product name already supplied in its quoted zone, as plain text. Do not invent or render any logo, icon, emblem, monogram, mascot, or brand symbol.\n';
+  const sourceEvidence = ctx.hasStyleBoard
+    ? 'The first attached image is a multi-frame STYLE BOARD captured from the real source page. Treat it as the primary visual evidence.'
+    : 'No source style board is attached; rely on the source-derived direction and palette below.';
+  const proportions = p.proportions?.length
+    ? p.proportions
+        .map((entry) => `${entry.color} about ${Math.round(entry.proportion * 100)}%`)
+        .join(', ')
     : '';
+  const supporting = [p.secondary, ...(p.supporting ?? [])].filter(Boolean).join(', ');
+  const visualDirection = [
+    layout.imagery ? `Imagery: ${layout.imagery}` : '',
+    layout.typography_treatment ? `Typography treatment: ${layout.typography_treatment}` : '',
+    layout.lighting ? `Lighting: ${layout.lighting}` : '',
+    layout.texture ? `Texture/material finish: ${layout.texture}` : '',
+    layout.motifs?.length ? `Motifs: ${layout.motifs.join(', ')}` : '',
+  ].filter(Boolean).join('\n');
+  const density = layout.density ?? 'balanced';
+  const densityInstruction: Record<VisualDensity, string> = {
+    sparse:
+      'Preserve the source page\'s SPARSE rhythm: use only the supplied zones, keep generous intentional negative space, and resist adding filler details.',
+    balanced:
+      'Preserve a BALANCED rhythm: maintain clear hierarchy and measured supporting detail without crowding or artificial emptiness.',
+    dense:
+      'Preserve the source page\'s DENSE rhythm: layer the supplied zones and supporting visual detail while keeping every element legible.',
+  };
 
   return `Create a single PORTRAIT 2:3 product-promotion poster. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
+${visualDirection ? `${visualDirection}\n` : ''}${sourceEvidence}
 
-This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, rounded clickable controls, tabs, or any UI chrome. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.
+Translate the observed visual language into a poster-specific composition. Do not copy navigation bars, menus, browser chrome, app screens, cards, buttons, tabs, form controls, or other website UI. Do not impose category stereotypes or substitute a trendy medium that is not evidenced by the source. Any REFERENCE PURPOSE labels attached after this prompt are instructions only and must never appear as poster text.
 
-Make the poster INFORMATION-DENSE and editorial: fill the composition with multiple supporting elements (a feature grid, a stat or proof row, product detail, icons) so it feels rich and considered — the artwork owns the COMPLETE frame edge to edge, so avoid large empty areas anywhere.
+This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.
+
+${densityInstruction[density]}
 ${logoLine}
-Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; vivid accent ${p.accent}; ${p.surface ? `card/surface ${p.surface}; ` : ''}body text ${p.text}. Stay within this palette plus neutrals — no rogue colors.
+Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; accent ${p.accent}; ${p.surface ? `surface ${p.surface}; ` : ''}body text ${p.text}.${supporting ? ` Supporting source colors: ${supporting}.` : ''} Stay within this palette plus source neutrals — no rogue colors.
+${proportions ? `Preserve the source page's approximate COLOR AREA PROPORTIONS across the finished poster: ${proportions}. Dominant source colors must remain dominant; accents must remain restrained when they were restrained in the source.` : ''}
 
-Honor this brand — infuse its palette, logo motif and vibe, do not invent an unrelated look:
+Honor this brand — infuse its palette, typography, imagery, observed motifs, and vibe; reproduce a logo only when an authentic logo reference is attached:
 ${ctx.essence || ctx.product}
 
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings listed below, and they must all be in ENGLISH. Do NOT print any of the layout/section descriptions, role names, position words, or instruction words as visible text — those are directions, not content.
 
 Arrange the poster top to bottom using these zones — together they fill the complete frame:
-${zoneLines || '- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
+${zoneLines || '- TOP strip: plain-text product name.\n- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
-Avoid: garbled or misspelled text, painted buttons / pills / clickable UI controls, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, and watermarks.`;
+Avoid: garbled or misspelled text, copied navigation or web controls, painted buttons / pills / clickable UI controls, invented logos or symbols when no authentic logo reference is attached, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, and watermarks.`;
 }
 
 export async function aiImage(
   prompt: string,
   aspectRatio = '4:5',
-  referenceImages: string[] = [],
+  referenceImages: Array<TypedImageReference | string> = [],
 ): Promise<string> {
-  const content: unknown[] = [{ type: 'text', text: prompt }];
-  for (const url of referenceImages.filter(Boolean).slice(0, 6)) {
-    content.push({ type: 'image_url', image_url: { url } });
-  }
+  const content = imageGenerationContent(prompt, referenceImages, 6);
 
   const ctl = new AbortController();
   const timeout = setTimeout(() => ctl.abort(), 90_000);
@@ -864,7 +1206,15 @@ export type RGB = [number, number, number];
 
 export interface DesignTokens {
   typography: { headingFamily: string; bodyFamily: string; scale: number[]; weights: number[] };
-  colors: { bg: string; text: string; primary: string; accent: string; palette: string[] };
+  colors: {
+    bg: string;
+    text: string;
+    primary: string;
+    accent: string;
+    palette: string[];
+    visualPalette?: WeightedPaletteColor[];
+    theme?: 'light' | 'dark' | 'mixed';
+  };
   radii: number[];
   shadows: string[];
   spacing: number[];
@@ -899,19 +1249,27 @@ export function toHex(rgb: RGB): string {
 
 export interface CaptureResult {
   tokens: DesignTokens | null;
-  screenshotDataUrl: string | null;
+  styleBoardDataUrl: string | null;
   error: { code: string; message: string; retryable: boolean } | null;
+}
+
+export type CaptureColorScheme = 'light' | 'dark';
+
+export function normalizeCaptureColorScheme(value: unknown): CaptureColorScheme | null {
+  if (value === undefined || value === null) return 'light';
+  return value === 'light' || value === 'dark' ? value : null;
 }
 
 export async function captureSite(
   url: string,
+  colorScheme: CaptureColorScheme = 'light',
 ): Promise<CaptureResult> {
   const serviceUrl = Deno.env.get('CAPTURE_SERVICE_URL');
   const token = Deno.env.get('CAPTURE_TOKEN');
   if (!serviceUrl || !token) {
     return {
       tokens: null,
-      screenshotDataUrl: null,
+      styleBoardDataUrl: null,
       error: { code: 'capture_unconfigured', message: 'Capture service is not configured.', retryable: false },
     };
   }
@@ -923,7 +1281,7 @@ export async function captureSite(
       method: 'POST',
       signal: ctl.signal,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, color_scheme: colorScheme }),
     });
     const result = await response.json().catch(() => ({})) as {
       tokens?: DesignTokens | null;
@@ -933,7 +1291,7 @@ export async function captureSite(
     if (!response.ok) {
       return {
         tokens: null,
-        screenshotDataUrl: null,
+        styleBoardDataUrl: null,
         error: {
           code: result.error?.code ?? 'capture_http_error',
           message: result.error?.message ?? `Capture service failed (${response.status}).`,
@@ -943,14 +1301,14 @@ export async function captureSite(
     }
     return {
       tokens: result.tokens ?? null,
-      screenshotDataUrl: result.screenshot_b64 ? `data:image/jpeg;base64,${result.screenshot_b64}` : null,
+      styleBoardDataUrl: result.screenshot_b64 ? `data:image/jpeg;base64,${result.screenshot_b64}` : null,
       error: null,
     };
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === 'AbortError';
     return {
       tokens: null,
-      screenshotDataUrl: null,
+      styleBoardDataUrl: null,
       error: {
         code: timedOut ? 'capture_timeout' : 'capture_network_error',
         message: timedOut ? 'Capture request timed out.' : (error instanceof Error ? error.message : String(error)),

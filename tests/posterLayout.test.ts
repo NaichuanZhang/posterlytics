@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   normalizePosterLayout,
   compileLayoutPrompt,
+  ensurePosterLayoutZones,
   type PosterLayout,
 } from '../functions/_shared.ts'
 
@@ -42,11 +43,25 @@ test('normalizePosterLayout keeps valid zones, drops empty ones, clamps band/emp
   assert.equal(l.palette_roles.surface, '#eee')
 })
 
-test('normalizePosterLayout caps zones at 8 and truncates long strings', () => {
+test('normalizePosterLayout caps zones at 7 and truncates long strings', () => {
   const zones = Array.from({ length: 12 }, (_, i) => ({ band: 'mid', role: `r${i}`, content: `c${i}` }))
   const l = normalizePosterLayout({ zones, composition: 'x'.repeat(500) }, PALETTE)
-  assert.equal(l.zones.length, 8)
+  assert.equal(l.zones.length, 7)
   assert.ok(l.composition.length <= 240)
+})
+
+test('ensurePosterLayoutZones repairs sparse model output to three zones immutably', () => {
+  const layout = normalizePosterLayout({
+    zones: [{ band: 'upper', role: 'hero headline', content: 'One clear idea' }],
+  }, PALETTE)
+  const repaired = ensurePosterLayoutZones(layout, [
+    { band: 'top', role: 'plain-text brand row', content: 'Acme' },
+    { band: 'upper', role: 'hero headline', content: 'One clear idea' },
+    { band: 'mid', role: 'source-derived imagery focal area', content: '' },
+  ])
+  assert.equal(layout.zones.length, 1)
+  assert.equal(repaired.zones.length, 3)
+  assert.equal(repaired.zones[2].role, 'source-derived imagery focal area')
 })
 
 const LAYOUT: PosterLayout = {
@@ -105,11 +120,38 @@ test('compileLayoutPrompt forbids painted buttons (printed poster, not a web UI)
   assert.ok(/painted buttons \/ pills \/ clickable UI controls/i.test(prompt), 'Avoid list must call out buttons')
 })
 
-test('compileLayoutPrompt forbids a redundant CTA and asks for density', () => {
+test('compileLayoutPrompt forbids a redundant CTA without forcing dense filler', () => {
   const prompt = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: '' })
   assert.ok(/QR footer bar.*IS the call-to-action/i.test(prompt), 'QR footer is the CTA')
   assert.ok(/do NOT render any "Get started"/i.test(prompt), 'must forbid a painted CTA line')
-  assert.ok(/INFORMATION-DENSE/i.test(prompt), 'must ask for a dense composition')
+  assert.ok(!/INFORMATION-DENSE/i.test(prompt), 'must not impose universal density')
+  assert.ok(!/feature grid, a stat or proof row/i.test(prompt), 'must not impose generic filler zones')
+})
+
+test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', () => {
+  const prompt = compileLayoutPrompt({
+    ...LAYOUT,
+    density: 'sparse',
+    imagery: 'full-bleed cinematic character art',
+    typography_treatment: 'metallic gold high-contrast display lettering',
+    lighting: 'low-key violet rim light',
+    texture: 'polished metal and film grain',
+    motifs: ['constellation lines'],
+    palette_roles: {
+      ...PALETTE,
+      supporting: ['#241447'],
+      proportions: [
+        { color: '#050711', proportion: 0.72 },
+        { color: '#7c3aed', proportion: 0.12 },
+      ],
+    },
+  }, { product: 'Acme', essence: '', hasStyleBoard: true })
+  assert.match(prompt, /SPARSE rhythm/)
+  assert.match(prompt, /generous intentional negative space/)
+  assert.match(prompt, /metallic gold/)
+  assert.match(prompt, /low-key violet rim light/)
+  assert.match(prompt, /#050711 about 72%/)
+  assert.match(prompt, /first attached image is a multi-frame STYLE BOARD/)
 })
 
 test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => {
@@ -117,6 +159,8 @@ test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => 
   const noLogo = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: '', hasLogo: false })
   assert.ok(/reference image of the brand LOGO/i.test(withLogo), 'logo line present when hasLogo')
   assert.ok(!/reference image of the brand LOGO/i.test(noLogo), 'no logo line when no logo')
+  assert.match(noLogo, /render only the product name/i)
+  assert.match(noLogo, /Do not invent or render any logo, icon, emblem, monogram, mascot, or brand symbol/i)
 })
 
 test('compileLayoutPrompt tolerates an empty zone list with a sensible default', () => {

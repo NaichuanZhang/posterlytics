@@ -11,9 +11,11 @@ Live app: **https://3f9q2998.insforge.site**
 1. Sign in and create a product campaign.
 2. Enter the product URL, campaign copy, destination, and optional generation
    context or reference images.
-3. `analyze` captures the site and prepares brand context and poster copy.
-4. `designer` creates a structured 2:3 layout.
-5. `hero` paints the poster through OpenRouter.
+3. `analyze` captures a theme-matched, multi-frame style board and prepares
+   source-grounded brand context and poster copy.
+4. `designer` creates a structured 2:3 layout that preserves the source's
+   visual treatment and density.
+5. `hero` paints the poster through OpenRouter using ordered visual references.
 6. Add placements, publish, and export a PNG with each placement's QR.
 7. A visit to the QR link is recorded and redirected to the destination URL.
 8. Analytics reports visits, unique visitors, device, OS, and country.
@@ -30,9 +32,10 @@ renderable and can be regenerated.
   functions. `view` is the public tracked redirect.
 - **AI:** Edge functions call OpenRouter directly with the server-only
   `OPENROUTER_API_KEY`.
-- **Capture:** `capture-service/` is a Playwright compute service that returns
-  normalized design tokens and a screenshot. It enforces a 12-second deadline
-  and blocks private-network targets.
+- **Capture:** `capture-service/` is a Playwright + Sharp compute service that
+  returns visible-DOM design tokens, a weighted pixel palette, theme
+  classification, and a compressed three-frame style board. It enforces a
+  12-second deadline and blocks private-network targets.
 - **Data:** Owner-only campaign data and visits-only analytics are exposed
   through RLS and narrow `SECURITY DEFINER` RPCs.
 

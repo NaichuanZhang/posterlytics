@@ -1,9 +1,10 @@
 # Posterlytics capture-service
 
 A headless-Chromium microservice that, for a given URL, returns **programmatic
-design tokens** (read from real `getComputedStyle`) plus an above-the-fold
-**screenshot**. Used by the `analyze` edge function to ground style extraction
-and the poster agents in the site's actual rendered design.
+design tokens** (read from viewport-visible `getComputedStyle` samples), a
+weighted pixel palette and theme classification, plus a compressed
+multi-viewport **style board**. Used by the `analyze` edge function to ground
+poster agents in the site's actual rendered design.
 
 It is **not** part of the Vite app or the Deno edge functions — it's a separate
 Node container deployed as an InsForge compute (Fly) service, because Deno
@@ -14,11 +15,17 @@ Subhosting cannot run a browser.
 | Route | Method | Auth | Body | Response |
 |---|---|---|---|---|
 | `/healthz` | GET | — | — | `200 ok` |
-| `/capture` | POST | `Authorization: Bearer $CAPTURE_TOKEN` | `{ "url": "https://..." }` | `{ tokens, screenshot_b64, final_url, title }` |
+| `/capture` | POST | `Authorization: Bearer $CAPTURE_TOKEN` | `{ "url": "https://...", "color_scheme": "light" \| "dark" }` | `{ tokens, screenshot_b64, final_url, title }` |
 
 - The container holds **no InsForge credentials** by design. It returns the
-  screenshot as base64; `analyze` (which has `API_KEY`) uploads it to Storage.
-- The screenshot is a compact viewport-clipped JPEG (q70, 1280x800).
+  board as base64; `analyze` uploads it to Storage. `screenshot_b64` is retained
+  as the wire key so the capture service can deploy before the edge functions.
+- `color_scheme` is optional and defaults to `light` for older callers.
+- Frames are captured at `0`, `0.8x`, and `1.6x` viewport height, clamped and
+  deduplicated near the page end, then merged by Sharp into one compact JPEG.
+- DOM style weights use only each element's visible intersection with the
+  current frame. `tokens.colors.visualPalette` records pixel usage proportions;
+  `tokens.colors.theme` is `light`, `dark`, or `mixed`.
 - Chromium warms before the service accepts traffic. Page capture then has a
   12-second deadline and rejects private/reserved network targets, including
   redirects and subresources.
@@ -32,7 +39,10 @@ the service boundary.
 
 ## Layers (separation of concerns)
 
-- `src/capture.ts` — Playwright orchestration + the in-browser DOM collector.
+- `src/capture.ts` — Playwright orchestration, frame capture, and Sharp board merge.
+- `src/frameSampling.ts` — pure frame positioning and visible-area geometry.
+- `src/pixelPalette.ts` — pure pixel clustering and theme classification.
+- `src/captureOptions.ts` — request color-scheme validation.
 - `src/buildRawTokens.ts` — **pure** aggregation of element samples → `RawTokens`
   (a unit-tested seam; no DOM, no I/O).
 - `src/normalizeDesignTokens.ts` — **pure** normalization into the public response.
@@ -79,5 +89,5 @@ Smoke test:
 curl -s -X POST https://posterlytics-capture-<proj>.fly.dev/capture \
   -H "Authorization: Bearer <random-secret>" \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://stripe.com"}' | head -c 400
+  -d '{"url":"https://stripe.com","color_scheme":"dark"}' | head -c 400
 ```
