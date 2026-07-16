@@ -7,24 +7,34 @@ export const REFERENCE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] a
 
 type ReferenceFile = Pick<File, 'name' | 'size' | 'type'>
 
-export function validateReferenceFiles(
+export type ReferenceFileRejectionReason = 'type' | 'size' | 'capacity'
+
+export interface ReferenceFileRejection {
+  filename: string
+  reason: ReferenceFileRejectionReason
+}
+
+export function partitionReferenceFiles<TFile extends ReferenceFile>(
   currentCount: number,
-  additions: readonly ReferenceFile[],
-): string | null {
-  if (currentCount + additions.length > MAX_REFERENCE_IMAGES) {
-    return `Add up to ${MAX_REFERENCE_IMAGES} reference images.`
-  }
+  additions: readonly TFile[],
+): { accepted: TFile[]; rejected: ReferenceFileRejection[] } {
+  const accepted: TFile[] = []
+  const rejected: ReferenceFileRejection[] = []
+  const remainingSlots = Math.max(0, MAX_REFERENCE_IMAGES - Math.max(0, currentCount))
 
   for (const file of additions) {
     if (!REFERENCE_IMAGE_TYPES.includes(file.type as (typeof REFERENCE_IMAGE_TYPES)[number])) {
-      return `${file.name} must be a JPEG, PNG, or WebP image.`
-    }
-    if (file.size <= 0 || file.size > MAX_REFERENCE_IMAGE_BYTES) {
-      return `${file.name} must be smaller than 10 MB.`
+      rejected.push({ filename: file.name, reason: 'type' })
+    } else if (file.size <= 0 || file.size > MAX_REFERENCE_IMAGE_BYTES) {
+      rejected.push({ filename: file.name, reason: 'size' })
+    } else if (accepted.length >= remainingSlots) {
+      rejected.push({ filename: file.name, reason: 'capacity' })
+    } else {
+      accepted.push(file)
     }
   }
 
-  return null
+  return { accepted, rejected }
 }
 
 export function normalizeReferenceContext(value: string): string | null {
