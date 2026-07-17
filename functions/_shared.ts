@@ -283,6 +283,421 @@ export function sniffImageMime(bytes: Uint8Array): string | null {
   return null;
 }
 
+export const MAX_REFERENCE_IMPORT_BYTES = 10 * 1024 * 1024;
+export const MAX_REFERENCE_IMPORT_REDIRECTS = 3;
+export const REFERENCE_IMPORT_TIMEOUT_MS = 10_000;
+
+const REFERENCE_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const BLOCKED_HOST_SUFFIXES = [
+  '.internal',
+  '.invalid',
+  '.local',
+  '.localhost',
+  '.test',
+  '.home.arpa',
+];
+const BLOCKED_IPV4_CIDRS: Array<[string, number]> = [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.0.0.0', 24],
+  ['192.0.2.0', 24],
+  ['192.31.196.0', 24],
+  ['192.52.193.0', 24],
+  ['192.88.99.0', 24],
+  ['192.168.0.0', 16],
+  ['192.175.48.0', 24],
+  ['198.18.0.0', 15],
+  ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4],
+];
+const BLOCKED_IPV6_CIDRS: Array<[string, number]> = [
+  ['::', 128],
+  ['::1', 128],
+  ['::ffff:0:0', 96],
+  ['64:ff9b::', 96],
+  ['64:ff9b:1::', 48],
+  ['100::', 64],
+  ['2001::', 23],
+  ['2001:db8::', 32],
+  ['2002::', 16],
+  ['fc00::', 7],
+  ['fe80::', 10],
+  ['ff00::', 8],
+];
+
+export class ReferenceImportError extends Error {
+  code: string;
+  status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = 'ReferenceImportError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type ReferenceDnsResolver = (hostname: string) => Promise<string[]>;
+
+export interface PublicReferenceImage {
+  bytes: Uint8Array;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  finalUrl: URL;
+}
+
+export async function assertPublicHttpsUrl(
+  value: string | URL,
+  resolveHostname: ReferenceDnsResolver = resolveReferenceHostname,
+): Promise<URL> {
+  let url: URL;
+  try {
+    if ((value instanceof URL ? value.href : value).length > 2048) {
+      throw new Error('too long');
+    }
+    url = value instanceof URL ? new URL(value.href) : new URL(value);
+  } catch {
+    throw new ReferenceImportError('invalid_url', 'Image URL is invalid.', 400);
+  }
+
+  if (url.protocol !== 'https:') {
+    throw new ReferenceImportError('https_required', 'Image URL must use HTTPS.', 400);
+  }
+  if (url.username || url.password) {
+    throw new ReferenceImportError(
+      'credentials_not_allowed',
+      'Image URL cannot include a username or password.',
+      400,
+    );
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (
+    !hostname
+    || hostname === 'localhost'
+    || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
+  ) {
+    throw new ReferenceImportError(
+      'unsafe_target',
+      'Image URL must use a public network host.',
+      400,
+    );
+  }
+
+  const literal = parseIpAddress(hostname);
+  let addresses: string[];
+  if (literal) {
+    addresses = [hostname];
+  } else {
+    try {
+      addresses = await resolveHostname(hostname);
+    } catch (error) {
+      if (
+        (error instanceof DOMException && error.name === 'AbortError')
+        || (error instanceof Error && error.name === 'AbortError')
+      ) {
+        throw error;
+      }
+      throw new ReferenceImportError(
+        'dns_failed',
+        'Image URL host could not be resolved.',
+        422,
+      );
+    }
+  }
+
+  if (addresses.length === 0) {
+    throw new ReferenceImportError(
+      'dns_failed',
+      'Image URL host could not be resolved.',
+      422,
+    );
+  }
+  if (addresses.some(isPrivateOrReservedAddress)) {
+    throw new ReferenceImportError(
+      'unsafe_target',
+      'Image URL resolves to a private or reserved network.',
+      400,
+    );
+  }
+
+  return url;
+}
+
+export function isPrivateOrReservedAddress(address: string): boolean {
+  const parsed = parseIpAddress(address);
+  if (!parsed) return true;
+  const cidrs = parsed.length === 4 ? BLOCKED_IPV4_CIDRS : BLOCKED_IPV6_CIDRS;
+  return cidrs.some(([network, prefix]) => {
+    const parsedNetwork = parseIpAddress(network);
+    return !!parsedNetwork && matchesAddressPrefix(parsed, parsedNetwork, prefix);
+  });
+}
+
+export async function fetchPublicReferenceImage(
+  value: string,
+  options: {
+    fetchImpl?: typeof fetch;
+    resolveHostname?: ReferenceDnsResolver;
+    maxBytes?: number;
+    maxRedirects?: number;
+    timeoutMs?: number;
+  } = {},
+): Promise<PublicReferenceImage> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const resolveHostname = options.resolveHostname ?? resolveReferenceHostname;
+  const maxBytes = options.maxBytes ?? MAX_REFERENCE_IMPORT_BYTES;
+  const maxRedirects = options.maxRedirects ?? MAX_REFERENCE_IMPORT_REDIRECTS;
+  const timeoutMs = options.timeoutMs ?? REFERENCE_IMPORT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const resolveWithDeadline: ReferenceDnsResolver = (hostname) =>
+    abortable(resolveHostname(hostname), controller.signal);
+
+  try {
+    let currentUrl = await assertPublicHttpsUrl(value, resolveWithDeadline);
+    let redirectCount = 0;
+
+    while (true) {
+      const response = await fetchImpl(currentUrl.href, {
+        method: 'GET',
+        redirect: 'manual',
+        credentials: 'omit',
+        signal: controller.signal,
+        headers: {
+          Accept: 'image/avif,image/webp,image/png,image/jpeg;q=0.9,*/*;q=0.1',
+          'User-Agent': 'Posterlytics-Reference-Importer/1.0',
+        },
+      });
+
+      if (REDIRECT_STATUSES.has(response.status)) {
+        if (redirectCount >= maxRedirects) {
+          throw new ReferenceImportError(
+            'too_many_redirects',
+            `Image URL exceeded the ${maxRedirects}-redirect limit.`,
+            422,
+          );
+        }
+        await response.body?.cancel().catch(() => {});
+        const location = response.headers.get('location');
+        if (!location) {
+          throw new ReferenceImportError(
+            'invalid_redirect',
+            'Image server returned a redirect without a destination.',
+            422,
+          );
+        }
+        currentUrl = await assertPublicHttpsUrl(new URL(location, currentUrl), resolveWithDeadline);
+        redirectCount += 1;
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new ReferenceImportError(
+          'download_failed',
+          `Image server returned HTTP ${response.status}.`,
+          422,
+        );
+      }
+
+      const bytes = await readBoundedResponse(response, maxBytes);
+      const mimeType = sniffImageMime(bytes);
+      if (!mimeType || !REFERENCE_IMAGE_MIMES.has(mimeType)) {
+        throw new ReferenceImportError(
+          'unsupported_image',
+          'Image URL must return a JPEG, PNG, or WebP image.',
+          415,
+        );
+      }
+
+      return {
+        bytes,
+        mimeType: mimeType as PublicReferenceImage['mimeType'],
+        finalUrl: currentUrl,
+      };
+    }
+  } catch (error) {
+    if (error instanceof ReferenceImportError) throw error;
+    if (
+      (error instanceof DOMException && error.name === 'AbortError')
+      || (error instanceof Error && error.name === 'AbortError')
+    ) {
+      throw new ReferenceImportError(
+        'download_timeout',
+        'Image download exceeded the 10-second limit.',
+        504,
+      );
+    }
+    throw new ReferenceImportError(
+      'download_failed',
+      error instanceof Error ? error.message : 'Image download failed.',
+      422,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function importedReferenceFilename(
+  url: URL,
+  mimeType: PublicReferenceImage['mimeType'],
+): string {
+  const extension = mimeType === 'image/jpeg'
+    ? 'jpg'
+    : mimeType === 'image/png'
+      ? 'png'
+      : 'webp';
+  const pathParts = url.pathname.split('/').filter(Boolean);
+  const encodedName = url.pathname.endsWith('/') ? '' : pathParts[pathParts.length - 1] ?? '';
+  let decodedName = encodedName;
+  try {
+    decodedName = decodeURIComponent(encodedName);
+  } catch {
+    // Keep malformed escapes encoded.
+  }
+  const stem = decodedName
+    .normalize('NFKD')
+    .replace(/\.(?:jpe?g|png|webp)$/i, '')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 70) || 'reference-image';
+  return `${stem}.${extension}`;
+}
+
+async function resolveReferenceHostname(hostname: string): Promise<string[]> {
+  const results = await Promise.allSettled([
+    Deno.resolveDns(hostname, 'A'),
+    Deno.resolveDns(hostname, 'AAAA'),
+  ]);
+  return results.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    signal.addEventListener('abort', handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', handleAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function readBoundedResponse(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new ReferenceImportError(
+      'image_too_large',
+      'Image exceeds the 10 MB limit.',
+      413,
+    );
+  }
+  if (!response.body) {
+    throw new ReferenceImportError('empty_image', 'Image response was empty.', 422);
+  }
+
+  const chunks: Uint8Array[] = [];
+  const reader = response.body.getReader();
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new ReferenceImportError(
+        'image_too_large',
+        'Image exceeds the 10 MB limit.',
+        413,
+      );
+    }
+    chunks.push(value);
+  }
+  if (total === 0) {
+    throw new ReferenceImportError('empty_image', 'Image response was empty.', 422);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function parseIpAddress(address: string): number[] | null {
+  const value = address.toLowerCase().replace(/^\[|\]$/g, '');
+  if (value.includes('%')) return null;
+  return value.includes(':') ? parseIpv6(value) : parseIpv4(value);
+}
+
+function parseIpv4(value: string): number[] | null {
+  const parts = value.split('.');
+  if (parts.length !== 4) return null;
+  const bytes = parts.map((part) => /^\d{1,3}$/.test(part) ? Number(part) : -1);
+  return bytes.every((part) => part >= 0 && part <= 255) ? bytes : null;
+}
+
+function parseIpv6(value: string): number[] | null {
+  let normalized = value;
+  if (normalized.includes('.')) {
+    const lastColon = normalized.lastIndexOf(':');
+    const ipv4 = parseIpv4(normalized.slice(lastColon + 1));
+    if (lastColon < 0 || !ipv4) return null;
+    normalized = `${normalized.slice(0, lastColon)}:${((ipv4[0] << 8) | ipv4[1]).toString(16)}:${((ipv4[2] << 8) | ipv4[3]).toString(16)}`;
+  }
+
+  const halves = normalized.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  if (
+    [...left, ...right].some((part) => !/^[0-9a-f]{1,4}$/.test(part))
+    || (halves.length === 1 && left.length !== 8)
+    || (halves.length === 2 && left.length + right.length >= 8)
+  ) {
+    return null;
+  }
+
+  const groups = [
+    ...left,
+    ...Array(8 - left.length - right.length).fill('0'),
+    ...right,
+  ].map((part) => Number.parseInt(part, 16));
+  if (groups.length !== 8) return null;
+  return groups.flatMap((group) => [group >> 8, group & 0xff]);
+}
+
+function matchesAddressPrefix(address: number[], network: number[], prefix: number): boolean {
+  if (address.length !== network.length || prefix < 0 || prefix > address.length * 8) return false;
+  const wholeBytes = Math.floor(prefix / 8);
+  for (let index = 0; index < wholeBytes; index += 1) {
+    if (address[index] !== network[index]) return false;
+  }
+  const remainingBits = prefix % 8;
+  if (remainingBits === 0) return true;
+  const mask = (0xff << (8 - remainingBits)) & 0xff;
+  return (address[wholeBytes] & mask) === (network[wholeBytes] & mask);
+}
+
 // Chunked base64 so a multi-MB image never hits the String.fromCharCode
 // argument-count limit.
 function bytesToBase64(bytes: Uint8Array): string {

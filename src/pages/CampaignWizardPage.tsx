@@ -7,8 +7,12 @@ import { GenerationReferences } from '../components/GenerationReferences'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { insforge } from '../lib/insforge'
-import { uploadReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
-import { normalizeReferenceContext } from '../lib/references'
+import { materializeReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
+import {
+  normalizeReferenceContext,
+  pendingReferencesReady,
+  type PendingReference,
+} from '../lib/references'
 import {
   createPosterGeneration,
   failPosterGeneration,
@@ -48,7 +52,7 @@ export function CampaignWizardPage() {
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
   const [referenceContext, setReferenceContext] = useState('')
-  const [referenceFiles, setReferenceFiles] = useState<File[]>([])
+  const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
 
   function patchStep(key: AgentStep['key'], patch: Partial<AgentStep>) {
     setSteps((previous) => previous.map((step) => (step.key === key ? { ...step, ...patch } : step)))
@@ -90,6 +94,10 @@ export function CampaignWizardPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     if (!user) return
+    if (!pendingReferencesReady(pendingReferences)) {
+      setError('Remove any image URL that could not load, or wait for its preview to finish.')
+      return
+    }
     setError(null)
     setPhase('creating')
 
@@ -102,10 +110,10 @@ export function CampaignWizardPage() {
       return
     }
 
-    let uploaded = [] as Awaited<ReturnType<typeof uploadReferenceImages>>
+    let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
     let generationId: string
     try {
-      uploaded = await uploadReferenceImages(user.id, campaignId, referenceFiles)
+      uploaded = await materializeReferenceImages(user.id, campaignId, pendingReferences)
       const generation = await createPosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(referenceContext),
@@ -295,8 +303,8 @@ export function CampaignWizardPage() {
                 onContextChange={setReferenceContext}
                 existingImages={[]}
                 onRemoveExisting={() => {}}
-                pendingFiles={referenceFiles}
-                onPendingFilesChange={setReferenceFiles}
+                pendingReferences={pendingReferences}
+                onPendingReferencesChange={setPendingReferences}
               />
             </section>
 
@@ -308,7 +316,11 @@ export function CampaignWizardPage() {
             )}
 
             <div className="form-actions">
-              <button className="button button-primary" type="submit">
+              <button
+                className="button button-primary"
+                type="submit"
+                disabled={!pendingReferencesReady(pendingReferences)}
+              >
                 <Sparkles size={16} aria-hidden="true" />
                 {draftId ? 'Retry generation' : 'Generate poster'}
               </button>
@@ -339,7 +351,7 @@ export function CampaignWizardPage() {
               </div>
               <div>
                 <dt>References</dt>
-                <dd>{referenceFiles.length} image{referenceFiles.length === 1 ? '' : 's'}</dd>
+                <dd>{pendingReferences.length} image{pendingReferences.length === 1 ? '' : 's'}</dd>
               </div>
             </dl>
           </aside>

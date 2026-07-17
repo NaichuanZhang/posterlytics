@@ -38,8 +38,12 @@ import {
 } from '../lib/generationApi'
 import { overlayGeneration } from '../lib/generations'
 import { insforge } from '../lib/insforge'
-import { deleteReferenceImages, uploadReferenceImages } from '../lib/referenceStorage'
-import { normalizeReferenceContext } from '../lib/references'
+import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
+import {
+  normalizeReferenceContext,
+  pendingReferencesReady,
+  type PendingReference,
+} from '../lib/references'
 import type { PosterGenerationStage } from '../lib/types'
 import { buildViewUrl } from '../lib/viewUrl'
 
@@ -73,7 +77,7 @@ export function PosterEditorPage() {
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null)
   const [instruction, setInstruction] = useState('')
-  const [referenceFiles, setReferenceFiles] = useState<File[]>([])
+  const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
   const [refreshWebsite, setRefreshWebsite] = useState(false)
   const [generationError, setGenerationError] = useState<string | null>(null)
   const [stages, setStages] = useState<GenerationStageItem[]>(INITIAL_STAGES)
@@ -152,6 +156,10 @@ export function PosterEditorPage() {
 
   async function generateVersion() {
     if (!user || generating) return
+    if (!pendingReferencesReady(pendingReferences)) {
+      setGenerationError('Remove any image URL that could not load, or wait for its preview to finish.')
+      return
+    }
 
     setBusy('generate')
     setGenerationError(null)
@@ -161,12 +169,12 @@ export function PosterEditorPage() {
       status: stage.key === 'analyze' && !effectiveRefreshWebsite ? 'skipped' : 'pending',
     })))
 
-    let uploaded = [] as Awaited<ReturnType<typeof uploadReferenceImages>>
+    let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
     let generationId: string | null = null
     let failureStage: PosterGenerationStage = effectiveRefreshWebsite ? 'analyze' : 'designer'
 
     try {
-      uploaded = await uploadReferenceImages(user.id, campaignId, referenceFiles)
+      uploaded = await materializeReferenceImages(user.id, campaignId, pendingReferences)
       const generation = await createPosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(instruction),
@@ -198,7 +206,7 @@ export function PosterEditorPage() {
       setSelectedGenerationId(generation.id)
       await Promise.all([reload(), reloadGenerations()])
       setInstruction('')
-      setReferenceFiles([])
+      setPendingReferences([])
       setRefreshWebsite(false)
       setShowStages(false)
       notify('New poster version created.', 'success')
@@ -315,8 +323,8 @@ export function PosterEditorPage() {
         onContextChange={setInstruction}
         existingImages={[]}
         onRemoveExisting={() => {}}
-        pendingFiles={referenceFiles}
-        onPendingFilesChange={setReferenceFiles}
+        pendingReferences={pendingReferences}
+        onPendingReferencesChange={setPendingReferences}
         disabled={generating}
         contextLabel="What should change?"
         contextPlaceholder="Make the headline larger, replace the product image, or adjust the mood."
@@ -334,7 +342,7 @@ export function PosterEditorPage() {
       <button
         type="button"
         className="button button-primary inspector-primary"
-        disabled={!!busy}
+        disabled={!!busy || !pendingReferencesReady(pendingReferences)}
         onClick={() => void generateVersion()}
       >
         <Sparkles size={15} aria-hidden="true" />

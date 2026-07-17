@@ -10,7 +10,7 @@ Live app: **https://3f9q2998.insforge.site**
 
 1. Sign in and create a product campaign.
 2. Enter the product URL, campaign copy, destination, and optional generation
-   context or reference images.
+   context or reference images from files or public HTTPS URLs.
 3. `analyze` captures a theme-matched, multi-frame style board and prepares
    source-grounded brand context and poster copy.
 4. `designer` creates a structured 2:3 layout that preserves the source's

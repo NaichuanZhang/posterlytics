@@ -1,10 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  createPendingUrlReference,
   normalizeReferenceContext,
   normalizeReferenceImages,
+  parseDroppedReferenceUrls,
+  partitionReferenceUrls,
   partitionReferenceFiles,
+  pendingReferencesReady,
+  referenceNameFromUrl,
   safeReferenceFilename,
+  validateReferenceUrl,
 } from '../src/lib/references.ts'
 
 const image = (name = 'image.png', type = 'image/png', size = 1000) => ({ name, type, size })
@@ -114,4 +120,62 @@ test('reference image metadata is defensive and capped', () => {
 test('safeReferenceFilename removes path and punctuation noise', () => {
   assert.equal(safeReferenceFilename('../../Brand Mood (final).png'), 'Brand-Mood-final-.png')
   assert.equal(safeReferenceFilename('***'), 'reference-image')
+})
+
+test('reference URLs normalize HTTPS syntax and derive a readable name', () => {
+  assert.deepEqual(
+    validateReferenceUrl('  https://EXAMPLE.com:443/assets/Brand%20Hero.PNG#preview  '),
+    {
+      ok: true,
+      url: 'https://example.com/assets/Brand%20Hero.PNG',
+      name: 'Brand-Hero.PNG',
+    },
+  )
+  assert.equal(referenceNameFromUrl('https://images.example.com/'), 'images.example.com-image')
+})
+
+test('reference URL validation rejects invalid, non-HTTPS, and credentialed URLs', () => {
+  assert.deepEqual(validateReferenceUrl('not a URL'), { ok: false, reason: 'invalid' })
+  assert.deepEqual(
+    validateReferenceUrl('http://example.com/image.png'),
+    { ok: false, reason: 'protocol' },
+  )
+  assert.deepEqual(
+    validateReferenceUrl('https://user:secret@example.com/image.png'),
+    { ok: false, reason: 'credentials' },
+  )
+})
+
+test('reference URL partition rejects normalized duplicates and shares file capacity', () => {
+  const result = partitionReferenceUrls(3, ['https://example.com/one.png#old'], [
+    'https://EXAMPLE.com:443/one.png#new',
+    'https://example.com/two.webp',
+    'https://example.com/three.jpg',
+    'https://example.com/four.png',
+  ])
+
+  assert.deepEqual(result.accepted.map((item) => item.url), [
+    'https://example.com/two.webp',
+    'https://example.com/three.jpg',
+  ])
+  assert.deepEqual(result.rejected.map((item) => item.reason), ['duplicate', 'capacity'])
+})
+
+test('dropped URI lists ignore comments and preserve link ordering', () => {
+  assert.deepEqual(
+    parseDroppedReferenceUrls(
+      '# browser metadata\nhttps://example.com/first.png\n\nhttps://example.com/second.webp\r\n',
+    ),
+    ['https://example.com/first.png', 'https://example.com/second.webp'],
+  )
+})
+
+test('pending URL references are ready only after their preview loads', () => {
+  const reference = createPendingUrlReference({
+    url: 'https://example.com/image.png',
+    name: 'image.png',
+  })
+  assert.equal(pendingReferencesReady([reference]), false)
+  assert.equal(pendingReferencesReady([{ ...reference, previewStatus: 'ready' }]), true)
+  assert.equal(pendingReferencesReady([{ ...reference, previewStatus: 'error' }]), false)
 })
