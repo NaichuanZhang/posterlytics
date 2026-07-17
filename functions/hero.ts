@@ -1,15 +1,19 @@
 import {
   CORS,
   aiImage,
+  buildTraceContentManifest,
   buildParentContextPrompt,
   errorDetails,
+  imageGenerationContent,
   imageSourceToBlob,
-  inlineImageReferences,
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
   logPipelineEvent,
   markGenerationFailed,
+  prepareImageReferences,
+  resolvedImageModelId,
+  StageTraceRecorder,
   type PosterLayout,
   type TypedImageReference,
 } from './_shared.ts';
@@ -49,7 +53,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, design_status')
+    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status')
     .eq('id', body.generationId)
     .eq('campaign_id', campaign.id)
     .maybeSingle();
@@ -61,7 +65,7 @@ export default async function (req: Request): Promise<Response> {
   const { data: parent } = parentId
     ? await client.database
         .from('poster_generations')
-        .select('id, poster_layout, hero_image_url')
+        .select('id, poster_layout, hero_image_url, hero_image_key')
         .eq('id', parentId)
         .eq('campaign_id', campaign.id)
         .eq('status', 'ready')
@@ -76,6 +80,13 @@ export default async function (req: Request): Promise<Response> {
     await markGenerationFailed(client, generation.id, 'hero', stageError, 'stage_transition_failed');
     return jsonResponse({ error: stageError.message }, 409);
   }
+  const trace = new StageTraceRecorder(client, {
+    generationId: String(generation.id),
+    campaignId: String(campaign.id),
+    userId: userData.user.id,
+    stage: 'hero',
+  });
+  await trace.start();
 
   const generationSnapshot = {
     ...(generation as Record<string, unknown>),
@@ -94,13 +105,13 @@ export default async function (req: Request): Promise<Response> {
   // which 400s the whole generation.
   const assets = (generationSnapshot.brand_assets ?? {}) as {
     logo_url?: string;
+    logo_key?: string;
     primary_image_url?: string;
-    images?: Array<{ url?: string }>;
+    images?: Array<{ url?: string; key?: string }>;
   };
   const userReferences = Array.isArray(generationSnapshot.reference_images)
     ? (generationSnapshot.reference_images as Array<Record<string, unknown>>)
-        .map((image) => typeof image.url === 'string' ? image.url : '')
-        .filter(Boolean)
+        .filter((image) => typeof image.url === 'string' && image.url)
         .slice(0, 5)
     : [];
   const previousPosterUrl = typeof (parent as Record<string, unknown> | null)?.hero_image_url === 'string'
@@ -109,51 +120,81 @@ export default async function (req: Request): Promise<Response> {
   const screenshotUrl = typeof generationSnapshot.screenshot_url === 'string'
     ? String(generationSnapshot.screenshot_url)
     : '';
-  const productUrls = isEvent
+  const productImages = isEvent
     ? []
     : [
-        assets.primary_image_url,
-        ...(assets.images ?? []).map((image) => image.url),
-      ].filter((url): url is string => !!url);
+        ...(assets.primary_image_url
+          ? [{
+              url: assets.primary_image_url,
+              key: assets.images?.find((image) => image.url === assets.primary_image_url)?.key,
+            }]
+          : []),
+        ...(assets.images ?? []).filter(
+          (image): image is { url: string; key?: string } => !!image.url,
+        ),
+      ];
   const candidates: TypedImageReference[] = [
     ...(previousPosterUrl
       ? [{
           kind: 'previous-poster' as const,
           url: previousPosterUrl,
+          key: typeof (parent as Record<string, unknown> | null)?.hero_image_key === 'string'
+            ? String((parent as Record<string, unknown>).hero_image_key)
+            : undefined,
+          filename: 'Previous poster',
+          storageSource: 'poster-version',
           purpose: 'Primary edit source: keep every visual choice that the user did not explicitly ask to change.',
         }]
       : []),
-    ...userReferences.map((url, index) => ({
+    ...userReferences.map((image, index) => ({
       kind: 'user-reference' as const,
-      url,
+      url: String(image.url),
+      key: typeof image.key === 'string' ? image.key : undefined,
+      filename: typeof image.name === 'string' ? image.name : `Supporting image ${index + 1}`,
+      mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
+      sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
+      storageSource: 'user-upload',
       purpose: `New supporting image ${index + 1}; use it only for the requested change while preserving the parent poster.`,
     })),
     ...(assets.logo_url
       ? [{
           kind: 'logo' as const,
           url: assets.logo_url,
+          key: assets.logo_key,
+          filename: 'Brand logo',
+          storageSource: 'website-asset',
           purpose: 'Authentic brand logo; reproduce faithfully only if this reference remains attached.',
         }]
       : []),
-    ...productUrls.map((url, index) => ({
+    ...productImages.map((image, index) => ({
       kind: 'product' as const,
-      url,
+      url: image.url,
+      key: image.key,
+      filename: `Product image ${index + 1}`,
+      storageSource: 'website-asset',
       purpose: `Authentic product or brand image ${index + 1}; preserve its real subject and visual details.`,
     })),
     ...(!isEvent && screenshotUrl
       ? [{
           kind: 'style-board' as const,
           url: screenshotUrl,
+          key: typeof generationSnapshot.screenshot_key === 'string'
+            ? String(generationSnapshot.screenshot_key)
+            : undefined,
+          filename: 'Website style board',
+          storageSource: 'website-capture',
           purpose: 'Supporting source evidence for palette, typography, imagery treatment, lighting, texture, motifs, and density.',
         }]
       : []),
   ];
-  const referenceImages = await inlineImageReferences(candidates, {
+  const preparedImages = await prepareImageReferences(candidates, {
     maxImages: 6,
     maxCandidates: 14,
     maxTotalBytes: 12_000_000,
     ordering: 'painter',
   });
+  await trace.setImages(preparedImages);
+  const referenceImages = preparedImages.providerReferences;
   const hasLogo = referenceImages.some((reference) => reference.kind === 'logo');
   const hasStyleBoard = referenceImages.some((reference) => reference.kind === 'style-board');
 
@@ -201,8 +242,26 @@ export default async function (req: Request): Promise<Response> {
   // (AiPoster shows the full image uncropped above the external QR footer).
   let imageSource: string;
   try {
-    imageSource = await aiImage(prompt, '2:3', referenceImages);
+    const messages = [{
+      role: 'user',
+      content: imageGenerationContent(prompt, referenceImages, 6, 'painter'),
+    }];
+    imageSource = await trace.runModelCall(
+      {
+        operation: 'image',
+        modelId: resolvedImageModelId(),
+        prompt: { image: prompt },
+        providerSettings: {
+          modalities: ['image', 'text'],
+          image_config: { aspect_ratio: '2:3' },
+          timeout_ms: 90_000,
+        },
+        contentManifest: buildTraceContentManifest(messages, preparedImages.attachedImages),
+      },
+      () => aiImage(prompt, '2:3', referenceImages),
+    );
   } catch (e) {
+    await trace.fail(e, 'image_generation_failed');
     await markGenerationFailed(client, generation.id, 'hero', e, 'image_generation_failed');
     logPipelineEvent({
       source: 'hero',
@@ -219,12 +278,17 @@ export default async function (req: Request): Promise<Response> {
 
   let url: string;
   let key: string;
+  let posterMimeType = 'image/png';
+  let posterSizeBytes = 0;
   try {
     const blob = await imageSourceToBlob(imageSource);
+    posterMimeType = blob.type || posterMimeType;
+    posterSizeBytes = blob.size;
     const { data, error } = await client.storage
       .from('assets')
       .upload(`poster/${campaign.id}/${generation.id}/${crypto.randomUUID()}.png`, blob);
     if (error || !data) {
+      await trace.fail(error?.message ?? 'upload failed', 'poster_upload_failed');
       await markGenerationFailed(
         client,
         generation.id,
@@ -246,6 +310,7 @@ export default async function (req: Request): Promise<Response> {
     url = data.url;
     key = data.key;
   } catch (e) {
+    await trace.fail(e, 'poster_upload_failed');
     await markGenerationFailed(client, generation.id, 'hero', e, 'poster_upload_failed');
     logPipelineEvent({
       source: 'hero',
@@ -258,6 +323,14 @@ export default async function (req: Request): Promise<Response> {
     });
     return jsonResponse({ error: String(e) }, 500);
   }
+  await trace.addArtifact({
+    kind: 'poster',
+    url,
+    key,
+    mime_type: posterMimeType,
+    size_bytes: posterSizeBytes,
+  });
+  await trace.succeed();
 
   const { data: completedGeneration, error: completeError } = await client.database
     .rpc('complete_poster_generation', {

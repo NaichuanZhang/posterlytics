@@ -152,7 +152,7 @@ test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', 
   assert.match(prompt, /metallic gold/)
   assert.match(prompt, /low-key violet rim light/)
   assert.match(prompt, /#050711 about 72%/)
-  assert.match(prompt, /first attached image is a multi-frame STYLE BOARD/)
+  assert.match(prompt, /labeled STYLE BOARD image captured from the real source page is attached/)
 })
 
 test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => {

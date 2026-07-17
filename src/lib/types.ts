@@ -78,6 +78,114 @@ export type PosterGenerationMode = 'iteration' | 'website_refresh'
 
 export type PosterGenerationStage = 'analyze' | 'designer' | 'hero' | 'complete'
 
+export type GenerationTraceStage = 'analyze' | 'designer' | 'hero'
+
+export type GenerationStageTraceStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'skipped'
+
+export type TraceImageSource =
+  | 'previous-poster'
+  | 'style-board'
+  | 'user-reference'
+  | 'logo'
+  | 'product'
+
+export type TraceImageSkipReason =
+  | 'missing_url'
+  | 'duplicate'
+  | 'candidate_limit'
+  | 'fetch_failed'
+  | 'unsupported_format'
+  | 'empty_image'
+  | 'image_too_large'
+  | 'byte_budget'
+  | 'image_limit'
+
+export interface TraceImageAsset {
+  source: TraceImageSource
+  purpose: string
+  url: string | null
+  key: string | null
+  filename: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  storage_source: string
+  candidate_position: number
+  model_position: number | null
+}
+
+export interface TraceImageSkip {
+  asset: TraceImageAsset
+  reason: TraceImageSkipReason
+  detail: string
+}
+
+export interface TraceContentManifestEntry {
+  position: number
+  role: string
+  type: 'text' | 'image'
+  text?: string
+  image?: TraceImageAsset
+}
+
+export interface ModelCallTrace {
+  attempt: number
+  operation: 'chat' | 'image'
+  provider: 'openrouter'
+  model_id: string
+  status: 'running' | 'succeeded' | 'failed'
+  started_at: string
+  completed_at: string | null
+  prompt: {
+    system?: string
+    user?: string
+    image?: string
+  }
+  provider_settings: Record<string, unknown>
+  content_manifest: TraceContentManifestEntry[]
+  failure: {
+    code: string
+    message: string
+    retryable: boolean
+    upstream_status?: number
+  } | null
+}
+
+export interface GenerationTraceArtifact {
+  kind: 'style-board' | 'layout' | 'poster' | 'analysis'
+  url?: string | null
+  key?: string | null
+  mime_type?: string | null
+  size_bytes?: number | null
+  snapshot?: unknown
+  metadata?: Record<string, unknown>
+}
+
+export interface GenerationStageTrace {
+  id: string
+  generation_id: string
+  campaign_id: string
+  user_id: string
+  stage: GenerationTraceStage
+  status: GenerationStageTraceStatus
+  started_at: string | null
+  completed_at: string | null
+  model_calls: ModelCallTrace[]
+  candidate_images: TraceImageAsset[]
+  attached_images: TraceImageAsset[]
+  skipped_images: TraceImageSkip[]
+  artifacts: GenerationTraceArtifact[]
+  failure_code: string | null
+  failure_message: string | null
+  failure_metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
 // Designer mode: an LLM-designed bespoke poster layout (produced by the
 // `designer` edge function) that `hero` compiles into the image prompt — instead
 // of one of the two hardcoded template prompts. Mirror of `PosterLayout` in
@@ -277,6 +385,8 @@ export interface PosterGeneration {
   failure_stage: PosterGenerationStage | null
   failure_code: string | null
   failure_message: string | null
+  trace_schema_version: number | null
+  trace_incomplete: boolean
 }
 
 export interface Placement {

@@ -1,9 +1,10 @@
-import { Check, History, RotateCcw } from 'lucide-react'
+import { AlertTriangle, Check, History, ListTree, RotateCcw } from 'lucide-react'
 import type { PosterGeneration } from '../lib/types'
 import { Skeleton } from './ui/Feedback'
 
 interface Props {
   generations: PosterGeneration[]
+  failedGenerations: PosterGeneration[]
   selectedGeneration: PosterGeneration | null
   currentGenerationId: string | null
   loading: boolean
@@ -11,10 +12,12 @@ interface Props {
   activating: boolean
   onSelect: (generationId: string) => void
   onActivate: (generationId: string) => void
+  onReview: (generation: PosterGeneration) => void
 }
 
 export function PosterVersionHistory({
   generations,
+  failedGenerations,
   selectedGeneration,
   currentGenerationId,
   loading,
@@ -22,6 +25,7 @@ export function PosterVersionHistory({
   activating,
   onSelect,
   onActivate,
+  onReview,
 }: Props) {
   return (
     <section className="version-history" aria-labelledby="versions-heading">
@@ -111,10 +115,57 @@ export function PosterVersionHistory({
               </>
             )}
           </button>
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            onClick={() => onReview(selectedGeneration)}
+          >
+            <ListTree size={14} aria-hidden="true" />
+            Generation details
+          </button>
         </div>
+      )}
+
+      {failedGenerations.length > 0 && (
+        <details className="failed-generation-list">
+          <summary>
+            <span>
+              <AlertTriangle size={14} aria-hidden="true" />
+              Failed attempts
+            </span>
+            <strong>{failedGenerations.length}</strong>
+          </summary>
+          <div>
+            {failedGenerations.map((generation) => (
+              <button
+                key={generation.id}
+                type="button"
+                className="failed-generation-row"
+                onClick={() => onReview(generation)}
+              >
+                <span>
+                  <strong>{failureStageLabel(generation.failure_stage)}</strong>
+                  <time dateTime={generation.failed_at ?? generation.created_at}>
+                    {formatVersionDate(generation.failed_at ?? generation.created_at)}
+                  </time>
+                </span>
+                <small>{generation.failure_message || 'Generation did not complete.'}</small>
+                <ListTree size={14} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </details>
       )}
     </section>
   )
+}
+
+function failureStageLabel(stage: PosterGeneration['failure_stage']) {
+  if (stage === 'analyze') return 'Analyze failed'
+  if (stage === 'designer') return 'Designer failed'
+  if (stage === 'hero') return 'Image model failed'
+  if (stage === 'complete') return 'Completion failed'
+  return 'Generation failed'
 }
 
 function formatVersionDate(value: string) {

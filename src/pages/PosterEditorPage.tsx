@@ -14,6 +14,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { AppShell } from '../components/AppShell'
+import { GenerationDetailsSheet } from '../components/GenerationDetailsSheet'
+import { GenerationInputsReview } from '../components/GenerationInputsReview'
 import {
   GenerationStageProgress,
   type GenerationStageItem,
@@ -37,6 +39,7 @@ import {
   invokeGenerationFunction,
 } from '../lib/generationApi'
 import { overlayGeneration } from '../lib/generations'
+import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
@@ -44,7 +47,7 @@ import {
   pendingReferencesReady,
   type PendingReference,
 } from '../lib/references'
-import type { PosterGenerationStage } from '../lib/types'
+import type { PosterGeneration, PosterGenerationStage } from '../lib/types'
 import { buildViewUrl } from '../lib/viewUrl'
 
 type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete'
@@ -64,6 +67,7 @@ export function PosterEditorPage() {
   const { campaign, loading, reload, remove } = useCampaign(id)
   const {
     generations,
+    failedGenerations,
     loading: generationsLoading,
     error: generationsError,
     reload: reloadGenerations,
@@ -85,6 +89,7 @@ export function PosterEditorPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [versionsDrawerOpen, setVersionsDrawerOpen] = useState(false)
   const [mobileSection, setMobileSection] = useState<MobileSection>('create')
+  const [detailsGeneration, setDetailsGeneration] = useState<PosterGeneration | null>(null)
 
   useEffect(() => {
     if (user?.id) void ensureDefault()
@@ -141,6 +146,16 @@ export function PosterEditorPage() {
   const firstVersion = !campaign.current_generation_id
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
   const generating = busy === 'generate'
+  const currentGeneration =
+    generations.find((generation) => generation.id === campaign.current_generation_id) ?? null
+  const generationPreflight = deriveGenerationPreflight({
+    campaign,
+    currentGeneration,
+    selectedGeneration,
+    instruction,
+    pendingReferences,
+    refreshWebsite: effectiveRefreshWebsite,
+  })
   const showDesktopVersions = !isMobileWorkspace && (
     isVersionsDrawer ? versionsDrawerOpen : preferences.versionsPanelOpen
   )
@@ -300,6 +315,7 @@ export function PosterEditorPage() {
   const versionPanel = (
     <PosterVersionHistory
       generations={generations}
+      failedGenerations={failedGenerations}
       selectedGeneration={selectedGeneration}
       currentGenerationId={campaign.current_generation_id}
       loading={generationsLoading}
@@ -307,6 +323,7 @@ export function PosterEditorPage() {
       activating={busy === 'activate'}
       onSelect={setSelectedGenerationId}
       onActivate={(generationId) => void useVersion(generationId)}
+      onReview={setDetailsGeneration}
     />
   )
 
@@ -339,6 +356,10 @@ export function PosterEditorPage() {
         />
         <span>Re-read website before generating</span>
       </label>
+      <GenerationInputsReview
+        preflight={generationPreflight}
+        disabled={generating}
+      />
       <button
         type="button"
         className="button button-primary inspector-primary"
@@ -579,6 +600,13 @@ export function PosterEditorPage() {
           </aside>
         )}
       </div>
+      {detailsGeneration && (
+        <GenerationDetailsSheet
+          generation={detailsGeneration}
+          generations={[...generations, ...failedGenerations]}
+          onClose={() => setDetailsGeneration(null)}
+        />
+      )}
     </AppShell>
   )
 }

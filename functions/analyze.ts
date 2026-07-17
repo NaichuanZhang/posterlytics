@@ -1,19 +1,21 @@
 import {
   CORS,
   aiChat,
+  buildTraceContentManifest,
   extractJson,
   jsonResponse,
   createUserClient,
   captureSite,
   dataUrlToBlob,
-  inlineReferenceImages,
   normalizeCaptureColorScheme,
   normalizeStyleProfile,
   parseColor,
   toHex,
   logPipelineEvent,
   markGenerationFailed,
-  userContentWithImages,
+  prepareImageReferences,
+  resolvedChatModelId,
+  StageTraceRecorder,
   userContentWithImageReferences,
   extractEventDetails,
   fetchLumaHtml,
@@ -21,6 +23,7 @@ import {
   isLumaHost,
   type DesignTokens,
   type EventDetails,
+  type TraceImageAsset,
   type TypedImageReference,
 } from './_shared.ts';
 
@@ -83,21 +86,24 @@ export default async function (req: Request): Promise<Response> {
     await markGenerationFailed(client, generation.id, 'analyze', stageError, 'stage_transition_failed');
     return jsonResponse({ error: stageError.message }, 409);
   }
+  const trace = new StageTraceRecorder(client, {
+    generationId: String(generation.id),
+    campaignId: String(campaign.id),
+    userId: userData.user.id,
+    stage: 'analyze',
+  });
+  await trace.start();
 
   // New event creation is retired. Only persisted legacy event rows enter the
   // event branch, so a request body cannot turn a product campaign into an event.
   const persistedScenario = (generation as { scenario?: string | null }).scenario;
   const scenario = persistedScenario === 'event' ? 'event' : 'product';
   const referenceContext = String((generation as Record<string, unknown>).instruction ?? '').trim().slice(0, 4000);
-  const referenceUrls = Array.isArray((generation as Record<string, unknown>).reference_images)
+  const userReferenceImages = Array.isArray((generation as Record<string, unknown>).reference_images)
     ? ((generation as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
-        .map((image) => typeof image.url === 'string' ? image.url : '')
-        .filter(Boolean)
+        .filter((image) => typeof image.url === 'string' && image.url)
         .slice(0, 5)
     : [];
-  // Inline as data URLs (raster only) — our storage CDN serves
-  // binary/octet-stream, which model providers reject when fetching by URL.
-  const referenceImages = await inlineReferenceImages(referenceUrls, { maxImages: 5 });
 
   const productUrl: string = (campaign as Record<string, string>).product_url;
 
@@ -269,6 +275,50 @@ export default async function (req: Request): Promise<Response> {
     await Promise.allSettled(keys.map((key) => client.storage.from('assets').remove(key)));
   };
 
+  const analysisCandidates: TypedImageReference[] = [
+    ...(screenshot_url
+      ? [{
+          kind: 'style-board' as const,
+          url: screenshot_url,
+          key: screenshot_key ?? undefined,
+          filename: 'Website style board',
+          mimeType: 'image/jpeg',
+          storageSource: 'website-capture',
+          purpose: 'Primary source evidence: three page viewports showing palette proportions, typography, imagery, lighting, motifs, hierarchy, and density.',
+        }]
+      : []),
+    ...userReferenceImages.map((image, index) => ({
+      kind: 'user-reference' as const,
+      url: String(image.url),
+      key: typeof image.key === 'string' ? image.key : undefined,
+      filename: typeof image.name === 'string' ? image.name : `Supporting image ${index + 1}`,
+      mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
+      sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
+      storageSource: 'user-upload',
+      purpose: `User-supplied creative reference ${index + 1}; use only where it agrees with or intentionally supplements the source page.`,
+    })),
+  ];
+  const preparedAnalysisImages = await prepareImageReferences(analysisCandidates, {
+    maxImages: 6,
+    maxCandidates: 8,
+    maxTotalBytes: 12_000_000,
+  });
+  await trace.setImages(preparedAnalysisImages);
+  if (screenshot_url) {
+    await trace.addArtifact({
+      kind: 'style-board',
+      url: screenshot_url,
+      key: screenshot_key,
+      mime_type: preparedAnalysisImages.attachedImages.find(
+        (image) => image.source === 'style-board',
+      )?.mime_type ?? 'image/jpeg',
+      size_bytes: preparedAnalysisImages.attachedImages.find(
+        (image) => image.source === 'style-board',
+      )?.size_bytes ?? null,
+    });
+  }
+  const referenceImages = preparedAnalysisImages.providerReferences;
+
   // 3. gpt-4o → poster_content + style_profile + brand_essence. The `designer`
   // agent then designs the bespoke layout from these and `hero` paints it;
   // brand_essence is a word-portrait that supplements the visual references.
@@ -281,7 +331,11 @@ export default async function (req: Request): Promise<Response> {
     const parsedEv = await analyzeEvent({
       campaign: campaign as Record<string, string>,
       eventDetails: event_details ?? {}, siteColors, tokens: design_tokens,
-      visibleText, referenceContext, referenceImages,
+      visibleText,
+      referenceContext,
+      referenceImages,
+      attachedImages: preparedAnalysisImages.attachedImages,
+      trace,
     });
     const { error: upErrEv } = await client.database
       .from('poster_generations')
@@ -301,6 +355,7 @@ export default async function (req: Request): Promise<Response> {
       .eq('id', generation.id);
     if (upErrEv) {
       await discardUploadedAnalysisAssets();
+      await trace.fail(upErrEv, 'generation_persist_failed');
       await markGenerationFailed(client, generation.id, 'analyze', upErrEv, 'generation_persist_failed');
       logPipelineEvent({
         source: 'analyze', campaignId: campaign.id, generationId: generation.id, status: 'failed',
@@ -310,6 +365,11 @@ export default async function (req: Request): Promise<Response> {
       });
       return jsonResponse({ error: upErrEv.message }, 500);
     }
+    await trace.addArtifact({
+      kind: 'analysis',
+      metadata: { scenario: 'event', deterministic_logistics: true },
+    });
+    await trace.succeed();
     return jsonResponse({
       generation_id: generation.id,
       scenario: 'event',
@@ -377,38 +437,66 @@ export default async function (req: Request): Promise<Response> {
     `VISIBLE DOM COLOR ROLES: bg ${design_tokens?.colors.bg ?? '(unknown)'}, text ${design_tokens?.colors.text ?? '(unknown)'}, primary ${design_tokens?.colors.primary ?? '(unknown)'}, accent ${design_tokens?.colors.accent ?? '(unknown)'}\n\n` +
     `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}\n\n` +
     `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
-    `The user supplied ${referenceImages.length} supporting image(s). Treat them as secondary visual references, not text to reproduce verbatim.`;
-  const analysisReferences: TypedImageReference[] = [
-    ...(capture.styleBoardDataUrl
-      ? [{
-          kind: 'style-board' as const,
-          url: capture.styleBoardDataUrl,
-          purpose: 'Primary source evidence: three page viewports showing palette proportions, typography, imagery, lighting, motifs, hierarchy, and density.',
-        }]
-      : []),
-    ...referenceImages.map((url, index) => ({
-      kind: 'user-reference' as const,
-      url,
-      purpose: `User-supplied creative reference ${index + 1}; use only where it agrees with or intentionally supplements the source page.`,
-    })),
-  ];
-  const userContent = userContentWithImageReferences(user, analysisReferences, 6);
+    `The user supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} supporting image(s). Treat them as secondary visual references, not text to reproduce verbatim.`;
+  const userContent = userContentWithImageReferences(user, referenceImages, 6);
 
   let parsed: ParsedContent;
+  let usedFallback = false;
   try {
-    const raw = await aiChat([
+    const messages = [
       { role: 'system', content: sys },
       { role: 'user', content: userContent },
-    ], { maxTokens: 2200 });
-    parsed = normalize(extractJson(raw), campaign as Record<string, string>, siteColors, design_tokens);
+    ];
+    parsed = await trace.runModelCall(
+      {
+        operation: 'chat',
+        modelId: resolvedChatModelId(),
+        prompt: { system: sys, user },
+        providerSettings: { max_completion_tokens: 2200, timeout_ms: 30_000 },
+        contentManifest: buildTraceContentManifest(
+          messages,
+          preparedAnalysisImages.attachedImages,
+        ),
+      },
+      async () => {
+        const raw = await aiChat(messages, { maxTokens: 2200 });
+        return normalize(
+          extractJson(raw),
+          campaign as Record<string, string>,
+          siteColors,
+          design_tokens,
+        );
+      },
+    );
   } catch {
     // One repair retry with a terse reminder.
     try {
-      const raw2 = await aiChat([
-        { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
+      const repairSystem = sys + ' Return ONLY valid minified JSON.';
+      const messages = [
+        { role: 'system', content: repairSystem },
         { role: 'user', content: userContent },
-      ], { maxTokens: 2200 });
-      parsed = normalize(extractJson(raw2), campaign as Record<string, string>, siteColors, design_tokens);
+      ];
+      parsed = await trace.runModelCall(
+        {
+          operation: 'chat',
+          modelId: resolvedChatModelId(),
+          prompt: { system: repairSystem, user },
+          providerSettings: { max_completion_tokens: 2200, timeout_ms: 30_000 },
+          contentManifest: buildTraceContentManifest(
+            messages,
+            preparedAnalysisImages.attachedImages,
+          ),
+        },
+        async () => {
+          const raw = await aiChat(messages, { maxTokens: 2200 });
+          return normalize(
+            extractJson(raw),
+            campaign as Record<string, string>,
+            siteColors,
+            design_tokens,
+          );
+        },
+      );
     } catch (e) {
       // Both AI-chat attempts failed → hardcoded fallback content. The poster still
       // renders, but it's off-brand; record why so it's not invisible.
@@ -422,6 +510,7 @@ export default async function (req: Request): Promise<Response> {
         error: e,
       });
       parsed = fallbackContent(campaign as Record<string, string>, siteColors, design_tokens);
+      usedFallback = true;
     }
   }
 
@@ -445,6 +534,7 @@ export default async function (req: Request): Promise<Response> {
     .eq('id', generation.id);
   if (upErr) {
     await discardUploadedAnalysisAssets();
+    await trace.fail(upErr, 'generation_persist_failed');
     await markGenerationFailed(client, generation.id, 'analyze', upErr, 'generation_persist_failed');
     logPipelineEvent({
       source: 'analyze',
@@ -457,6 +547,11 @@ export default async function (req: Request): Promise<Response> {
     });
     return jsonResponse({ error: upErr.message }, 500);
   }
+  await trace.addArtifact({
+    kind: 'analysis',
+    metadata: { scenario: 'product', used_fallback: usedFallback },
+  });
+  await trace.succeed();
 
   return jsonResponse({
     generation_id: generation.id,
@@ -794,7 +889,9 @@ async function analyzeEvent(args: {
   tokens: DesignTokens | null;
   visibleText: string;
   referenceContext: string;
-  referenceImages: string[];
+  referenceImages: TypedImageReference[];
+  attachedImages: TraceImageAsset[];
+  trace: StageTraceRecorder;
 }): Promise<ParsedContent & { prompt: { system: string; user: string } }> {
   const {
     campaign,
@@ -804,6 +901,8 @@ async function analyzeEvent(args: {
     visibleText,
     referenceContext,
     referenceImages,
+    attachedImages,
+    trace,
   } = args;
   const lines = formatEventLines(eventDetails);
   const title = eventDetails.event_name || campaign.product_name || 'the event';
@@ -837,16 +936,28 @@ async function analyzeEvent(args: {
     `REAL BRAND COLORS mined from the page (use for palette): ${siteColors.length ? siteColors.join(', ') : '(none — infer tasteful defaults)'}\n\n` +
     `EVENT PAGE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the fields above)'}\n\n` +
     `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
-    `The user supplied ${referenceImages.length} supporting image(s). Use them as visual references.`;
-  const userContent = userContentWithImages(user, referenceImages);
+    `The user supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} supporting image(s). Use them as visual references.`;
+  const userContent = userContentWithImageReferences(user, referenceImages);
 
   let ev: Record<string, unknown> = {};
   try {
-    const raw = await aiChat([
+    const messages = [
       { role: 'system', content: sys },
       { role: 'user', content: userContent },
-    ], { maxTokens: 1600 });
-    ev = extractJson(raw) as Record<string, unknown>;
+    ];
+    ev = await trace.runModelCall(
+      {
+        operation: 'chat',
+        modelId: resolvedChatModelId(),
+        prompt: { system: sys, user },
+        providerSettings: { max_completion_tokens: 1600, timeout_ms: 30_000 },
+        contentManifest: buildTraceContentManifest(messages, attachedImages),
+      },
+      async () => {
+        const raw = await aiChat(messages, { maxTokens: 1600 });
+        return extractJson(raw) as Record<string, unknown>;
+      },
+    );
   } catch (e) {
     logPipelineEvent({
       source: 'analyze',

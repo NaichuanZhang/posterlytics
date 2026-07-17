@@ -164,6 +164,80 @@ export interface TypedImageReference {
   kind: ImageReferenceKind;
   url: string;
   purpose: string;
+  key?: string;
+  filename?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  storageSource?: string;
+}
+
+export type TraceImageSkipReason =
+  | 'missing_url'
+  | 'duplicate'
+  | 'candidate_limit'
+  | 'fetch_failed'
+  | 'unsupported_format'
+  | 'empty_image'
+  | 'image_too_large'
+  | 'byte_budget'
+  | 'image_limit';
+
+export interface TraceImageAsset {
+  source: ImageReferenceKind;
+  purpose: string;
+  url: string | null;
+  key: string | null;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  storage_source: string;
+  candidate_position: number;
+  model_position: number | null;
+}
+
+export interface TraceImageSkip {
+  asset: TraceImageAsset;
+  reason: TraceImageSkipReason;
+  detail: string;
+}
+
+export interface PreparedImageReferences {
+  providerReferences: TypedImageReference[];
+  candidateImages: TraceImageAsset[];
+  attachedImages: TraceImageAsset[];
+  skippedImages: TraceImageSkip[];
+}
+
+export interface TraceContentManifestEntry {
+  position: number;
+  role: string;
+  type: 'text' | 'image';
+  text?: string;
+  image?: TraceImageAsset;
+}
+
+export interface ModelCallTrace {
+  attempt: number;
+  operation: 'chat' | 'image';
+  provider: 'openrouter';
+  model_id: string;
+  status: 'running' | 'succeeded' | 'failed';
+  started_at: string;
+  completed_at: string | null;
+  prompt: { system?: string; user?: string; image?: string };
+  provider_settings: Record<string, unknown>;
+  content_manifest: TraceContentManifestEntry[];
+  failure: ReturnType<typeof errorDetails> | null;
+}
+
+export interface GenerationTraceArtifact {
+  kind: 'style-board' | 'layout' | 'poster' | 'analysis';
+  url?: string | null;
+  key?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  snapshot?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 const SOURCE_REFERENCE_PRIORITY: Record<ImageReferenceKind, number> = {
@@ -709,55 +783,255 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// Fetch a reference image and return it as a raster data URL, or null when it
-// can't be used (SVG, non-image, oversized, fetch failure). Model providers
-// fetch URL references themselves and choke on the CDN's binary/octet-stream
-// content type — inlining bytes sidesteps that entirely.
-export async function fetchImageAsDataUrl(url: string, maxBytes = 5_000_000): Promise<string | null> {
+export type ModelImageFetchResult =
+  | { ok: true; dataUrl: string; mimeType: string; sizeBytes: number }
+  | {
+      ok: false;
+      reason: 'fetch_failed' | 'unsupported_format' | 'empty_image' | 'image_too_large';
+      detail: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    };
+
+export type ModelImageFetcher = (
+  url: string,
+  maxBytes: number,
+) => Promise<ModelImageFetchResult>;
+
+// Fetch and validate the same bytes that will be placed in a provider request.
+// The returned data URL is request-only; trace metadata always retains the
+// durable source URL/key and never persists inline bytes.
+export async function fetchImageForModel(
+  url: string,
+  maxBytes = 5_000_000,
+): Promise<ModelImageFetchResult> {
   if (url.startsWith('data:')) {
-    return /^data:image\/(png|jpe?g|webp|gif)[;,]/i.test(url) ? url : null;
+    const match = /^data:image\/(png|jpe?g|webp|gif)(?:;[^,]*)?,/i.exec(url);
+    if (!match) {
+      return {
+        ok: false,
+        reason: 'unsupported_format',
+        detail: 'Inline image is not a supported raster format.',
+      };
+    }
+    const payload = url.slice(url.indexOf(',') + 1);
+    const sizeBytes = /;base64,/i.test(url)
+      ? Math.floor(payload.length * 0.75)
+      : new TextEncoder().encode(decodeURIComponent(payload)).length;
+    if (sizeBytes <= 0) {
+      return { ok: false, reason: 'empty_image', detail: 'Image payload is empty.' };
+    }
+    if (sizeBytes > maxBytes) {
+      return {
+        ok: false,
+        reason: 'image_too_large',
+        detail: `Image exceeds the ${maxBytes.toLocaleString()} byte per-image limit.`,
+        sizeBytes,
+      };
+    }
+    const subtype = match[1].toLowerCase();
+    const mimeType = subtype === 'jpg' ? 'image/jpeg' : `image/${subtype}`;
+    return { ok: true, dataUrl: url, mimeType, sizeBytes };
   }
+
   try {
     const ctl = new AbortController();
     const timeout = setTimeout(() => ctl.abort(), 10_000);
     try {
       const response = await fetch(url, { signal: ctl.signal });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        return {
+          ok: false,
+          reason: 'fetch_failed',
+          detail: `Image fetch returned HTTP ${response.status}.`,
+        };
+      }
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length === 0 || bytes.length > maxBytes) return null;
-      const mime = sniffImageMime(bytes);
-      if (!mime) return null;
-      return `data:${mime};base64,${bytesToBase64(bytes)}`;
+      if (bytes.length === 0) {
+        return { ok: false, reason: 'empty_image', detail: 'Fetched image was empty.' };
+      }
+      if (bytes.length > maxBytes) {
+        return {
+          ok: false,
+          reason: 'image_too_large',
+          detail: `Image exceeds the ${maxBytes.toLocaleString()} byte per-image limit.`,
+          sizeBytes: bytes.length,
+        };
+      }
+      const mimeType = sniffImageMime(bytes);
+      if (!mimeType) {
+        return {
+          ok: false,
+          reason: 'unsupported_format',
+          detail: 'Fetched content is not a supported raster image.',
+          sizeBytes: bytes.length,
+        };
+      }
+      return {
+        ok: true,
+        dataUrl: `data:${mimeType};base64,${bytesToBase64(bytes)}`,
+        mimeType,
+        sizeBytes: bytes.length,
+      };
     } finally {
       clearTimeout(timeout);
     }
-  } catch {
-    return null;
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'fetch_failed',
+      detail: error instanceof DOMException && error.name === 'AbortError'
+        ? 'Image fetch timed out.'
+        : 'Image could not be fetched.',
+    };
   }
 }
 
-// Inline a list of reference-image URLs as data URLs, in order, dropping any
-// that fail and stopping before the total payload outgrows the request-size
-// headroom of the chat/image APIs.
+export async function fetchImageAsDataUrl(
+  url: string,
+  maxBytes = 5_000_000,
+): Promise<string | null> {
+  const result = await fetchImageForModel(url, maxBytes);
+  return result.ok ? result.dataUrl : null;
+}
+
+export async function prepareImageReferences(
+  references: readonly TypedImageReference[],
+  opts: {
+    maxImages?: number;
+    maxCandidates?: number;
+    maxImageBytes?: number;
+    maxTotalBytes?: number;
+    ordering?: 'source' | 'painter';
+    fetcher?: ModelImageFetcher;
+  } = {},
+): Promise<PreparedImageReferences> {
+  const {
+    maxImages = 6,
+    maxCandidates = 12,
+    maxImageBytes = 5_000_000,
+    maxTotalBytes = 12_000_000,
+    ordering = 'source',
+    fetcher = fetchImageForModel,
+  } = opts;
+  const priority = ordering === 'painter'
+    ? PAINTER_REFERENCE_PRIORITY
+    : SOURCE_REFERENCE_PRIORITY;
+  const positioned = references
+    .map((reference, index) => ({ reference, candidatePosition: index + 1 }))
+    .sort((a, b) =>
+      priority[a.reference.kind] - priority[b.reference.kind] ||
+      a.candidatePosition - b.candidatePosition
+    );
+  const candidateImages = positioned.map(({ reference, candidatePosition }) =>
+    traceImageAsset(reference, candidatePosition)
+  );
+  const skippedImages: TraceImageSkip[] = [];
+  const unique: typeof positioned = [];
+  const seen = new Set<string>();
+
+  for (const candidate of positioned) {
+    const asset = traceImageAsset(candidate.reference, candidate.candidatePosition);
+    if (!candidate.reference.url) {
+      skippedImages.push({
+        asset,
+        reason: 'missing_url',
+        detail: 'Candidate did not have an image URL.',
+      });
+      continue;
+    }
+    if (seen.has(candidate.reference.url)) {
+      skippedImages.push({
+        asset,
+        reason: 'duplicate',
+        detail: 'A higher-priority candidate already uses this image.',
+      });
+      continue;
+    }
+    seen.add(candidate.reference.url);
+    if (unique.length >= Math.max(0, maxCandidates)) {
+      skippedImages.push({
+        asset,
+        reason: 'candidate_limit',
+        detail: `Candidate falls beyond the ${Math.max(0, maxCandidates)}-image fetch limit.`,
+      });
+      continue;
+    }
+    unique.push(candidate);
+  }
+
+  const fetched = await Promise.all(unique.map(async (candidate) => ({
+    candidate,
+    result: await fetcher(candidate.reference.url, maxImageBytes),
+  })));
+  const providerReferences: TypedImageReference[] = [];
+  const attachedImages: TraceImageAsset[] = [];
+  let totalBytes = 0;
+
+  for (const { candidate, result } of fetched) {
+    const baseAsset = traceImageAsset(candidate.reference, candidate.candidatePosition);
+    if (!result.ok) {
+      skippedImages.push({
+        asset: {
+          ...baseAsset,
+          mime_type: result.mimeType ?? baseAsset.mime_type,
+          size_bytes: result.sizeBytes ?? baseAsset.size_bytes,
+        },
+        reason: result.reason,
+        detail: result.detail,
+      });
+      continue;
+    }
+    const fetchedAsset = {
+      ...baseAsset,
+      mime_type: result.mimeType,
+      size_bytes: result.sizeBytes,
+    };
+    if (providerReferences.length >= Math.max(0, maxImages)) {
+      skippedImages.push({
+        asset: fetchedAsset,
+        reason: 'image_limit',
+        detail: `Candidate falls beyond the ${Math.max(0, maxImages)}-image model limit.`,
+      });
+      continue;
+    }
+    if (totalBytes + result.sizeBytes > Math.max(0, maxTotalBytes)) {
+      skippedImages.push({
+        asset: fetchedAsset,
+        reason: 'byte_budget',
+        detail: 'Candidate would exceed the total image byte budget.',
+      });
+      continue;
+    }
+
+    totalBytes += result.sizeBytes;
+    const modelPosition = providerReferences.length + 1;
+    providerReferences.push({
+      ...candidate.reference,
+      url: result.dataUrl,
+      mimeType: result.mimeType,
+      sizeBytes: result.sizeBytes,
+    });
+    attachedImages.push({ ...fetchedAsset, model_position: modelPosition });
+  }
+
+  return { providerReferences, candidateImages, attachedImages, skippedImages };
+}
+
+// Compatibility wrappers retained for callers that only need provider payloads.
 export async function inlineReferenceImages(
   urls: readonly string[],
   opts: { maxImages?: number; maxTotalBytes?: number } = {},
 ): Promise<string[]> {
-  const { maxImages = 6, maxTotalBytes = 10_000_000 } = opts;
-  const fetched = await Promise.all(
-    urls.filter(Boolean).slice(0, maxImages).map((url) => fetchImageAsDataUrl(url)),
+  const prepared = await prepareImageReferences(
+    urls.map((url, index) => ({
+      kind: 'user-reference' as const,
+      url,
+      purpose: `Supporting image ${index + 1}`,
+    })),
+    opts,
   );
-  const inlined: string[] = [];
-  let total = 0;
-  for (const dataUrl of fetched) {
-    if (!dataUrl) continue;
-    // ~3/4 of the base64 length is the byte size; close enough for a budget.
-    const approxBytes = Math.floor(dataUrl.length * 0.75);
-    if (total + approxBytes > maxTotalBytes) break;
-    total += approxBytes;
-    inlined.push(dataUrl);
-  }
-  return inlined;
+  return prepared.providerReferences.map((reference) => reference.url);
 }
 
 export async function inlineImageReferences(
@@ -769,30 +1043,311 @@ export async function inlineImageReferences(
     ordering?: 'source' | 'painter';
   } = {},
 ): Promise<TypedImageReference[]> {
-  const {
-    maxImages = 6,
-    maxCandidates = 12,
-    maxTotalBytes = 12_000_000,
-    ordering = 'source',
-  } = opts;
-  const order = ordering === 'painter'
-    ? orderPainterImageReferences
-    : orderImageReferences;
-  const candidates = order(references, maxCandidates);
-  const fetched = await Promise.all(candidates.map(async (reference) => ({
-    reference,
-    dataUrl: await fetchImageAsDataUrl(reference.url),
-  })));
-  const valid: TypedImageReference[] = [];
-  let total = 0;
-  for (const item of fetched) {
-    if (!item.dataUrl) continue;
-    const approxBytes = Math.floor(item.dataUrl.length * 0.75);
-    if (total + approxBytes > maxTotalBytes) continue;
-    total += approxBytes;
-    valid.push({ ...item.reference, url: item.dataUrl });
+  return (await prepareImageReferences(references, opts)).providerReferences;
+}
+
+function traceImageAsset(
+  reference: TypedImageReference,
+  candidatePosition: number,
+): TraceImageAsset {
+  return {
+    source: reference.kind,
+    purpose: reference.purpose.slice(0, 1000),
+    url: durableTraceUrl(reference.url),
+    key: reference.key ?? null,
+    filename: reference.filename ?? filenameFromImageUrl(reference.url),
+    mime_type: reference.mimeType ?? null,
+    size_bytes: Number.isFinite(reference.sizeBytes) ? reference.sizeBytes! : null,
+    storage_source: reference.storageSource ??
+      (reference.key ? 'insforge-storage' : reference.url.startsWith('data:') ? 'runtime-inline' : 'external-url'),
+    candidate_position: candidatePosition,
+    model_position: null,
+  };
+}
+
+function durableTraceUrl(value: string): string | null {
+  if (!value || value.startsWith('data:')) return null;
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  } catch {
+    return null;
   }
-  return order(valid, maxImages);
+}
+
+function filenameFromImageUrl(value: string): string | null {
+  if (!value || value.startsWith('data:')) return null;
+  try {
+    const filename = decodeURIComponent(new URL(value).pathname.split('/').filter(Boolean).pop() ?? '');
+    return filename.slice(0, 240) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildTraceContentManifest(
+  messages: Array<{ role: string; content: string | unknown[] }>,
+  attachedImages: readonly TraceImageAsset[],
+): TraceContentManifestEntry[] {
+  const manifest: TraceContentManifestEntry[] = [];
+  let imageIndex = 0;
+
+  for (const message of messages) {
+    const parts = typeof message.content === 'string'
+      ? [{ type: 'text', text: message.content }]
+      : message.content;
+    for (const part of parts) {
+      const record = part && typeof part === 'object'
+        ? part as Record<string, unknown>
+        : {};
+      if (record.type === 'image_url') {
+        const image = attachedImages[imageIndex] ?? {
+          source: 'user-reference',
+          purpose: 'Image metadata was unavailable.',
+          url: null,
+          key: null,
+          filename: null,
+          mime_type: null,
+          size_bytes: null,
+          storage_source: 'unknown',
+          candidate_position: imageIndex + 1,
+          model_position: imageIndex + 1,
+        } satisfies TraceImageAsset;
+        imageIndex += 1;
+        manifest.push({
+          position: manifest.length + 1,
+          role: message.role,
+          type: 'image',
+          image,
+        });
+        continue;
+      }
+      if (record.type === 'text' && typeof record.text === 'string') {
+        manifest.push({
+          position: manifest.length + 1,
+          role: message.role,
+          type: 'text',
+          text: traceSafeText(record.text),
+        });
+      }
+    }
+  }
+
+  return manifest;
+}
+
+export function traceSafeText(value: string): string {
+  return value
+    .replace(/data:image\/[a-z0-9.+-]+(?:;[^,\s]*)?,[^\s"'<>]+/gi, '[inline image omitted]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/\b(?:sk-or-v1|ik)_[A-Za-z0-9_-]{12,}\b/g, '[credential redacted]');
+}
+
+export function resolvedChatModelId(): string {
+  return Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o';
+}
+
+export function resolvedImageModelId(): string {
+  return Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image';
+}
+
+export interface TracedModelCall {
+  operation: 'chat' | 'image';
+  modelId: string;
+  prompt: { system?: string; user?: string; image?: string };
+  providerSettings: Record<string, unknown>;
+  contentManifest: TraceContentManifestEntry[];
+}
+
+type GenerationTraceStage = 'analyze' | 'designer' | 'hero';
+type UserClient = ReturnType<typeof createUserClient>;
+
+export class StageTraceRecorder {
+  private client: UserClient;
+  private generationId: string;
+  private campaignId: string;
+  private userId: string;
+  private stage: GenerationTraceStage;
+  private modelCalls: ModelCallTrace[] = [];
+  private artifacts: GenerationTraceArtifact[] = [];
+  private markedIncomplete = false;
+
+  constructor(
+    client: UserClient,
+    context: {
+      generationId: string;
+      campaignId: string;
+      userId: string;
+      stage: GenerationTraceStage;
+    },
+  ) {
+    this.client = client;
+    this.generationId = context.generationId;
+    this.campaignId = context.campaignId;
+    this.userId = context.userId;
+    this.stage = context.stage;
+  }
+
+  async start(): Promise<void> {
+    try {
+      const { data, error } = await this.client.database
+        .from('generation_stage_traces')
+        .select('status, started_at, model_calls, artifacts')
+        .eq('generation_id', this.generationId)
+        .eq('stage', this.stage)
+        .maybeSingle();
+      if (error || !data) throw new Error(error?.message ?? 'Stage trace row is unavailable.');
+      const row = data as Record<string, unknown>;
+      this.modelCalls = Array.isArray(row.model_calls)
+        ? row.model_calls as ModelCallTrace[]
+        : [];
+      this.artifacts = Array.isArray(row.artifacts)
+        ? row.artifacts as GenerationTraceArtifact[]
+        : [];
+      await this.persist({
+        status: 'running',
+        started_at: typeof row.started_at === 'string' ? row.started_at : new Date().toISOString(),
+      });
+    } catch (error) {
+      await this.markTraceIncomplete(error);
+    }
+  }
+
+  async setImages(prepared: PreparedImageReferences): Promise<void> {
+    await this.persist({
+      candidate_images: prepared.candidateImages,
+      attached_images: prepared.attachedImages,
+      skipped_images: prepared.skippedImages,
+    });
+  }
+
+  async addArtifact(artifact: GenerationTraceArtifact): Promise<void> {
+    this.artifacts.push(sanitizeTraceValue(artifact) as GenerationTraceArtifact);
+    await this.persist({ artifacts: this.artifacts });
+  }
+
+  async runModelCall<T>(
+    request: TracedModelCall,
+    execute: () => Promise<T>,
+  ): Promise<T> {
+    const attempt = this.modelCalls.reduce(
+      (highest, call) => Math.max(highest, call.attempt),
+      0,
+    ) + 1;
+    const call: ModelCallTrace = {
+      attempt,
+      operation: request.operation,
+      provider: 'openrouter',
+      model_id: request.modelId,
+      status: 'running',
+      started_at: new Date().toISOString(),
+      completed_at: null,
+      prompt: sanitizeTraceValue(request.prompt) as ModelCallTrace['prompt'],
+      provider_settings: sanitizeTraceValue(request.providerSettings) as Record<string, unknown>,
+      content_manifest: sanitizeTraceValue(request.contentManifest) as TraceContentManifestEntry[],
+      failure: null,
+    };
+    this.modelCalls.push(call);
+    await this.persist({ model_calls: this.modelCalls });
+
+    try {
+      const result = await execute();
+      call.status = 'succeeded';
+      call.completed_at = new Date().toISOString();
+      await this.persist({ model_calls: this.modelCalls });
+      return result;
+    } catch (error) {
+      call.status = 'failed';
+      call.completed_at = new Date().toISOString();
+      const details = errorDetails(error);
+      call.failure = {
+        ...details,
+        message: traceSafeText(details.message).slice(0, 2000),
+      };
+      await this.persist({ model_calls: this.modelCalls });
+      throw error;
+    }
+  }
+
+  async succeed(): Promise<void> {
+    await this.persist({
+      status: 'succeeded',
+      completed_at: new Date().toISOString(),
+      failure_code: null,
+      failure_message: null,
+      failure_metadata: {},
+    });
+  }
+
+  async fail(
+    error: unknown,
+    code?: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    const details = errorDetails(error);
+    await this.persist({
+      status: 'failed',
+      completed_at: new Date().toISOString(),
+      failure_code: code ?? details.code,
+      failure_message: traceSafeText(details.message).slice(0, 2000),
+      failure_metadata: sanitizeTraceValue({
+        ...metadata,
+        retryable: details.retryable,
+        upstream_status: details.upstream_status,
+      }),
+    });
+  }
+
+  private async persist(patch: Record<string, unknown>): Promise<void> {
+    try {
+      const { error } = await this.client.database
+        .from('generation_stage_traces')
+        .update(patch)
+        .eq('generation_id', this.generationId)
+        .eq('campaign_id', this.campaignId)
+        .eq('user_id', this.userId)
+        .eq('stage', this.stage);
+      if (error) throw new Error(error.message);
+    } catch (error) {
+      await this.markTraceIncomplete(error);
+    }
+  }
+
+  private async markTraceIncomplete(error: unknown): Promise<void> {
+    if (!this.markedIncomplete) {
+      this.markedIncomplete = true;
+      try {
+        await this.client.database
+          .from('poster_generations')
+          .update({ trace_incomplete: true })
+          .eq('id', this.generationId)
+          .eq('campaign_id', this.campaignId);
+      } catch {
+        // Trace capture is explicitly non-fatal to poster generation.
+      }
+    }
+    console.warn(JSON.stringify({
+      event: 'generation_trace_write_failed',
+      generation_id: this.generationId,
+      stage: this.stage,
+      message: traceSafeText(error instanceof Error ? error.message : String(error)).slice(0, 500),
+    }));
+  }
+}
+
+function sanitizeTraceValue(value: unknown): unknown {
+  if (typeof value === 'string') return traceSafeText(value);
+  if (Array.isArray(value)) return value.map(sanitizeTraceValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !/authorization|api[-_]?key|access[-_]?token/i.test(key))
+      .map(([key, item]) => [key, sanitizeTraceValue(item)]),
+  );
 }
 
 async function upstreamFailure(provider: string, response: Response): Promise<UpstreamError> {
@@ -823,7 +1378,7 @@ export async function aiChat(
         'X-Title': 'Posterlytics',
       },
       body: JSON.stringify({
-        model: Deno.env.get('OPENROUTER_CHAT_MODEL') ?? 'openai/gpt-4o',
+        model: resolvedChatModelId(),
         messages,
         max_completion_tokens: opts.maxTokens ?? 1200,
       }),
@@ -1205,7 +1760,7 @@ export function compileLayoutPrompt(
     ? '\nA reference image of the brand LOGO is provided alongside this prompt — reproduce it FAITHFULLY (exact shape, proportions, and colors) in the top brand row. Do not redraw, restyle, or distort it.\n'
     : '\nNo authentic logo image is attached. If the layout calls for a brand identifier, render only the product name already supplied in its quoted zone, as plain text. Do not invent or render any logo, icon, emblem, monogram, mascot, or brand symbol.\n';
   const sourceEvidence = ctx.hasStyleBoard
-    ? 'The first attached image is a multi-frame STYLE BOARD captured from the real source page. Treat it as the primary visual evidence.'
+    ? 'A labeled STYLE BOARD image captured from the real source page is attached. Treat it as the primary brand-style evidence while preserving the painter priority described by each reference label.'
     : 'No source style board is attached; rely on the source-derived direction and palette below.';
   const proportions = p.proportions?.length
     ? p.proportions
@@ -1275,7 +1830,7 @@ export async function aiImage(
         'X-Title': 'Posterlytics',
       },
       body: JSON.stringify({
-        model: Deno.env.get('OPENROUTER_IMAGE_MODEL') ?? 'google/gemini-2.5-flash-image',
+        model: resolvedImageModelId(),
         modalities: ['image', 'text'],
         messages: [{ role: 'user', content }],
         image_config: { aspect_ratio: aspectRatio },

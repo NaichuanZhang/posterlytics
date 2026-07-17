@@ -1,17 +1,20 @@
 import {
   CORS,
   aiChat,
+  buildTraceContentManifest,
   buildParentContextPrompt,
   errorDetails,
   ensurePosterLayoutZones,
   extractJson,
-  inlineImageReferences,
   jsonResponse,
   createUserClient,
   markGenerationFailed,
   normalizePosterLayout,
   normalizeStyleProfile,
   logPipelineEvent,
+  prepareImageReferences,
+  resolvedChatModelId,
+  StageTraceRecorder,
   userContentWithImageReferences,
   type DesignTokens,
   type PosterLayout,
@@ -54,7 +57,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, poster_layout')
+    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout')
     .eq('id', body.generationId)
     .eq('campaign_id', campaign.id)
     .maybeSingle();
@@ -66,7 +69,7 @@ export default async function (req: Request): Promise<Response> {
   const { data: parent } = parentId
     ? await client.database
         .from('poster_generations')
-        .select('id, poster_layout, hero_image_url')
+        .select('id, poster_layout, hero_image_url, hero_image_key')
         .eq('id', parentId)
         .eq('campaign_id', campaign.id)
         .eq('status', 'ready')
@@ -81,6 +84,13 @@ export default async function (req: Request): Promise<Response> {
     await markGenerationFailed(client, generation.id, 'designer', stageError, 'stage_transition_failed');
     return jsonResponse({ error: stageError.message }, 409);
   }
+  const trace = new StageTraceRecorder(client, {
+    generationId: String(generation.id),
+    campaignId: String(campaign.id),
+    userId: userData.user.id,
+    stage: 'designer',
+  });
+  await trace.start();
 
   const c = {
     ...(generation as Record<string, unknown>),
@@ -94,14 +104,18 @@ export default async function (req: Request): Promise<Response> {
   const tokens = (c.design_tokens ?? null) as DesignTokens | null;
   const copy = (c.poster_copy ?? {}) as Record<string, unknown>;
   const content = (c.poster_content ?? {}) as Record<string, unknown>;
-  const assets = (c.brand_assets ?? {}) as { logo_url?: string; primary_image_url?: string; images?: Array<{ url: string }> };
+  const assets = (c.brand_assets ?? {}) as {
+    logo_url?: string;
+    logo_key?: string;
+    primary_image_url?: string;
+    images?: Array<{ url: string; key?: string }>;
+  };
   const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
   const hasLogo = !!assets.logo_url;
   const instruction = String(c.instruction ?? '').trim().slice(0, 4000);
-  const referenceUrls = Array.isArray(c.reference_images)
+  const userReferenceImages = Array.isArray(c.reference_images)
     ? (c.reference_images as Array<Record<string, unknown>>)
-        .map((image) => typeof image.url === 'string' ? image.url : '')
-        .filter(Boolean)
+        .filter((image) => typeof image.url === 'string' && image.url)
         .slice(0, 5)
     : [];
   const visualCandidates: TypedImageReference[] = [
@@ -109,6 +123,11 @@ export default async function (req: Request): Promise<Response> {
       ? [{
           kind: 'previous-poster' as const,
           url: String((parent as Record<string, unknown>).hero_image_url),
+          key: typeof (parent as Record<string, unknown>).hero_image_key === 'string'
+            ? String((parent as Record<string, unknown>).hero_image_key)
+            : undefined,
+          filename: 'Previous poster',
+          storageSource: 'poster-version',
           purpose: 'The current poster to edit. Preserve every visual choice not explicitly changed by the user request.',
         }]
       : []),
@@ -116,19 +135,29 @@ export default async function (req: Request): Promise<Response> {
       ? [{
           kind: 'style-board' as const,
           url: c.screenshot_url,
+          key: typeof c.screenshot_key === 'string' ? c.screenshot_key : undefined,
+          filename: 'Website style board',
+          storageSource: 'website-capture',
           purpose: 'Primary source evidence: merged page viewports for observed palette proportions, typography, imagery, lighting, motifs, composition, and density.',
         }]
       : []),
-    ...referenceUrls.map((url, index) => ({
+    ...userReferenceImages.map((image, index) => ({
       kind: 'user-reference' as const,
-      url,
+      url: String(image.url),
+      key: typeof image.key === 'string' ? image.key : undefined,
+      filename: typeof image.name === 'string' ? image.name : `Supporting image ${index + 1}`,
+      mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
+      sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
+      storageSource: 'user-upload',
       purpose: `User-supplied creative reference ${index + 1}; secondary to the source style board.`,
     })),
   ];
-  const visualReferences = await inlineImageReferences(visualCandidates, {
+  const preparedImages = await prepareImageReferences(visualCandidates, {
     maxImages: 6,
     maxCandidates: 7,
   });
+  await trace.setImages(preparedImages);
+  const visualReferences = preparedImages.providerReferences;
   if (
     visualCandidates.some((reference) => reference.kind === 'style-board') &&
     !visualReferences.some((reference) => reference.kind === 'style-board')
@@ -145,14 +174,14 @@ export default async function (req: Request): Promise<Response> {
   const attachedUserReferences = visualReferences.filter(
     (reference) => reference.kind === 'user-reference',
   ).length;
-  if (attachedUserReferences < referenceUrls.length) {
+  if (attachedUserReferences < userReferenceImages.length) {
     logPipelineEvent({
       source: 'designer',
       campaignId: campaign.id,
       generationId: generation.id,
       status: 'degraded',
       code: 'reference_image_skipped',
-      detail: `${referenceUrls.length - attachedUserReferences} of ${referenceUrls.length} user reference image(s) could not be inlined for the layout designer.`,
+      detail: `${userReferenceImages.length - attachedUserReferences} of ${userReferenceImages.length} user reference image(s) could not be inlined for the layout designer.`,
     });
   }
 
@@ -250,26 +279,52 @@ export default async function (req: Request): Promise<Response> {
 
   let layout;
   try {
-    const raw = await aiChat([
+    const messages = [
       { role: 'system', content: sys },
       { role: 'user', content: userContent },
-    ], { maxTokens: 1800 });
-    layout = ensurePosterLayoutZones(
-      normalizePosterLayout(extractJson(raw), palHint, sp),
-      fallbackZones,
+    ];
+    layout = await trace.runModelCall(
+      {
+        operation: 'chat',
+        modelId: resolvedChatModelId(),
+        prompt: { system: sys, user },
+        providerSettings: { max_completion_tokens: 1800, timeout_ms: 30_000 },
+        contentManifest: buildTraceContentManifest(messages, preparedImages.attachedImages),
+      },
+      async () => {
+        const raw = await aiChat(messages, { maxTokens: 1800 });
+        return ensurePosterLayoutZones(
+          normalizePosterLayout(extractJson(raw), palHint, sp),
+          fallbackZones,
+        );
+      },
     );
   } catch {
     // One repair retry with a terse reminder, then give up (design_status=failed).
     try {
-      const raw2 = await aiChat([
-        { role: 'system', content: sys + ' Return ONLY valid minified JSON.' },
+      const repairSystem = sys + ' Return ONLY valid minified JSON.';
+      const messages = [
+        { role: 'system', content: repairSystem },
         { role: 'user', content: userContent },
-      ], { maxTokens: 1800 });
-      layout = ensurePosterLayoutZones(
-        normalizePosterLayout(extractJson(raw2), palHint, sp),
-        fallbackZones,
+      ];
+      layout = await trace.runModelCall(
+        {
+          operation: 'chat',
+          modelId: resolvedChatModelId(),
+          prompt: { system: repairSystem, user },
+          providerSettings: { max_completion_tokens: 1800, timeout_ms: 30_000 },
+          contentManifest: buildTraceContentManifest(messages, preparedImages.attachedImages),
+        },
+        async () => {
+          const raw = await aiChat(messages, { maxTokens: 1800 });
+          return ensurePosterLayoutZones(
+            normalizePosterLayout(extractJson(raw), palHint, sp),
+            fallbackZones,
+          );
+        },
       );
     } catch (e) {
+      await trace.fail(e, 'layout_ai_failed');
       await markGenerationFailed(client, generation.id, 'designer', e, 'layout_ai_failed');
       logPipelineEvent({
         source: 'designer',
@@ -290,6 +345,7 @@ export default async function (req: Request): Promise<Response> {
     .update({ poster_layout: layout, design_status: 'ready' })
     .eq('id', generation.id);
   if (upErr) {
+    await trace.fail(upErr, 'generation_persist_failed');
     await markGenerationFailed(client, generation.id, 'designer', upErr, 'generation_persist_failed');
     logPipelineEvent({
       source: 'designer',
@@ -302,6 +358,8 @@ export default async function (req: Request): Promise<Response> {
     });
     return jsonResponse({ error: upErr.message }, 500);
   }
+  await trace.addArtifact({ kind: 'layout', snapshot: layout });
+  await trace.succeed();
 
   // Return the real layout-agent prompt for the generation loading UI.
   return jsonResponse({ poster_layout: layout, prompt: { system: sys, user } });
