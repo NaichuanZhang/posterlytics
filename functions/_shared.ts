@@ -100,11 +100,48 @@ export function errorDetails(error: unknown): {
       upstream_status: error.status || undefined,
     };
   }
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const message = typeof record.message === 'string' ? record.message : String(error);
+    const code = typeof record.code === 'string' ? record.code : 'internal_error';
+    const status = typeof record.status === 'number'
+      ? record.status
+      : typeof record.statusCode === 'number'
+        ? record.statusCode
+        : undefined;
+    return {
+      code,
+      message,
+      retryable: status === 408 || status === 429 || (status !== undefined && status >= 500),
+      upstream_status: status,
+    };
+  }
   return {
     code: 'internal_error',
     message: error instanceof Error ? error.message : String(error),
     retryable: false,
   };
+}
+
+export async function markGenerationFailed(
+  client: ReturnType<typeof createUserClient>,
+  generationId: string,
+  stage: 'analyze' | 'designer' | 'hero' | 'complete',
+  error: unknown,
+  code?: string,
+): Promise<void> {
+  const details = errorDetails(error);
+  await client.database
+    .from('poster_generations')
+    .update({
+      status: 'failed',
+      failed_at: new Date().toISOString(),
+      failure_stage: stage,
+      failure_code: code ?? details.code,
+      failure_message: details.message.slice(0, 2000),
+    })
+    .eq('id', generationId)
+    .catch(() => {});
 }
 
 export function userContentWithImages(text: string, imageUrls: readonly string[]): string | unknown[] {
@@ -116,7 +153,12 @@ export function userContentWithImages(text: string, imageUrls: readonly string[]
   ];
 }
 
-export type ImageReferenceKind = 'style-board' | 'user-reference' | 'logo' | 'product';
+export type ImageReferenceKind =
+  | 'previous-poster'
+  | 'style-board'
+  | 'user-reference'
+  | 'logo'
+  | 'product';
 
 export interface TypedImageReference {
   kind: ImageReferenceKind;
@@ -124,23 +166,47 @@ export interface TypedImageReference {
   purpose: string;
 }
 
-const IMAGE_REFERENCE_PRIORITY: Record<ImageReferenceKind, number> = {
-  'style-board': 0,
+const SOURCE_REFERENCE_PRIORITY: Record<ImageReferenceKind, number> = {
+  'previous-poster': 0,
+  'style-board': 1,
+  'user-reference': 2,
+  logo: 3,
+  product: 4,
+};
+
+const PAINTER_REFERENCE_PRIORITY: Record<ImageReferenceKind, number> = {
+  'previous-poster': 0,
   'user-reference': 1,
   logo: 2,
   product: 3,
+  'style-board': 4,
 };
 
 export function orderImageReferences(
   references: readonly TypedImageReference[],
   maxImages = 6,
 ): TypedImageReference[] {
+  return orderReferences(references, maxImages, SOURCE_REFERENCE_PRIORITY);
+}
+
+export function orderPainterImageReferences(
+  references: readonly TypedImageReference[],
+  maxImages = 6,
+): TypedImageReference[] {
+  return orderReferences(references, maxImages, PAINTER_REFERENCE_PRIORITY);
+}
+
+function orderReferences(
+  references: readonly TypedImageReference[],
+  maxImages: number,
+  priority: Record<ImageReferenceKind, number>,
+): TypedImageReference[] {
   const seen = new Set<string>();
   return references
     .map((reference, index) => ({ reference, index }))
     .filter(({ reference }) => !!reference.url)
     .sort((a, b) =>
-      IMAGE_REFERENCE_PRIORITY[a.reference.kind] - IMAGE_REFERENCE_PRIORITY[b.reference.kind] ||
+      priority[a.reference.kind] - priority[b.reference.kind] ||
       a.index - b.index
     )
     .filter(({ reference }) => {
@@ -175,6 +241,7 @@ export function imageGenerationContent(
   prompt: string,
   references: readonly (TypedImageReference | string)[],
   maxImages = 6,
+  ordering: 'source' | 'painter' = 'source',
 ): unknown[] {
   const content: unknown[] = [{ type: 'text', text: prompt }];
   if (references.every((reference) => typeof reference === 'string')) {
@@ -187,7 +254,10 @@ export function imageGenerationContent(
   const typed = references.filter(
     (reference): reference is TypedImageReference => typeof reference !== 'string',
   );
-  for (const [index, reference] of orderImageReferences(typed, maxImages).entries()) {
+  const ordered = ordering === 'painter'
+    ? orderPainterImageReferences(typed, maxImages)
+    : orderImageReferences(typed, maxImages);
+  for (const [index, reference] of ordered.entries()) {
     content.push({
       type: 'text',
       text: `REFERENCE ${index + 1} [${reference.kind.toUpperCase()}]: ${reference.purpose.slice(0, 240)}`,
@@ -277,14 +347,23 @@ export async function inlineReferenceImages(
 
 export async function inlineImageReferences(
   references: readonly TypedImageReference[],
-  opts: { maxImages?: number; maxCandidates?: number; maxTotalBytes?: number } = {},
+  opts: {
+    maxImages?: number;
+    maxCandidates?: number;
+    maxTotalBytes?: number;
+    ordering?: 'source' | 'painter';
+  } = {},
 ): Promise<TypedImageReference[]> {
   const {
     maxImages = 6,
     maxCandidates = 12,
     maxTotalBytes = 12_000_000,
+    ordering = 'source',
   } = opts;
-  const candidates = orderImageReferences(references, maxCandidates);
+  const order = ordering === 'painter'
+    ? orderPainterImageReferences
+    : orderImageReferences;
+  const candidates = order(references, maxCandidates);
   const fetched = await Promise.all(candidates.map(async (reference) => ({
     reference,
     dataUrl: await fetchImageAsDataUrl(reference.url),
@@ -298,7 +377,7 @@ export async function inlineImageReferences(
     total += approxBytes;
     valid.push({ ...item.reference, url: item.dataUrl });
   }
-  return orderImageReferences(valid, maxImages);
+  return order(valid, maxImages);
 }
 
 async function upstreamFailure(provider: string, response: Response): Promise<UpstreamError> {
@@ -644,6 +723,42 @@ function normalizeColorValue(value: unknown): string | null {
   return rgb ? toHex(rgb) : null;
 }
 
+export function buildParentContextPrompt(args: {
+  instruction: string | null | undefined;
+  parentLayout: PosterLayout | null;
+  hasPreviousPoster: boolean;
+  refreshWebsite?: boolean;
+}): string {
+  const instruction = args.instruction?.trim().slice(0, 4000) ||
+    'Create a refined next version without introducing gratuitous changes.';
+
+  if (!args.parentLayout && !args.hasPreviousPoster) {
+    return [
+      'VERSION CONTEXT: This is the first poster version.',
+      `USER REQUEST: ${instruction}`,
+      args.refreshWebsite
+        ? 'Use the freshly captured website evidence as the visual source of truth.'
+        : '',
+    ].filter(Boolean).join('\n');
+  }
+
+  const layout = args.parentLayout
+    ? JSON.stringify(args.parentLayout).slice(0, 6000)
+    : '(parent layout unavailable)';
+  return [
+    'ITERATION CONTRACT: Edit the current poster into its next version; do not redesign it from scratch.',
+    args.hasPreviousPoster
+      ? 'The PREVIOUS-POSTER reference is the primary composition and image-editing source.'
+      : 'The previous image is unavailable, so use the parent layout as the primary composition source.',
+    `USER REQUEST: ${instruction}`,
+    'PRESERVATION RULE: Keep every element, word, hierarchy choice, crop, color role, type treatment, texture, motif, spacing relationship, and composition decision that the user did not explicitly ask to change.',
+    args.refreshWebsite
+      ? 'WEBSITE REFRESH: Reconcile newly captured brand evidence only where it conflicts with stale brand facts; the requested delta and preservation rule still govern the edit.'
+      : 'BRAND SNAPSHOT: Reuse the current version brand analysis; do not reinterpret the website or invent a new direction.',
+    `PARENT LAYOUT JSON: ${layout}`,
+  ].join('\n');
+}
+
 // Compile a PosterLayout into a text-to-image prompt. PURE + deterministic — the
 // testable seam between the agentic layout and the image model. Reuses hero.ts's
 // proven conventions: 2:3 framing, brand-honoring, "render only these exact
@@ -730,7 +845,7 @@ export async function aiImage(
   aspectRatio = '4:5',
   referenceImages: Array<TypedImageReference | string> = [],
 ): Promise<string> {
-  const content = imageGenerationContent(prompt, referenceImages, 6);
+  const content = imageGenerationContent(prompt, referenceImages, 6, 'painter');
 
   const ctl = new AbortController();
   const timeout = setTimeout(() => ctl.abort(), 90_000);
@@ -821,6 +936,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
 export function logPipelineEvent(entry: {
   source: 'analyze' | 'designer' | 'hero' | 'capture';
   campaignId: string;
+  generationId?: string;
   status: 'failed' | 'degraded';
   code: string;
   detail: string;
@@ -833,6 +949,7 @@ export function logPipelineEvent(entry: {
     timestamp: new Date().toISOString(),
     source: entry.source,
     campaign_id: entry.campaignId,
+    generation_id: entry.generationId,
     severity: entry.status === 'failed' ? 'error' : 'warning',
     status: entry.status,
     code: entry.code,

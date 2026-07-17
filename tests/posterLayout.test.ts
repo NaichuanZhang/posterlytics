@@ -4,6 +4,7 @@ import {
   normalizePosterLayout,
   compileLayoutPrompt,
   ensurePosterLayoutZones,
+  buildParentContextPrompt,
   type PosterLayout,
 } from '../functions/_shared.ts'
 
@@ -168,4 +169,31 @@ test('compileLayoutPrompt tolerates an empty zone list with a sensible default',
   assert.ok(prompt.includes('2:3'))
   assert.ok(prompt.includes('UPPER area: a bold hero headline'))
   assert.ok(!/BOTTOM ~26%/.test(prompt))
+})
+
+test('buildParentContextPrompt isolates the requested delta and preserves everything else', () => {
+  const prompt = buildParentContextPrompt({
+    instruction: 'Make the headline larger and leave the rest alone.',
+    parentLayout: LAYOUT,
+    hasPreviousPoster: true,
+  })
+
+  assert.match(prompt, /Edit the current poster into its next version/)
+  assert.match(prompt, /PREVIOUS-POSTER reference is the primary/)
+  assert.match(prompt, /Make the headline larger/)
+  assert.match(prompt, /Keep every element.*user did not explicitly ask to change/)
+  assert.match(prompt, /PARENT LAYOUT JSON/)
+  assert.match(prompt, /BRAND SNAPSHOT/)
+})
+
+test('buildParentContextPrompt identifies a first website-backed version', () => {
+  const prompt = buildParentContextPrompt({
+    instruction: null,
+    parentLayout: null,
+    hasPreviousPoster: false,
+    refreshWebsite: true,
+  })
+
+  assert.match(prompt, /first poster version/)
+  assert.match(prompt, /freshly captured website evidence/)
 })

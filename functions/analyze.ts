@@ -12,6 +12,7 @@ import {
   parseColor,
   toHex,
   logPipelineEvent,
+  markGenerationFailed,
   userContentWithImages,
   userContentWithImageReferences,
   extractEventDetails,
@@ -39,13 +40,15 @@ export default async function (req: Request): Promise<Response> {
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
 
-  let body: { campaignId?: string; colorScheme?: unknown };
+  let body: { campaignId?: string; generationId?: string; colorScheme?: unknown };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'bad json' }, 400);
   }
-  if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
+  if (!body.campaignId || !body.generationId) {
+    return jsonResponse({ error: 'missing campaignId or generationId' }, 400);
+  }
   const colorScheme = normalizeCaptureColorScheme(body.colorScheme);
   if (!colorScheme) {
     return jsonResponse({ error: 'colorScheme must be "light" or "dark"' }, 400);
@@ -54,18 +57,40 @@ export default async function (req: Request): Promise<Response> {
   // Load the campaign (owner RLS guarantees it's the caller's).
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario, reference_context, reference_images, screenshot_url, screenshot_key')
+    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
+  const { data: generation, error: generationError } = await client.database
+    .from('poster_generations')
+    .select('id, campaign_id, generation_mode, instruction, reference_images, scenario, screenshot_url, screenshot_key')
+    .eq('id', body.generationId)
+    .eq('campaign_id', campaign.id)
+    .maybeSingle();
+  if (generationError || !generation) {
+    return jsonResponse({ error: 'poster generation not found' }, 404);
+  }
+  if ((generation as Record<string, unknown>).generation_mode !== 'website_refresh') {
+    return jsonResponse({ error: 'analysis is only valid for website refresh generations' }, 409);
+  }
+
+  const { error: stageError } = await client.database
+    .from('poster_generations')
+    .update({ status: 'analyzing' })
+    .eq('id', generation.id);
+  if (stageError) {
+    await markGenerationFailed(client, generation.id, 'analyze', stageError, 'stage_transition_failed');
+    return jsonResponse({ error: stageError.message }, 409);
+  }
+
   // New event creation is retired. Only persisted legacy event rows enter the
   // event branch, so a request body cannot turn a product campaign into an event.
-  const persistedScenario = (campaign as { scenario?: string | null }).scenario;
+  const persistedScenario = (generation as { scenario?: string | null }).scenario;
   const scenario = persistedScenario === 'event' ? 'event' : 'product';
-  const referenceContext = String((campaign as Record<string, unknown>).reference_context ?? '').trim().slice(0, 4000);
-  const referenceUrls = Array.isArray((campaign as Record<string, unknown>).reference_images)
-    ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
+  const referenceContext = String((generation as Record<string, unknown>).instruction ?? '').trim().slice(0, 4000);
+  const referenceUrls = Array.isArray((generation as Record<string, unknown>).reference_images)
+    ? ((generation as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
         .map((image) => typeof image.url === 'string' ? image.url : '')
         .filter(Boolean)
         .slice(0, 5)
@@ -73,8 +98,6 @@ export default async function (req: Request): Promise<Response> {
   // Inline as data URLs (raster only) — our storage CDN serves
   // binary/octet-stream, which model providers reject when fetching by URL.
   const referenceImages = await inlineReferenceImages(referenceUrls, { maxImages: 5 });
-
-  await client.database.from('campaigns').update({ status: 'analyzing' }).eq('id', campaign.id);
 
   const productUrl: string = (campaign as Record<string, string>).product_url;
 
@@ -126,6 +149,7 @@ export default async function (req: Request): Promise<Response> {
     logPipelineEvent({
       source: 'capture',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'degraded',
       code: capture.error.code,
       detail: 'Capture unavailable; using HTML color extraction.',
@@ -162,7 +186,12 @@ export default async function (req: Request): Promise<Response> {
   // canonical <link rel="logo"> is often an SVG — so skip past it to the
   // masthead PNG or apple-touch-icon rather than persisting an unusable URL.
   for (const candidate of assets.logoCandidates.slice(0, 5)) {
-    const up = await rehost(client, candidate, `brand/${campaign.id}/logo`, { rasterOnly: true });
+    const up = await rehost(
+      client,
+      candidate,
+      `brand/${campaign.id}/${generation.id}/logo-${crypto.randomUUID().slice(0, 8)}`,
+      { rasterOnly: true },
+    );
     if (up) {
       brand_assets.logo_url = up.url;
       brand_assets.logo_key = up.key;
@@ -173,25 +202,27 @@ export default async function (req: Request): Promise<Response> {
     logPipelineEvent({
       source: 'analyze',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'degraded',
       code: 'logo_rehost_no_raster',
       detail: `Found ${assets.logoCandidates.length} logo candidate(s) but none were fetchable raster images; painting with the product name instead.`,
     });
   }
   for (const imgUrl of assets.images.slice(0, 2)) {
-    const up = await rehost(client, imgUrl, `brand/${campaign.id}/img-${crypto.randomUUID().slice(0, 8)}`);
+    const up = await rehost(
+      client,
+      imgUrl,
+      `brand/${campaign.id}/${generation.id}/img-${crypto.randomUUID().slice(0, 8)}`,
+    );
     if (up) brand_assets.images.push({ url: up.url, key: up.key });
   }
   brand_assets.primary_image_url = brand_assets.images[0]?.url;
 
-  // Upload a new style board under a fresh key. The campaign continues to point
-  // at the previous board until its full analysis update succeeds.
+  // Upload under a generation-scoped key. Older versions keep their own board.
   const previousScreenshotUrl = String(
-    (campaign as Record<string, unknown>).screenshot_url ?? '',
+    (generation as Record<string, unknown>).screenshot_url ?? '',
   ) || null;
-  const previousScreenshotKey = String(
-    (campaign as Record<string, unknown>).screenshot_key ?? '',
-  ) || null;
+  const previousScreenshotKey = String((generation as Record<string, unknown>).screenshot_key ?? '') || null;
   let screenshot_url: string | null = previousScreenshotUrl;
   let screenshot_key: string | null = previousScreenshotKey;
   let uploadedStyleBoardKey: string | null = null;
@@ -200,7 +231,7 @@ export default async function (req: Request): Promise<Response> {
       const blob = dataUrlToBlob(capture.styleBoardDataUrl);
       const { data, error } = await client.storage
         .from('assets')
-        .upload(`style-board/${campaign.id}/${crypto.randomUUID().slice(0, 8)}.jpg`, blob);
+        .upload(`style-board/${campaign.id}/${generation.id}/${crypto.randomUUID().slice(0, 8)}.jpg`, blob);
       if (!error && data) {
         screenshot_url = data.url;
         screenshot_key = data.key;
@@ -209,6 +240,7 @@ export default async function (req: Request): Promise<Response> {
         logPipelineEvent({
           source: 'analyze',
           campaignId: campaign.id,
+          generationId: generation.id,
           status: 'degraded',
           code: 'style_board_upload_failed',
           detail: 'Fresh style board could not be persisted; retaining the previous stored board.',
@@ -219,6 +251,7 @@ export default async function (req: Request): Promise<Response> {
       logPipelineEvent({
         source: 'analyze',
         campaignId: campaign.id,
+        generationId: generation.id,
         status: 'degraded',
         code: 'style_board_upload_failed',
         detail: 'Fresh style board could not be persisted; retaining the previous stored board.',
@@ -227,19 +260,13 @@ export default async function (req: Request): Promise<Response> {
     }
   }
 
-  const discardUploadedStyleBoard = async () => {
-    if (uploadedStyleBoardKey) {
-      await client.storage.from('assets').remove(uploadedStyleBoardKey).catch(() => {});
-    }
-  };
-  const removePreviousStyleBoard = async () => {
-    if (
-      uploadedStyleBoardKey &&
-      previousScreenshotKey &&
-      previousScreenshotKey !== uploadedStyleBoardKey
-    ) {
-      await client.storage.from('assets').remove(previousScreenshotKey).catch(() => {});
-    }
+  const discardUploadedAnalysisAssets = async () => {
+    const keys = [
+      uploadedStyleBoardKey,
+      brand_assets.logo_key,
+      ...brand_assets.images.map((image) => image.key),
+    ].filter((key): key is string => !!key);
+    await Promise.allSettled(keys.map((key) => client.storage.from('assets').remove(key)));
   };
 
   // 3. gpt-4o → poster_content + style_profile + brand_essence. The `designer`
@@ -257,7 +284,7 @@ export default async function (req: Request): Promise<Response> {
       visibleText, referenceContext, referenceImages,
     });
     const { error: upErrEv } = await client.database
-      .from('campaigns')
+      .from('poster_generations')
       .update({
         scenario: 'event',
         event_details,
@@ -270,21 +297,21 @@ export default async function (req: Request): Promise<Response> {
         design_tokens,
         screenshot_url,
         screenshot_key,
-        status: 'draft',
       })
-      .eq('id', campaign.id);
+      .eq('id', generation.id);
     if (upErrEv) {
-      await discardUploadedStyleBoard();
+      await discardUploadedAnalysisAssets();
+      await markGenerationFailed(client, generation.id, 'analyze', upErrEv, 'generation_persist_failed');
       logPipelineEvent({
-        source: 'analyze', campaignId: campaign.id, status: 'failed',
-        code: 'campaign_persist_failed',
-        detail: 'campaign persist failed after event analyze',
+        source: 'analyze', campaignId: campaign.id, generationId: generation.id, status: 'failed',
+        code: 'generation_persist_failed',
+        detail: 'generation persist failed after event analyze',
         error: upErrEv,
       });
       return jsonResponse({ error: upErrEv.message }, 500);
     }
-    await removePreviousStyleBoard();
     return jsonResponse({
+      generation_id: generation.id,
       scenario: 'event',
       event_details,
       style_profile: parsedEv.style_profile,
@@ -388,6 +415,7 @@ export default async function (req: Request): Promise<Response> {
       logPipelineEvent({
         source: 'analyze',
         campaignId: campaign.id,
+        generationId: generation.id,
         status: 'degraded',
         code: 'analysis_ai_failed',
         detail: 'AI chat failed twice — used hardcoded fallback content',
@@ -400,7 +428,7 @@ export default async function (req: Request): Promise<Response> {
   // 4. Persist. design_tokens/screenshot are written even when the AI step used a
   // fallback. poster_content feeds the poster copy in designer.ts.
   const { error: upErr } = await client.database
-    .from('campaigns')
+    .from('poster_generations')
     .update({
       scenario: 'product',
       event_details: null, // clear any stale event data if a campaign switched to product
@@ -413,24 +441,25 @@ export default async function (req: Request): Promise<Response> {
       design_tokens,
       screenshot_url,
       screenshot_key,
-      status: 'draft',
     })
-    .eq('id', campaign.id);
+    .eq('id', generation.id);
   if (upErr) {
-    await discardUploadedStyleBoard();
+    await discardUploadedAnalysisAssets();
+    await markGenerationFailed(client, generation.id, 'analyze', upErr, 'generation_persist_failed');
     logPipelineEvent({
       source: 'analyze',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'failed',
-      code: 'campaign_persist_failed',
-      detail: 'campaign persist failed after analyze',
+      code: 'generation_persist_failed',
+      detail: 'generation persist failed after analyze',
       error: upErr,
     });
     return jsonResponse({ error: upErr.message }, 500);
   }
-  await removePreviousStyleBoard();
 
   return jsonResponse({
+    generation_id: generation.id,
     style_profile: parsed.style_profile,
     poster_copy: parsed.poster_copy,
     poster_content: parsed.poster_content,

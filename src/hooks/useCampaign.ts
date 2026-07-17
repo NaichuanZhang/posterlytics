@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { insforge } from '../lib/insforge'
-import type { Campaign } from '../lib/types'
+import { collectCampaignAssetKeys } from '../lib/generations'
+import type { Campaign, PosterGeneration } from '../lib/types'
 
 export function useCampaign(id: string | undefined) {
   const [campaign, setCampaign] = useState<Campaign | null>(null)
@@ -24,22 +25,27 @@ export function useCampaign(id: string | undefined) {
     void reload()
   }, [reload])
 
-  // Database children cascade. Storage objects do not, so remove known keys
-  // best-effort before deleting the owner-scoped campaign row.
+  // Database children cascade. Storage objects do not, so collect every
+  // generation's keys before deleting the campaign and clean them up afterward.
   const remove = useCallback(async () => {
     if (!campaign) return
-    const assets = campaign.brand_assets
-    const keys = [
-      campaign.hero_image_key,
-      campaign.screenshot_key,
-      assets?.logo_key,
-      ...(assets?.images ?? []).map((img) => img.key),
-      ...(campaign.reference_images ?? []).map((image) => image.key),
-    ].filter((k): k is string => !!k)
-    await Promise.allSettled(keys.map((key) => insforge.storage.from('assets').remove(key)))
+
+    const { data: generationData, error: generationError } = await insforge.database
+      .from('poster_generations')
+      .select('hero_image_key, screenshot_key, brand_assets, event_details, reference_images')
+      .eq('campaign_id', campaign.id)
+    if (generationError) throw new Error(generationError.message)
+
+    const generations = (generationData ?? []) as Array<Pick<
+      PosterGeneration,
+      'hero_image_key' | 'screenshot_key' | 'brand_assets' | 'event_details' | 'reference_images'
+    >>
+    const keys = collectCampaignAssetKeys(campaign, generations)
 
     const { error } = await insforge.database.from('campaigns').delete().eq('id', campaign.id)
     if (error) throw new Error(error.message)
+
+    await Promise.allSettled(keys.map((key) => insforge.storage.from('assets').remove(key)))
   }, [campaign])
 
   return { campaign, loading, error, reload, remove }

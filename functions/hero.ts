@@ -1,15 +1,15 @@
 import {
   CORS,
   aiImage,
+  buildParentContextPrompt,
   errorDetails,
-  fetchImageAsDataUrl,
   imageSourceToBlob,
   inlineImageReferences,
-  inlineReferenceImages,
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
   logPipelineEvent,
+  markGenerationFailed,
   type PosterLayout,
   type TypedImageReference,
 } from './_shared.ts';
@@ -30,24 +30,61 @@ export default async function (req: Request): Promise<Response> {
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
 
-  let body: { campaignId?: string };
+  let body: { campaignId?: string; generationId?: string };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'bad json' }, 400);
   }
-  if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
+  if (!body.campaignId || !body.generationId) {
+    return jsonResponse({ error: 'missing campaignId or generationId' }, 400);
+  }
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, hero_image_key, screenshot_url, reference_context, reference_images')
+    .select('id, product_name, tagline')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
+  const { data: generation, error: generationError } = await client.database
+    .from('poster_generations')
+    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, design_status')
+    .eq('id', body.generationId)
+    .eq('campaign_id', campaign.id)
+    .maybeSingle();
+  if (generationError || !generation) {
+    return jsonResponse({ error: 'poster generation not found' }, 404);
+  }
+
+  const parentId = String((generation as Record<string, unknown>).parent_generation_id ?? '');
+  const { data: parent } = parentId
+    ? await client.database
+        .from('poster_generations')
+        .select('id, poster_layout, hero_image_url')
+        .eq('id', parentId)
+        .eq('campaign_id', campaign.id)
+        .eq('status', 'ready')
+        .maybeSingle()
+    : { data: null };
+
+  const { error: stageError } = await client.database
+    .from('poster_generations')
+    .update({ status: 'painting' })
+    .eq('id', generation.id);
+  if (stageError) {
+    await markGenerationFailed(client, generation.id, 'hero', stageError, 'stage_transition_failed');
+    return jsonResponse({ error: stageError.message }, 409);
+  }
+
+  const generationSnapshot = {
+    ...(generation as Record<string, unknown>),
+    ...(campaign as Record<string, unknown>),
+  };
+
   // Event campaigns get their own promo-poster prompt; every product campaign
   // paints the designer layout (the fixed template modes were removed).
-  const isEvent = (campaign as Record<string, unknown>).scenario === 'event';
+  const isEvent = generationSnapshot.scenario === 'event';
   const style = isEvent ? 'event' : 'designer';
 
   // The real brand logo (if any) is passed to the image model as a reference so
@@ -55,122 +92,109 @@ export default async function (req: Request): Promise<Response> {
   // inlined as raster data URLs: the provider fetches plain URLs itself and
   // rejects our CDN's binary/octet-stream content type (and SVG logos outright),
   // which 400s the whole generation.
-  const assets = ((campaign as Record<string, unknown>).brand_assets ?? {}) as {
+  const assets = (generationSnapshot.brand_assets ?? {}) as {
     logo_url?: string;
     primary_image_url?: string;
     images?: Array<{ url?: string }>;
   };
-  const userReferences = Array.isArray((campaign as Record<string, unknown>).reference_images)
-    ? ((campaign as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
+  const userReferences = Array.isArray(generationSnapshot.reference_images)
+    ? (generationSnapshot.reference_images as Array<Record<string, unknown>>)
         .map((image) => typeof image.url === 'string' ? image.url : '')
         .filter(Boolean)
         .slice(0, 5)
     : [];
-  let referenceImages: Array<TypedImageReference | string>;
-  let hasLogo = false;
-  let hasStyleBoard = false;
-  if (isEvent) {
-    // Preserve the historical event painter contract: logo first, then user
-    // references, with no source-board or product-asset additions.
-    const inlinedLogo = assets.logo_url ? await fetchImageAsDataUrl(assets.logo_url) : null;
-    const inlinedRefs = await inlineReferenceImages(userReferences, { maxImages: 5 });
-    if (assets.logo_url && !inlinedLogo) {
-      logPipelineEvent({
-        source: 'hero',
-        campaignId: campaign.id,
-        status: 'degraded',
-        code: 'logo_reference_skipped',
-        detail: 'Brand logo could not be inlined as a raster image (SVG or fetch failure); painting without it.',
-      });
-    }
-    if (inlinedRefs.length < userReferences.length) {
-      logPipelineEvent({
-        source: 'hero',
-        campaignId: campaign.id,
-        status: 'degraded',
-        code: 'reference_image_skipped',
-        detail: `${userReferences.length - inlinedRefs.length} of ${userReferences.length} reference image(s) could not be inlined; painting with the rest.`,
-      });
-    }
-    referenceImages = [...(inlinedLogo ? [inlinedLogo] : []), ...inlinedRefs].slice(0, 6);
-    hasLogo = !!inlinedLogo;
-  } else {
-    const screenshotUrl = typeof (campaign as Record<string, unknown>).screenshot_url === 'string'
-      ? String((campaign as Record<string, unknown>).screenshot_url)
-      : '';
-    const productUrls = [
-      assets.primary_image_url,
-      ...(assets.images ?? []).map((image) => image.url),
-    ].filter((url): url is string => !!url);
-    const candidates: TypedImageReference[] = [
-      ...(screenshotUrl
-        ? [{
-            kind: 'style-board' as const,
-            url: screenshotUrl,
-            purpose: 'Primary source evidence: preserve page palette proportions, type character, imagery treatment, lighting, texture, motifs, hierarchy, and density.',
-          }]
-        : []),
-      ...userReferences.map((url, index) => ({
-        kind: 'user-reference' as const,
-        url,
-        purpose: `User-supplied creative reference ${index + 1}; use for requested subject or direction after honoring the source style board.`,
-      })),
-      ...(assets.logo_url
-        ? [{
-            kind: 'logo' as const,
-            url: assets.logo_url,
-            purpose: 'Authentic brand logo; reproduce faithfully only if this reference remains attached.',
-          }]
-        : []),
-      ...productUrls.map((url, index) => ({
-        kind: 'product' as const,
-        url,
-        purpose: `Authentic product or brand image ${index + 1}; use its real subject and visual details without turning the poster into a UI screenshot.`,
-      })),
-    ];
-    const inlined = await inlineImageReferences(candidates, {
-      maxImages: 6,
-      maxCandidates: 12,
-      maxTotalBytes: 12_000_000,
-    });
-    referenceImages = inlined;
-    hasLogo = inlined.some((reference) => reference.kind === 'logo');
-    hasStyleBoard = inlined.some((reference) => reference.kind === 'style-board');
+  const previousPosterUrl = typeof (parent as Record<string, unknown> | null)?.hero_image_url === 'string'
+    ? String((parent as Record<string, unknown>).hero_image_url)
+    : '';
+  const screenshotUrl = typeof generationSnapshot.screenshot_url === 'string'
+    ? String(generationSnapshot.screenshot_url)
+    : '';
+  const productUrls = isEvent
+    ? []
+    : [
+        assets.primary_image_url,
+        ...(assets.images ?? []).map((image) => image.url),
+      ].filter((url): url is string => !!url);
+  const candidates: TypedImageReference[] = [
+    ...(previousPosterUrl
+      ? [{
+          kind: 'previous-poster' as const,
+          url: previousPosterUrl,
+          purpose: 'Primary edit source: keep every visual choice that the user did not explicitly ask to change.',
+        }]
+      : []),
+    ...userReferences.map((url, index) => ({
+      kind: 'user-reference' as const,
+      url,
+      purpose: `New supporting image ${index + 1}; use it only for the requested change while preserving the parent poster.`,
+    })),
+    ...(assets.logo_url
+      ? [{
+          kind: 'logo' as const,
+          url: assets.logo_url,
+          purpose: 'Authentic brand logo; reproduce faithfully only if this reference remains attached.',
+        }]
+      : []),
+    ...productUrls.map((url, index) => ({
+      kind: 'product' as const,
+      url,
+      purpose: `Authentic product or brand image ${index + 1}; preserve its real subject and visual details.`,
+    })),
+    ...(!isEvent && screenshotUrl
+      ? [{
+          kind: 'style-board' as const,
+          url: screenshotUrl,
+          purpose: 'Supporting source evidence for palette, typography, imagery treatment, lighting, texture, motifs, and density.',
+        }]
+      : []),
+  ];
+  const referenceImages = await inlineImageReferences(candidates, {
+    maxImages: 6,
+    maxCandidates: 14,
+    maxTotalBytes: 12_000_000,
+    ordering: 'painter',
+  });
+  const hasLogo = referenceImages.some((reference) => reference.kind === 'logo');
+  const hasStyleBoard = referenceImages.some((reference) => reference.kind === 'style-board');
 
-    if (screenshotUrl && !hasStyleBoard) {
-      logPipelineEvent({
-        source: 'hero',
-        campaignId: campaign.id,
-        status: 'degraded',
-        code: 'style_board_reference_skipped',
-        detail: 'Style board could not be attached to the painter because it failed to inline or exceeded the six-image limit.',
-      });
-    }
-    const attachedUsers = inlined.filter((reference) => reference.kind === 'user-reference').length;
-    if (attachedUsers < userReferences.length) {
-      logPipelineEvent({
-        source: 'hero',
-        campaignId: campaign.id,
-        status: 'degraded',
-        code: 'reference_image_skipped',
-        detail: `${userReferences.length - attachedUsers} of ${userReferences.length} user reference image(s) could not be attached; painting with the ordered remainder.`,
-      });
-    }
-    if (assets.logo_url && !hasLogo) {
-      logPipelineEvent({
-        source: 'hero',
-        campaignId: campaign.id,
-        status: 'degraded',
-        code: 'logo_reference_skipped',
-        detail: 'The authentic logo could not be attached or no capacity remained; the prompt forbids an invented symbol and uses the product name only.',
-      });
-    }
+  const attachedUsers = referenceImages.filter((reference) => reference.kind === 'user-reference').length;
+  if (attachedUsers < userReferences.length) {
+    logPipelineEvent({
+      source: 'hero',
+      campaignId: campaign.id,
+      generationId: generation.id,
+      status: 'degraded',
+      code: 'reference_image_skipped',
+      detail: `${userReferences.length - attachedUsers} of ${userReferences.length} new reference image(s) could not be attached; painting with the ordered remainder.`,
+    });
+  }
+  if (assets.logo_url && !hasLogo) {
+    logPipelineEvent({
+      source: 'hero',
+      campaignId: campaign.id,
+      generationId: generation.id,
+      status: 'degraded',
+      code: 'logo_reference_skipped',
+      detail: 'The authentic logo could not be attached or no capacity remained; the prompt forbids an invented symbol.',
+    });
+  }
+  if (!isEvent && screenshotUrl && !hasStyleBoard) {
+    logPipelineEvent({
+      source: 'hero',
+      campaignId: campaign.id,
+      generationId: generation.id,
+      status: 'degraded',
+      code: 'style_board_reference_skipped',
+      detail: 'The style board could not be attached or fell beyond the six-image painter limit.',
+    });
   }
   const prompt = buildPosterPrompt(
-    campaign as Record<string, unknown>,
+    generationSnapshot,
     style,
     hasLogo,
     hasStyleBoard,
+    ((parent as Record<string, unknown> | null)?.poster_layout ?? null) as PosterLayout | null,
+    !!previousPosterUrl,
   );
 
   // Request 2:3 explicitly — aspect ratio only, never provider pixel dimensions
@@ -179,9 +203,11 @@ export default async function (req: Request): Promise<Response> {
   try {
     imageSource = await aiImage(prompt, '2:3', referenceImages);
   } catch (e) {
+    await markGenerationFailed(client, generation.id, 'hero', e, 'image_generation_failed');
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'failed',
       code: 'image_generation_failed',
       detail: 'AI image generation failed',
@@ -197,11 +223,19 @@ export default async function (req: Request): Promise<Response> {
     const blob = await imageSourceToBlob(imageSource);
     const { data, error } = await client.storage
       .from('assets')
-      .upload(`poster/${campaign.id}/${crypto.randomUUID()}.png`, blob);
+      .upload(`poster/${campaign.id}/${generation.id}/${crypto.randomUUID()}.png`, blob);
     if (error || !data) {
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'hero',
+        error?.message ?? 'upload failed',
+        'poster_upload_failed',
+      );
       logPipelineEvent({
         source: 'hero',
         campaignId: campaign.id,
+        generationId: generation.id,
         status: 'failed',
         code: 'poster_upload_failed',
         detail: 'poster image upload failed',
@@ -212,9 +246,11 @@ export default async function (req: Request): Promise<Response> {
     url = data.url;
     key = data.key;
   } catch (e) {
+    await markGenerationFailed(client, generation.id, 'hero', e, 'poster_upload_failed');
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'failed',
       code: 'poster_upload_failed',
       detail: 'poster image upload threw',
@@ -223,29 +259,39 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: String(e) }, 500);
   }
 
-  const { error: upErr } = await client.database
-    .from('campaigns')
-    .update({ hero_image_url: url, hero_image_key: key })
-    .eq('id', campaign.id);
-  if (upErr) {
+  const { data: completedGeneration, error: completeError } = await client.database
+    .rpc('complete_poster_generation', {
+      p_generation_id: generation.id,
+      p_hero_image_url: url,
+      p_hero_image_key: key,
+    });
+  if (completeError) {
     await client.storage.from('assets').remove(key).catch(() => {});
+    await markGenerationFailed(
+      client,
+      generation.id,
+      'complete',
+      completeError,
+      'generation_completion_failed',
+    );
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'failed',
-      code: 'campaign_persist_failed',
-      detail: 'campaign persist failed after image generation',
-      error: upErr,
+      code: 'generation_completion_failed',
+      detail: 'atomic generation completion failed after image generation',
+      error: completeError,
     });
-    return jsonResponse({ error: upErr.message }, 500);
-  }
-  const previousKey = String((campaign as Record<string, unknown>).hero_image_key ?? '');
-  if (previousKey && previousKey !== key) {
-    await client.storage.from('assets').remove(previousKey).catch(() => {});
+    return jsonResponse({ error: completeError.message }, 500);
   }
 
   // Return the compiled text-to-image prompt for the generation loading UI.
-  return jsonResponse({ poster_image_url: url, prompt: { image: prompt } });
+  return jsonResponse({
+    poster_image_url: url,
+    generation: completedGeneration,
+    prompt: { image: prompt },
+  });
 }
 
 // Dispatch: events get the event promo prompt; products compile the
@@ -257,12 +303,20 @@ function buildPosterPrompt(
   style: string,
   hasLogo: boolean,
   hasStyleBoard = false,
+  parentLayout: PosterLayout | null = null,
+  hasPreviousPoster = false,
 ): string {
-  const context = String(c.reference_context ?? '').trim().slice(0, 4000);
+  const instruction = String(c.instruction ?? '').trim().slice(0, 4000);
   const referenceCount = Array.isArray(c.reference_images) ? c.reference_images.length : 0;
+  const parentContext = buildParentContextPrompt({
+    instruction,
+    parentLayout,
+    hasPreviousPoster,
+    refreshWebsite: c.generation_mode === 'website_refresh',
+  });
   const referenceBlock =
-    `\n\nUSER CREATIVE CONTEXT: ${context || '(none provided)'}` +
-    `\n${referenceCount} user-supplied supporting image(s) accompany this prompt. Use them for subject, product, and visual direction fidelity.`;
+    `\n\n${parentContext}` +
+    `\n${referenceCount} new supporting image(s) accompany this prompt. Use them only for the requested delta.`;
   if (style === 'event') return buildEventPrompt(c, hasLogo) + referenceBlock;
   const layout = c.poster_layout as PosterLayout | null;
   const ctx = {

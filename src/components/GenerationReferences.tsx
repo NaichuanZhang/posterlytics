@@ -23,6 +23,9 @@ interface Props {
   pendingFiles: File[]
   onPendingFilesChange: (files: File[]) => void
   disabled?: boolean
+  contextLabel?: string
+  contextPlaceholder?: string
+  contextHint?: string
 }
 
 export function GenerationReferences({
@@ -33,6 +36,9 @@ export function GenerationReferences({
   pendingFiles,
   onPendingFilesChange,
   disabled = false,
+  contextLabel = 'Creative context',
+  contextPlaceholder = 'Audience, campaign goals, visual direction, required details, or anything the generator should preserve.',
+  contextHint,
 }: Props) {
   const [rejections, setRejections] = useState<ReferenceFileRejection[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -110,17 +116,20 @@ export function GenerationReferences({
   return (
     <div className="generation-references">
       <div className="field">
-        <label htmlFor={contextId}>Creative context <span className="hint">(optional)</span></label>
+        <label htmlFor={contextId}>{contextLabel} <span className="hint">(optional)</span></label>
         <textarea
           id={contextId}
           className="textarea"
           value={context}
           maxLength={MAX_REFERENCE_CONTEXT_LENGTH}
           disabled={disabled}
-          placeholder="Audience, campaign goals, visual direction, required details, or anything the generator should preserve."
+          placeholder={contextPlaceholder}
           onChange={(event) => onContextChange(event.target.value)}
         />
-        <div className="hint">{context.length.toLocaleString()} / {MAX_REFERENCE_CONTEXT_LENGTH.toLocaleString()} characters</div>
+        <div className="hint">
+          {contextHint ? `${contextHint} ` : ''}
+          {context.length.toLocaleString()} / {MAX_REFERENCE_CONTEXT_LENGTH.toLocaleString()} characters
+        </div>
       </div>
 
       <div className="field" style={{ marginBottom: 0 }}>

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
+import { Download } from 'lucide-react'
 import type { Campaign, Placement } from '../lib/types'
 import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
 import { AiPoster } from './posters/AiPoster'
@@ -8,6 +9,7 @@ interface Props {
   campaign: Campaign
   placement: Placement
   label?: string // button text; defaults to 'Export A4 PNG'
+  versionNumber?: number
 }
 
 // Exports the poster with this placement's QR embedded as an A4 PNG
@@ -18,7 +20,12 @@ interface Props {
 // The AI hero lives on cross-origin Storage, which would taint the export canvas;
 // we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
 // imageSrcOverride (falling back to the hosted URL if the fetch fails).
-export function PosterExportButton({ campaign, placement, label = 'Export A4 PNG' }: Props) {
+export function PosterExportButton({
+  campaign,
+  placement,
+  label = 'Export A4 PNG',
+  versionNumber,
+}: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
@@ -58,10 +65,12 @@ export function PosterExportButton({ campaign, placement, label = 'Export A4 PNG
         height: POSTER_HEIGHT,
         pixelRatio: 2,
         cacheBust: true,
+        skipFonts: true,
       })
       const a = document.createElement('a')
       a.href = dataUrl
-      a.download = `${campaign.product_name.replace(/\W+/g, '-')}-${placement.label.replace(/\W+/g, '-')}-A4.png`
+      const version = versionNumber ? `-v${versionNumber}` : ''
+      a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}-${placement.label.replace(/\W+/g, '-')}-A4.png`
       a.click()
     } catch (e) {
       console.error('export failed', e)
@@ -75,6 +84,7 @@ export function PosterExportButton({ campaign, placement, label = 'Export A4 PNG
   return (
     <>
       <button className="btn secondary sm" onClick={handleExport} disabled={busy}>
+        <Download size={15} aria-hidden="true" />
         {busy ? 'Exporting…' : label}
       </button>
       {/* Offscreen full-size render target bound to this placement's QR. */}

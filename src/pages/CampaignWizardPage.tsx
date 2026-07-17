@@ -7,8 +7,12 @@ import { Layout } from '../components/Layout'
 import { insforge } from '../lib/insforge'
 import { uploadReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import { normalizeReferenceContext } from '../lib/references'
-import { getDeviceColorScheme } from '../lib/colorScheme'
-import type { PosterLayout, ReferenceImage } from '../lib/types'
+import {
+  createPosterGeneration,
+  failPosterGeneration,
+  invokeGenerationFunction,
+} from '../lib/generationApi'
+import type { PosterGenerationStage, PosterLayout } from '../lib/types'
 
 type Phase = 'form' | 'creating' | 'analyzing' | 'generating' | 'error'
 
@@ -42,9 +46,7 @@ export function CampaignWizardPage() {
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
   const [referenceContext, setReferenceContext] = useState('')
-  const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([])
   const [referenceFiles, setReferenceFiles] = useState<File[]>([])
-  const [removedReferenceImages, setRemovedReferenceImages] = useState<ReferenceImage[]>([])
 
   function patchStep(key: AgentStep['key'], patch: Partial<AgentStep>) {
     setSteps((previous) => previous.map((step) => (step.key === key ? { ...step, ...patch } : step)))
@@ -60,7 +62,6 @@ export function CampaignWizardPage() {
       tagline: tagline.trim() || null,
       cta_text: ctaText.trim() || 'Learn more',
       destination_url: destinationUrl.trim(),
-      reference_context: normalizeReferenceContext(referenceContext),
       status: 'draft',
     }
 
@@ -68,7 +69,7 @@ export function CampaignWizardPage() {
     if (!campaignId) {
       const { data, error: createError } = await insforge.database
         .from('campaigns')
-        .insert([{ ...values, user_id: user.id, reference_images: referenceImages }])
+        .insert([{ ...values, user_id: user.id }])
         .select('id')
         .single()
       if (createError || !data) throw new Error(createError?.message ?? 'Could not create campaign')
@@ -76,21 +77,11 @@ export function CampaignWizardPage() {
       setDraftId(campaignId)
     }
 
-    const uploaded = await uploadReferenceImages(user.id, campaignId, referenceFiles)
-    const nextImages = [...referenceImages, ...uploaded]
     const { error: updateError } = await insforge.database
       .from('campaigns')
-      .update({ ...values, reference_images: nextImages })
+      .update(values)
       .eq('id', campaignId)
-    if (updateError) {
-      await deleteReferenceImages(uploaded)
-      throw new Error(updateError.message)
-    }
-
-    await deleteReferenceImages(removedReferenceImages)
-    setReferenceImages(nextImages)
-    setRemovedReferenceImages([])
-    setReferenceFiles([])
+    if (updateError) throw new Error(updateError.message)
     return campaignId
   }
 
@@ -109,72 +100,64 @@ export function CampaignWizardPage() {
       return
     }
 
+    let uploaded = [] as Awaited<ReturnType<typeof uploadReferenceImages>>
+    let generationId: string
+    try {
+      uploaded = await uploadReferenceImages(user.id, campaignId, referenceFiles)
+      const generation = await createPosterGeneration({
+        campaignId,
+        instruction: normalizeReferenceContext(referenceContext),
+        referenceImages: uploaded,
+        refreshWebsite: true,
+      })
+      generationId = generation.id
+    } catch (cause) {
+      if (uploaded.length > 0) await deleteReferenceImages(uploaded)
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setPhase('error')
+      return
+    }
+
     setScreenshotUrl(null)
     setLayout(null)
     setSteps(STEP_DEFS.map((definition) => ({ ...definition, status: 'pending' as const })))
 
-    let generationFailed = false
-    setPhase('analyzing')
-    patchStep('analyze', { status: 'running' })
+    let failureStage: PosterGenerationStage = 'analyze'
     try {
-      const { data, error: analyzeError } = await insforge.functions.invoke('analyze', {
-        body: { campaignId, colorScheme: getDeviceColorScheme() },
-      })
-      if (analyzeError) throw new Error(analyzeError.message ?? 'Analysis failed')
-      const result = data as { screenshot_url?: string | null; prompt?: AgentPrompt } | null
-      if (result?.screenshot_url) setScreenshotUrl(result.screenshot_url)
-      patchStep('analyze', { status: 'done', prompt: result?.prompt })
-    } catch (cause) {
-      generationFailed = true
-      patchStep('analyze', {
-        status: 'error',
-        error: cause instanceof Error ? cause.message : String(cause),
-      })
-    }
+      setPhase('analyzing')
+      patchStep('analyze', { status: 'running' })
+      const analyzeData = await invokeGenerationFunction('analyze', campaignId, generationId)
+      const analyzeResult = analyzeData as { screenshot_url?: string | null; prompt?: AgentPrompt } | null
+      if (analyzeResult?.screenshot_url) setScreenshotUrl(analyzeResult.screenshot_url)
+      patchStep('analyze', { status: 'done', prompt: analyzeResult?.prompt })
 
-    setPhase('generating')
-    patchStep('designer', { status: 'running' })
-    try {
-      const { data, error: designerError } = await insforge.functions.invoke('designer', {
-        body: { campaignId },
-      })
-      if (designerError) throw new Error(designerError.message ?? 'Layout design failed')
-      const result = data as { prompt?: AgentPrompt; poster_layout?: PosterLayout } | null
-      if (result?.poster_layout) setLayout(result.poster_layout)
-      patchStep('designer', { status: 'done', prompt: result?.prompt })
-    } catch (cause) {
-      generationFailed = true
-      patchStep('designer', {
-        status: 'error',
-        error: cause instanceof Error ? cause.message : String(cause),
-      })
-    }
+      failureStage = 'designer'
+      setPhase('generating')
+      patchStep('designer', { status: 'running' })
+      const designerData = await invokeGenerationFunction('designer', campaignId, generationId)
+      const designerResult = designerData as { prompt?: AgentPrompt; poster_layout?: PosterLayout } | null
+      if (designerResult?.poster_layout) setLayout(designerResult.poster_layout)
+      patchStep('designer', { status: 'done', prompt: designerResult?.prompt })
 
-    patchStep('hero', { status: 'running' })
-    try {
-      const { data, error: heroError } = await insforge.functions.invoke('hero', {
-        body: { campaignId },
-      })
-      if (heroError) generationFailed = true
+      failureStage = 'hero'
+      patchStep('hero', { status: 'running' })
+      const heroData = await invokeGenerationFunction('hero', campaignId, generationId)
       patchStep('hero', {
-        status: heroError ? 'error' : 'done',
-        error: heroError ? (heroError.message ?? 'Poster generation failed') : undefined,
-        prompt: (data as { prompt?: AgentPrompt } | null)?.prompt,
+        status: 'done',
+        prompt: (heroData as { prompt?: AgentPrompt } | null)?.prompt,
       })
     } catch (cause) {
-      generationFailed = true
-      patchStep('hero', {
+      await failPosterGeneration(generationId, failureStage, cause)
+      patchStep(failureStage === 'analyze' ? 'analyze' : failureStage === 'designer' ? 'designer' : 'hero', {
         status: 'error',
         error: cause instanceof Error ? cause.message : String(cause),
       })
-    }
-
-    if (generationFailed) {
       setError('Generation did not complete. Review the inputs and retry this same draft.')
       setPhase('error')
-    } else {
-      navigate(`/campaigns/${campaignId}`)
+      return
     }
+
+    navigate(`/campaigns/${campaignId}`)
   }
 
   const working = phase === 'creating' || phase === 'analyzing' || phase === 'generating'
@@ -264,11 +247,8 @@ export function CampaignWizardPage() {
             <GenerationReferences
               context={referenceContext}
               onContextChange={setReferenceContext}
-              existingImages={referenceImages}
-              onRemoveExisting={(image) => {
-                setReferenceImages((images) => images.filter((item) => item.key !== image.key))
-                setRemovedReferenceImages((images) => [...images, image])
-              }}
+              existingImages={[]}
+              onRemoveExisting={() => {}}
               pendingFiles={referenceFiles}
               onPendingFilesChange={setReferenceFiles}
             />

@@ -66,6 +66,18 @@ export interface ReferenceImage {
   size_bytes: number
 }
 
+export type PosterGenerationStatus =
+  | 'created'
+  | 'analyzing'
+  | 'designing'
+  | 'painting'
+  | 'ready'
+  | 'failed'
+
+export type PosterGenerationMode = 'iteration' | 'website_refresh'
+
+export type PosterGenerationStage = 'analyze' | 'designer' | 'hero' | 'complete'
+
 // Designer mode: an LLM-designed bespoke poster layout (produced by the
 // `designer` edge function) that `hero` compiles into the image prompt — instead
 // of one of the two hardcoded template prompts. Mirror of `PosterLayout` in
@@ -228,8 +240,43 @@ export interface Campaign {
   // repurposed (event URL / title / Luma RSVP target) and event_details is set.
   scenario: CampaignScenario
   event_details: EventDetails | null
+  current_generation_id: string | null
   status: CampaignStatus
   created_at: string
+}
+
+export interface PosterGeneration {
+  id: string
+  campaign_id: string
+  user_id: string
+  parent_generation_id: string | null
+  version_number: number | null
+  status: PosterGenerationStatus
+  generation_mode: PosterGenerationMode
+  instruction: string | null
+  reference_images: ReferenceImage[]
+  scenario: CampaignScenario
+  event_details: EventDetails | null
+  style_profile: StyleProfile | null
+  poster_copy: PosterCopy | null
+  poster_content: PosterContent | null
+  brand_assets: BrandAssets | null
+  brand_essence: string | null
+  poster_spec: PosterSpec | null
+  design_tokens: DesignTokens | null
+  screenshot_url: string | null
+  screenshot_key: string | null
+  poster_layout: PosterLayout | null
+  design_status: DesignStatus | null
+  hero_image_url: string | null
+  hero_image_key: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+  failed_at: string | null
+  failure_stage: PosterGenerationStage | null
+  failure_code: string | null
+  failure_message: string | null
 }
 
 export interface Placement {

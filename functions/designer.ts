@@ -1,17 +1,20 @@
 import {
   CORS,
   aiChat,
+  buildParentContextPrompt,
   errorDetails,
   ensurePosterLayoutZones,
   extractJson,
   inlineImageReferences,
   jsonResponse,
   createUserClient,
+  markGenerationFailed,
   normalizePosterLayout,
   normalizeStyleProfile,
   logPipelineEvent,
   userContentWithImageReferences,
   type DesignTokens,
+  type PosterLayout,
   type TypedImageReference,
 } from './_shared.ts';
 
@@ -21,9 +24,8 @@ import {
 // design a BESPOKE poster layout as structured JSON (composition, mood, art
 // style, palette roles, top→lower zones) — not one of the two hardcoded
 // templates. `hero` then compiles that layout into the text-to-image prompt via
-// the pure compileLayoutPrompt(). Persists `poster_layout` + `design_status`.
-// Auth-scoped. Best-effort: on failure it records design_status='failed' and
-// hero falls back to a template prompt so the pipeline never hard-stops.
+// the pure compileLayoutPrompt(). The candidate layout is stored only on the
+// active generation; completion later projects it onto the campaign atomically.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -33,24 +35,57 @@ export default async function (req: Request): Promise<Response> {
   const { data: userData } = await client.auth.getCurrentUser();
   if (!userData?.user?.id) return jsonResponse({ error: 'Unauthorized' }, 401);
 
-  let body: { campaignId?: string };
+  let body: { campaignId?: string; generationId?: string };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'bad json' }, 400);
   }
-  if (!body.campaignId) return jsonResponse({ error: 'missing campaignId' }, 400);
+  if (!body.campaignId || !body.generationId) {
+    return jsonResponse({ error: 'missing campaignId or generationId' }, 400);
+  }
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, reference_context, reference_images')
+    .select('id, product_name, tagline')
     .eq('id', body.campaignId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
-  await client.database.from('campaigns').update({ design_status: 'generating' }).eq('id', campaign.id);
+  const { data: generation, error: generationError } = await client.database
+    .from('poster_generations')
+    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, poster_layout')
+    .eq('id', body.generationId)
+    .eq('campaign_id', campaign.id)
+    .maybeSingle();
+  if (generationError || !generation) {
+    return jsonResponse({ error: 'poster generation not found' }, 404);
+  }
 
-  const c = campaign as Record<string, unknown>;
+  const parentId = String((generation as Record<string, unknown>).parent_generation_id ?? '');
+  const { data: parent } = parentId
+    ? await client.database
+        .from('poster_generations')
+        .select('id, poster_layout, hero_image_url')
+        .eq('id', parentId)
+        .eq('campaign_id', campaign.id)
+        .eq('status', 'ready')
+        .maybeSingle()
+    : { data: null };
+
+  const { error: stageError } = await client.database
+    .from('poster_generations')
+    .update({ status: 'designing', design_status: 'generating' })
+    .eq('id', generation.id);
+  if (stageError) {
+    await markGenerationFailed(client, generation.id, 'designer', stageError, 'stage_transition_failed');
+    return jsonResponse({ error: stageError.message }, 409);
+  }
+
+  const c = {
+    ...(generation as Record<string, unknown>),
+    ...(campaign as Record<string, unknown>),
+  };
   const product = String(c.product_name ?? 'the product');
   const tagline = String(c.tagline ?? '');
   const essence = String(c.brand_essence ?? '');
@@ -62,7 +97,7 @@ export default async function (req: Request): Promise<Response> {
   const assets = (c.brand_assets ?? {}) as { logo_url?: string; primary_image_url?: string; images?: Array<{ url: string }> };
   const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
   const hasLogo = !!assets.logo_url;
-  const referenceContext = String(c.reference_context ?? '').trim().slice(0, 4000);
+  const instruction = String(c.instruction ?? '').trim().slice(0, 4000);
   const referenceUrls = Array.isArray(c.reference_images)
     ? (c.reference_images as Array<Record<string, unknown>>)
         .map((image) => typeof image.url === 'string' ? image.url : '')
@@ -70,6 +105,13 @@ export default async function (req: Request): Promise<Response> {
         .slice(0, 5)
     : [];
   const visualCandidates: TypedImageReference[] = [
+    ...(typeof (parent as Record<string, unknown> | null)?.hero_image_url === 'string'
+      ? [{
+          kind: 'previous-poster' as const,
+          url: String((parent as Record<string, unknown>).hero_image_url),
+          purpose: 'The current poster to edit. Preserve every visual choice not explicitly changed by the user request.',
+        }]
+      : []),
     ...(typeof c.screenshot_url === 'string' && c.screenshot_url
       ? [{
           kind: 'style-board' as const,
@@ -85,7 +127,7 @@ export default async function (req: Request): Promise<Response> {
   ];
   const visualReferences = await inlineImageReferences(visualCandidates, {
     maxImages: 6,
-    maxCandidates: 6,
+    maxCandidates: 7,
   });
   if (
     visualCandidates.some((reference) => reference.kind === 'style-board') &&
@@ -94,6 +136,7 @@ export default async function (req: Request): Promise<Response> {
     logPipelineEvent({
       source: 'designer',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'degraded',
       code: 'style_board_reference_skipped',
       detail: 'Stored style board could not be inlined for the layout designer.',
@@ -106,6 +149,7 @@ export default async function (req: Request): Promise<Response> {
     logPipelineEvent({
       source: 'designer',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'degraded',
       code: 'reference_image_skipped',
       detail: `${referenceUrls.length - attachedUserReferences} of ${referenceUrls.length} user reference image(s) could not be inlined for the layout designer.`,
@@ -138,14 +182,21 @@ export default async function (req: Request): Promise<Response> {
       emphasis: 'med' as const,
     },
   ];
+  const parentLayout = ((parent as Record<string, unknown> | null)?.poster_layout ?? null) as PosterLayout | null;
+  const parentContext = buildParentContextPrompt({
+    instruction,
+    parentLayout,
+    hasPreviousPoster: !!(parent as Record<string, unknown> | null)?.hero_image_url,
+    refreshWebsite: c.generation_mode === 'website_refresh',
+  });
 
   const sys =
-    'You are an award-winning poster art director. Design a BESPOKE PORTRAIT 2:3 product poster from observed ' +
-    'source evidence, not category assumptions or a generic template. The first attached image, when present, is a ' +
-    'multi-frame source STYLE BOARD and is the PRIMARY visual authority. Translate its palette proportions, type ' +
-    'character, imagery, lighting, motifs, hierarchy, and density into a poster composition without copying its ' +
-    'navigation or controls. Never pick a medium from a category stereotype; for example, a game is not automatically ' +
-    'risograph. Output STRICT JSON only (no prose, no code fences) ' +
+    'You are an award-winning poster art director creating the next version of a PORTRAIT 2:3 product poster. ' +
+    'Follow the iteration contract exactly: preserve the parent composition and every unspecified choice, changing ' +
+    'only what the user requested. Reference-purpose labels identify the previous poster, source style board, and ' +
+    'supporting images. Use observed evidence rather than category assumptions or a generic template. Never pick a ' +
+    'medium from a category stereotype; for example, a game is not automatically risograph. Output STRICT JSON only ' +
+    '(no prose, no code fences) ' +
     'matching this schema:\n' +
     '{"composition":"one phrase describing the overall composition (e.g. asymmetric, oversized hero top-left, diagonal flow)",' +
     '"mood":"2-4 words (e.g. editorial, calm, premium)",' +
@@ -172,6 +223,7 @@ export default async function (req: Request): Promise<Response> {
       : '');
 
   const user =
+    `${parentContext}\n\n` +
     `PRODUCT: ${product}\n` +
     `TAGLINE: ${tagline || '(none)'}\n` +
     `BRAND ESSENCE (word-portrait for the art director): ${essence || '(none)'}\n` +
@@ -192,8 +244,7 @@ export default async function (req: Request): Promise<Response> {
     `\nASSETS:\n` +
     (hasLogo ? `LOGO: ${assets.logo_url} (the real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (none found — use the product name as the brand mark)\n') +
     (heroImg ? `PRODUCT IMAGE: ${heroImg}\n` : '') +
-    `CREATIVE CONTEXT: ${referenceContext || '(none provided)'}\n` +
-    `ATTACHED VISUAL EVIDENCE: ${visualReferences.length} image(s); style board first, then user references.\n` +
+    `ATTACHED VISUAL EVIDENCE: ${visualReferences.length} labeled image(s), including the previous poster when available.\n` +
     `\nDesign the poster layout JSON now (no CTA zone — the QR footer is the action).`;
   const userContent = userContentWithImageReferences(user, visualReferences, 6);
 
@@ -219,13 +270,11 @@ export default async function (req: Request): Promise<Response> {
         fallbackZones,
       );
     } catch (e) {
-      await client.database
-        .from('campaigns')
-        .update({ design_status: 'failed' })
-        .eq('id', campaign.id);
+      await markGenerationFailed(client, generation.id, 'designer', e, 'layout_ai_failed');
       logPipelineEvent({
         source: 'designer',
         campaignId: campaign.id,
+        generationId: generation.id,
         status: 'failed',
         code: 'layout_ai_failed',
         detail: 'layout design AI chat failed twice',
@@ -237,17 +286,18 @@ export default async function (req: Request): Promise<Response> {
   }
 
   const { error: upErr } = await client.database
-    .from('campaigns')
+    .from('poster_generations')
     .update({ poster_layout: layout, design_status: 'ready' })
-    .eq('id', campaign.id);
+    .eq('id', generation.id);
   if (upErr) {
-    await client.database.from('campaigns').update({ design_status: 'failed' }).eq('id', campaign.id);
+    await markGenerationFailed(client, generation.id, 'designer', upErr, 'generation_persist_failed');
     logPipelineEvent({
       source: 'designer',
       campaignId: campaign.id,
+      generationId: generation.id,
       status: 'failed',
-      code: 'campaign_persist_failed',
-      detail: 'campaign persist failed after layout design',
+      code: 'generation_persist_failed',
+      detail: 'generation persist failed after layout design',
       error: upErr,
     });
     return jsonResponse({ error: upErr.message }, 500);

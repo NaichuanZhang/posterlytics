@@ -553,13 +553,17 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
   grid-template-areas:
     "head   head"
     "banner banner"
-    "rail   canvas";
+    "rail   canvas"
+    "rail   versions";
   column-gap: 28px;
   row-gap: 20px;
   align-items: start;
 }
 .ed-head   { grid-area: head; }
 .ed-banner { grid-area: banner; margin: 0; }
+.ed-banner { border-color: var(--accent); }
+.ed-banner strong { color: var(--accent-ink); }
+.ed-banner-row { gap: 12px; align-items: center; }
 
 /* Left rail: the existing control cards, tightened, sticky beside the canvas. */
 .ed-rail {
@@ -578,13 +582,16 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
 .ed-rail .card { padding: 18px; }
 .ed-rail .card .btn { width: 100%; }       /* full-width actions read as an inspector */
 .ed-rail .card .row.wrap { gap: 8px; }
+.ed-rail .card h3 { margin: 0 0 14px; }
 
 /* Canvas: one stable poster preview centered in the available workspace. */
 .ed-canvas {
   grid-area: canvas;
   min-width: 0;
+  width: min(100%, 560px);
   display: grid;
-  grid-template-columns: minmax(0, 560px);
+  grid-template-columns: minmax(0, 1fr);
+  justify-self: center;
   justify-content: center;
   gap: 20px;
   align-items: start;
@@ -599,6 +606,220 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
   padding: 16px;
   width: 100%;
 }
+.preview-label { font-size: 0.8rem; font-weight: 600; }
+.preview-message { padding: 24px; text-align: center; }
+
+/* Version history sits directly below the canvas, outside the inspector. */
+.ed-versions {
+  grid-area: versions;
+  min-width: 0;
+  width: min(100%, 720px);
+  justify-self: center;
+}
+.version-history {
+  min-width: 0;
+  padding-top: 2px;
+}
+.version-history-head,
+.version-details-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.version-history-head { margin-bottom: 10px; }
+.version-history-head h2,
+.composer-title h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+.version-history-head > span { font-size: 0.78rem; }
+.version-empty { margin: 0; padding: 14px 0; font-size: 0.86rem; }
+.version-strip {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+.version-tile {
+  appearance: none;
+  position: relative;
+  display: grid;
+  flex: 0 0 154px;
+  grid-template-rows: 112px auto;
+  min-width: 154px;
+  padding: 0;
+  overflow: hidden;
+  border: var(--line) solid var(--hairline);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: border-color 0.16s var(--ease), box-shadow 0.16s var(--ease);
+}
+.version-tile:hover { border-color: var(--ink-line); }
+.version-tile.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.version-tile > img {
+  display: block;
+  width: 100%;
+  height: 112px;
+  object-fit: cover;
+  background: var(--panel-2);
+}
+.version-tile-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 9px 10px 10px;
+}
+.version-tile-copy strong { font-size: 0.8rem; line-height: 1.3; }
+.version-tile-copy > span { color: var(--ink-faint); font-size: 0.68rem; white-space: nowrap; }
+.version-current {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--good);
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.version-details {
+  padding: 16px 0 2px;
+  border-top: var(--line) solid var(--hairline);
+}
+.version-details-head > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+.version-details-head > div:first-child > span { font-size: 0.75rem; }
+.version-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.version-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 14px 0 0;
+  border-top: var(--line) solid var(--hairline);
+}
+.version-facts > div {
+  min-width: 0;
+  padding: 10px 12px 10px 0;
+  border-bottom: var(--line) solid var(--hairline);
+}
+.version-facts dt {
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.version-facts dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+}
+.version-references { margin-top: 12px; }
+.version-references > span { display: block; margin-bottom: 6px; font-size: 0.72rem; }
+.version-references > div { display: flex; gap: 7px; overflow-x: auto; }
+.version-references img {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border: var(--line) solid var(--hairline);
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+/* Iteration composer and compact stage state. */
+.composer-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  color: var(--accent-ink);
+}
+.composer-title h2 { color: var(--ink); }
+.generation-composer .textarea { min-height: 104px; }
+.generation-refresh {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 14px 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.generation-refresh input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.generation-refresh:has(input:disabled) { cursor: not-allowed; opacity: 0.6; }
+.composer-submit { margin-top: 2px; }
+.generation-stage-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 14px;
+}
+.generation-stage {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px;
+  border: var(--line) solid var(--hairline);
+  border-radius: 6px;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.generation-stage.is-running { border-color: var(--accent); color: var(--accent-ink); }
+.generation-stage.is-done { color: var(--good); }
+.generation-stage.is-error { border-color: var(--bad); color: var(--bad); }
+.generation-stage.is-skipped { opacity: 0.6; }
+.generation-stage-spinner { animation: spin 0.7s linear infinite; }
+.composer-error {
+  margin: 10px 0 0;
+  color: var(--bad);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.editor-action-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.danger-zone {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: var(--line) solid var(--hairline);
+}
+.danger-zone p { margin: 0 0 10px; font-size: 0.82rem; }
 
 /* Below ~1080px a fixed 340px rail beside the preview starves the
    canvas, so collapse the WHOLE editor to one column early: previews on top,
@@ -608,16 +829,15 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
   .container:has(> .poster-editor) { width: min(100% - 48px, 760px); }
   .poster-editor {
     grid-template-columns: 1fr;
-    grid-template-areas: "head" "banner" "canvas" "rail";
+    grid-template-areas: "head" "banner" "canvas" "versions" "rail";
     row-gap: 18px;
   }
   .ed-rail { position: static; max-height: none; overflow: visible; }
-  .ed-canvas { grid-template-columns: minmax(0, 560px); }
   .ed-preview { width: 100%; max-width: 560px; margin-inline: auto; }
+  .ed-versions { width: min(100%, 560px); }
 }
 
-/* Phones: tighten the generous desktop spacing so the stacked editor isn't a
-   sea of whitespace. Smaller row gaps + slimmer card padding. */
+/* Phones: tighten the stacked editor spacing. */
 @media (max-width: 560px) {
   .poster-editor { row-gap: 12px; }
   .ed-canvas { gap: 12px; }
@@ -625,6 +845,12 @@ table.stats tr.winner td:first-child { box-shadow: inset 3px 0 0 var(--accent); 
   .ed-rail { gap: 12px; }
   .ed-rail .card { padding: 16px; }
   .ed-banner.card { padding: 16px; }
+  .ed-banner-row { align-items: flex-start; flex-direction: column; }
+  .ed-banner-row .btn { width: 100%; }
+  .version-details-head { align-items: flex-start; flex-direction: column; }
+  .version-actions { width: 100%; display: grid; grid-template-columns: 1fr; }
+  .version-actions .btn { width: 100%; }
+  .version-facts { grid-template-columns: 1fr; }
 }
 
 /* ---------- Mobile: sidebar becomes top bar ---------- */
