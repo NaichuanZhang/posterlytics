@@ -257,7 +257,7 @@ function ReferenceTile({
 }) {
   return (
     <div className="reference-tile">
-      <img src={src} alt="" />
+      <img src={src} alt={name} />
       <span title={name}>{name}</span>
       <button
         type="button"

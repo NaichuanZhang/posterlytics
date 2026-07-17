@@ -1,13 +1,11 @@
-import { Check, RotateCcw } from 'lucide-react'
-import type { Campaign, Placement, PosterGeneration } from '../lib/types'
-import { PosterExportButton } from './PosterExportButton'
+import { Check, History, RotateCcw } from 'lucide-react'
+import type { PosterGeneration } from '../lib/types'
+import { Skeleton } from './ui/Feedback'
 
 interface Props {
   generations: PosterGeneration[]
   selectedGeneration: PosterGeneration | null
   currentGenerationId: string | null
-  previewCampaign: Campaign
-  placement: Placement | null
   loading: boolean
   error: string | null
   activating: boolean
@@ -19,8 +17,6 @@ export function PosterVersionHistory({
   generations,
   selectedGeneration,
   currentGenerationId,
-  previewCampaign,
-  placement,
   loading,
   error,
   activating,
@@ -29,19 +25,32 @@ export function PosterVersionHistory({
 }: Props) {
   return (
     <section className="version-history" aria-labelledby="versions-heading">
-      <div className="version-history-head">
-        <h2 id="versions-heading">Versions</h2>
-        <span className="muted">{generations.length} saved</span>
+      <div className="panel-heading">
+        <div>
+          <History size={16} aria-hidden="true" />
+          <h2 id="versions-heading">Versions</h2>
+        </div>
+        <span>{generations.length}</span>
       </div>
 
       {loading ? (
-        <p className="muted version-empty">Loading versions...</p>
+        <div className="version-loading" aria-label="Loading versions" aria-busy="true">
+          {Array.from({ length: 3 }, (_, index) => (
+            <div key={index}>
+              <Skeleton className="version-skeleton-image" />
+              <span>
+                <Skeleton className="skeleton-line" />
+                <Skeleton className="skeleton-line skeleton-line-short" />
+              </span>
+            </div>
+          ))}
+        </div>
       ) : error ? (
-        <p className="error-text version-empty">{error}</p>
+        <p className="panel-error" role="alert">{error}</p>
       ) : generations.length === 0 ? (
-        <p className="muted version-empty">No completed version yet.</p>
+        <p className="panel-empty">The first completed poster will appear here.</p>
       ) : (
-        <div className="version-strip" aria-label="Poster versions">
+        <div className="version-list" aria-label="Poster versions">
           {generations.map((generation) => {
             const selected = selectedGeneration?.id === generation.id
             const current = currentGenerationId === generation.id
@@ -49,21 +58,28 @@ export function PosterVersionHistory({
               <button
                 key={generation.id}
                 type="button"
-                className={`version-tile${selected ? ' is-selected' : ''}`}
+                className={`version-row${selected ? ' is-selected' : ''}`}
                 aria-pressed={selected}
                 onClick={() => onSelect(generation.id)}
               >
-                <img
-                  src={generation.hero_image_url ?? ''}
-                  alt={`Version ${generation.version_number} poster thumbnail`}
-                />
-                <span className="version-tile-copy">
-                  <strong>Version {generation.version_number}</strong>
-                  <span>{formatVersionDate(generation.completed_at ?? generation.created_at)}</span>
+                {generation.hero_image_url ? (
+                  <img
+                    src={generation.hero_image_url}
+                    alt={`Version ${generation.version_number ?? ''} poster thumbnail`}
+                  />
+                ) : (
+                  <span className="version-image-placeholder" aria-hidden="true" />
+                )}
+                <span className="version-row-copy">
+                  <strong>Version {generation.version_number ?? '-'}</strong>
+                  <time dateTime={generation.completed_at ?? generation.created_at}>
+                    {formatVersionDate(generation.completed_at ?? generation.created_at)}
+                  </time>
+                  <span>{generation.generation_mode === 'website_refresh' ? 'Site refreshed' : 'Iteration'}</span>
                 </span>
                 {current && (
-                  <span className="version-current">
-                    <Check size={12} aria-hidden="true" /> Current
+                  <span className="version-current" aria-label="Current version">
+                    <Check size={12} aria-hidden="true" />
                   </span>
                 )}
               </button>
@@ -73,71 +89,31 @@ export function PosterVersionHistory({
       )}
 
       {selectedGeneration && (
-        <div className="version-details">
-          <div className="version-details-head">
-            <div>
-              <strong>Version {selectedGeneration.version_number}</strong>
-              <span className="muted">
-                {selectedGeneration.generation_mode === 'website_refresh'
-                  ? 'Website refreshed'
-                  : 'Current brand snapshot'}
-              </span>
-            </div>
-            <div className="version-actions">
-              <button
-                type="button"
-                className="btn secondary sm"
-                disabled={activating || currentGenerationId === selectedGeneration.id}
-                onClick={() => onActivate(selectedGeneration.id)}
-              >
-                <RotateCcw size={15} aria-hidden="true" />
-                {currentGenerationId === selectedGeneration.id
-                  ? 'Current version'
-                  : activating
-                    ? 'Restoring...'
-                    : 'Use this version'}
-              </button>
-              {placement && (
-                <PosterExportButton
-                  campaign={previewCampaign}
-                  placement={placement}
-                  label="Download this version"
-                  versionNumber={selectedGeneration.version_number ?? undefined}
-                />
-              )}
-            </div>
-          </div>
-
-          <dl className="version-facts">
-            <VersionFact label="Instruction" value={selectedGeneration.instruction || 'Initial poster'} />
-            <VersionFact label="Composition" value={selectedGeneration.poster_layout?.composition} />
-            <VersionFact label="Mood" value={selectedGeneration.poster_layout?.mood} />
-            <VersionFact label="Art style" value={selectedGeneration.poster_layout?.art_style} />
-            <VersionFact label="Tone" value={selectedGeneration.style_profile?.tone} />
-          </dl>
-
-          {selectedGeneration.reference_images.length > 0 && (
-            <div className="version-references">
-              <span className="muted">Supporting images</span>
-              <div>
-                {selectedGeneration.reference_images.map((image) => (
-                  <img key={image.key} src={image.url} alt={image.name} title={image.name} />
-                ))}
-              </div>
-            </div>
-          )}
+        <div className="selected-version">
+          <span>Selected</span>
+          <strong>Version {selectedGeneration.version_number ?? '-'}</strong>
+          <p>{selectedGeneration.instruction || 'Initial website-based poster'}</p>
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            disabled={activating || currentGenerationId === selectedGeneration.id}
+            onClick={() => onActivate(selectedGeneration.id)}
+          >
+            {currentGenerationId === selectedGeneration.id ? (
+              <>
+                <Check size={14} aria-hidden="true" />
+                Current version
+              </>
+            ) : (
+              <>
+                <RotateCcw size={14} aria-hidden="true" />
+                {activating ? 'Restoring' : 'Use this version'}
+              </>
+            )}
+          </button>
         </div>
       )}
     </section>
-  )
-}
-
-function VersionFact({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value || '-'}</dd>
-    </div>
   )
 }
 

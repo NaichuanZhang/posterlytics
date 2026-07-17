@@ -37,12 +37,12 @@ interface Props {
 // real prompt as it finishes. Purely presentational — the wizard owns the state.
 export function GenerationProgress({ headline, screenshotUrl, steps, layout }: Props) {
   return (
-    <div className="card genprog">
+    <section className="generation-workspace genprog" aria-live="polite">
       <div className="genprog-head">
         <Spinner />
         <div>
           <p className="genprog-title">{headline}</p>
-          <p className="muted genprog-sub">Watch each agent work — this takes ~10–25 seconds.</p>
+          <p className="muted genprog-sub">The style board and poster update as each stage completes.</p>
         </div>
       </div>
 
@@ -65,12 +65,12 @@ export function GenerationProgress({ headline, screenshotUrl, steps, layout }: P
       {layout && (
         <div className="genprog-layout">
           <p className="muted genprog-sub" style={{ marginBottom: 12 }}>
-            Bespoke layout designed — painting it into the poster now.
+            Layout complete. Painting the poster now.
           </p>
           <LayoutPreview layout={layout} width={300} />
         </div>
       )}
-    </div>
+    </section>
   )
 }
 

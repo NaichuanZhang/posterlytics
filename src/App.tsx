@@ -8,6 +8,7 @@ import { CampaignWizardPage } from './pages/CampaignWizardPage'
 import { PosterEditorPage } from './pages/PosterEditorPage'
 import { PlacementsPage } from './pages/PlacementsPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
+import { ToastProvider } from './components/ui/Toast'
 
 function HomeRoute() {
   const { user, loading } = useAuth()
@@ -18,16 +19,18 @@ function HomeRoute() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<HomeRoute />} />
-          <Route path="/signin" element={<SignInPage />} />
-          <Route path="/campaigns/new" element={<RequireAuth><CampaignWizardPage /></RequireAuth>} />
-          <Route path="/campaigns/:id" element={<RequireAuth><PosterEditorPage /></RequireAuth>} />
-          <Route path="/campaigns/:id/placements" element={<RequireAuth><PlacementsPage /></RequireAuth>} />
-          <Route path="/campaigns/:id/analytics" element={<RequireAuth><AnalyticsPage /></RequireAuth>} />
-        </Routes>
-      </BrowserRouter>
+      <ToastProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<HomeRoute />} />
+            <Route path="/signin" element={<SignInPage />} />
+            <Route path="/campaigns/new" element={<RequireAuth><CampaignWizardPage /></RequireAuth>} />
+            <Route path="/campaigns/:id" element={<RequireAuth><PosterEditorPage /></RequireAuth>} />
+            <Route path="/campaigns/:id/placements" element={<RequireAuth><PlacementsPage /></RequireAuth>} />
+            <Route path="/campaigns/:id/analytics" element={<RequireAuth><AnalyticsPage /></RequireAuth>} />
+          </Routes>
+        </BrowserRouter>
+      </ToastProvider>
     </AuthProvider>
   )
 }

@@ -40,9 +40,11 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
   )
 
   const removePlacement = useCallback(
-    async (id: string) => {
-      await insforge.database.from('placements').delete().eq('id', id)
+    async (id: string): Promise<string | null> => {
+      const { error } = await insforge.database.from('placements').delete().eq('id', id)
+      if (error) return error.message
       await reload()
+      return null
     },
     [reload],
   )

@@ -1,110 +1,211 @@
+import { Copy, MapPin, Plus, Trash2, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
+import { useAuth } from '../auth/AuthProvider'
+import { AppShell } from '../components/AppShell'
+import { PosterExportButton } from '../components/PosterExportButton'
+import { QrCode } from '../components/QrCode'
+import { EmptyState, InlineNotice } from '../components/ui/Feedback'
+import { Spinner } from '../components/ui/Spinner'
+import { useToast } from '../components/ui/Toast'
 import { useCampaign } from '../hooks/useCampaign'
 import { usePlacements } from '../hooks/usePlacements'
-import { useAuth } from '../auth/AuthProvider'
-import { Layout } from '../components/Layout'
-import { Spinner } from '../components/ui/Spinner'
-import { QrCode } from '../components/QrCode'
-import { PosterExportButton } from '../components/PosterExportButton'
 import { buildViewUrl } from '../lib/viewUrl'
 
 export function PlacementsPage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
+  const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
   const { placements, addPlacement, removePlacement } = usePlacements(id, user?.id)
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
-  async function handleAdd(e: FormEvent) {
-    e.preventDefault()
+  async function handleAdd(event: FormEvent) {
+    event.preventDefault()
     if (!label.trim()) return
     setBusy(true)
     setError(null)
-    const err = await addPlacement(label.trim())
-    if (err) setError(err)
-    else setLabel('')
+    const placementError = await addPlacement(label.trim())
+    if (placementError) {
+      setError(placementError)
+      notify('Placement could not be added.', 'error')
+    } else {
+      setLabel('')
+      notify('Placement added.', 'success')
+    }
     setBusy(false)
   }
 
   function copyLink(code: string) {
-    navigator.clipboard?.writeText(buildViewUrl(code))
-    setCopied(code)
-    setTimeout(() => setCopied(null), 1500)
+    void navigator.clipboard?.writeText(buildViewUrl(code))
+    notify('Tracked link copied.', 'success')
   }
 
-  if (loading) return <Layout><Spinner full /></Layout>
-  if (!campaign) return <Layout><p className="muted">Campaign not found.</p></Layout>
+  async function deletePlacement(placementId: string) {
+    setDeletingId(placementId)
+    setError(null)
+    const placementError = await removePlacement(placementId)
+    if (placementError) {
+      setError(placementError)
+      notify('Placement could not be deleted.', 'error')
+    } else {
+      notify('Placement deleted.', 'success')
+    }
+    setDeletingId(null)
+    setConfirmingId(null)
+  }
+
+  if (loading) {
+    return (
+      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Placements' }]}>
+        <Spinner full />
+      </AppShell>
+    )
+  }
+  if (!campaign) {
+    return (
+      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Not found' }]}>
+        <InlineNotice tone="error">Campaign not found.</InlineNotice>
+      </AppShell>
+    )
+  }
 
   return (
-    <Layout>
-      <h1 className="page-title">Placements — {campaign.product_name}</h1>
-      <p className="page-sub">
-        <Link to={`/campaigns/${campaign.id}`}>← Back to poster</Link> · Each placement mints a unique QR + link so
-        you can compare visits across channels.
-      </p>
+    <AppShell
+      breadcrumbs={[
+        { label: 'Campaigns', to: '/' },
+        { label: campaign.product_name, to: `/campaigns/${campaign.id}` },
+        { label: 'Placements' },
+      ]}
+      campaign={campaign}
+      activeSection="placements"
+    >
+      <header className="page-heading page-heading-compact">
+        <div>
+          <h1>Placements</h1>
+          <p>Each placement has a distinct tracked link and export.</p>
+        </div>
+        <span className="page-count">{placements.length} total</span>
+      </header>
 
       {campaign.status !== 'published' && (
-        <div className="card" style={{ borderColor: 'var(--accent)', marginBottom: 18 }}>
-          <strong style={{ color: 'var(--accent)' }}>Not published yet.</strong>{' '}
-          <span className="muted">Scans/links won't track until you publish on the poster page.</span>
-        </div>
+        <InlineNotice>
+          <strong>This campaign is still a draft.</strong>
+          <span>Its links start recording visits after publication.</span>
+        </InlineNotice>
       )}
 
-      <form className="card" onSubmit={handleAdd} style={{ marginBottom: 22 }}>
-        <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
-          <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-            <label>New placement</label>
-            <input
-              className="input"
-              placeholder="e.g. Bulletin board, LinkedIn, IG story"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-            />
-          </div>
-          <button className="btn" disabled={busy || !label.trim()}>
-            {busy ? 'Adding…' : '+ Add'}
+      <form className="placement-create" onSubmit={handleAdd}>
+        <label htmlFor="placement-label">Add placement</label>
+        <div>
+          <input
+            id="placement-label"
+            className="input"
+            placeholder="Bulletin board, newsletter, conference booth"
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+          />
+          <button className="button button-primary" disabled={busy || !label.trim()}>
+            <Plus size={16} aria-hidden="true" />
+            {busy ? 'Adding' : 'Add placement'}
           </button>
         </div>
-        {error && <p className="error-text" style={{ marginTop: 10 }}>{error}</p>}
       </form>
 
+      {error && <InlineNotice tone="error">{error}</InlineNotice>}
+
       {placements.length === 0 ? (
-        <p className="muted">No placements yet. Add one above for each channel you'll promote on.</p>
+        <EmptyState
+          icon={<MapPin size={23} />}
+          title="No placements"
+          description="Add a channel above to mint its tracked QR and link."
+        />
       ) : (
-        <div className="grid cols-2">
-          {placements.map((p) => (
-            <div key={p.id} className="card">
-              <div className="row between" style={{ marginBottom: 12 }}>
-                <strong style={{ fontSize: '1.05rem' }}>{p.label}</strong>
-                <button className="btn ghost sm" onClick={() => removePlacement(p.id)} title="Delete">
-                  ✕
-                </button>
-              </div>
-              <div className="row" style={{ gap: 16, alignItems: 'center' }}>
-                <div style={{ background: '#fff', padding: 8, borderRadius: 10 }}>
-                  <QrCode value={buildViewUrl(p.code)} size={104} />
+        <section className="placement-list" aria-label="Campaign placements">
+          <div className="placement-list-head" aria-hidden="true">
+            <span>Placement</span>
+            <span>Tracked link</span>
+            <span>Actions</span>
+          </div>
+          {placements.map((placement) => (
+            <article key={placement.id} className="placement-row">
+              <div className="placement-identity">
+                <div className="placement-qr">
+                  <QrCode value={buildViewUrl(placement.code)} size={62} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="muted" style={{ fontSize: '0.78rem' }}>Tracked link</div>
-                  <code style={{ fontSize: '0.78rem', wordBreak: 'break-all', display: 'block', margin: '2px 0 12px' }}>
-                    {buildViewUrl(p.code)}
-                  </code>
-                  <div className="row wrap" style={{ gap: 8 }}>
-                    <button className="btn secondary sm" onClick={() => copyLink(p.code)}>
-                      {copied === p.code ? 'Copied!' : 'Copy link'}
+                <div>
+                  <strong>{placement.label}</strong>
+                  <span>Created {formatDate(placement.created_at)}</span>
+                </div>
+              </div>
+              <code>{buildViewUrl(placement.code)}</code>
+              <div className="placement-actions">
+                {confirmingId === placement.id ? (
+                  <div className="row-confirmation" role="alertdialog" aria-label={`Delete ${placement.label}`}>
+                    <span>Delete?</span>
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      aria-label={`Confirm deletion of ${placement.label}`}
+                      disabled={deletingId === placement.id}
+                      onClick={() => void deletePlacement(placement.id)}
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
                     </button>
-                    <PosterExportButton campaign={campaign} placement={p} />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Cancel deletion"
+                      onClick={() => setConfirmingId(null)}
+                    >
+                      <X size={15} aria-hidden="true" />
+                    </button>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Copy ${placement.label} tracked link`}
+                      data-tooltip="Copy link"
+                      onClick={() => copyLink(placement.code)}
+                    >
+                      <Copy size={15} aria-hidden="true" />
+                    </button>
+                    <PosterExportButton
+                      campaign={campaign}
+                      placement={placement}
+                      label={`Download ${placement.label} poster`}
+                      variant="icon"
+                    />
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      aria-label={`Delete ${placement.label}`}
+                      data-tooltip="Delete"
+                      onClick={() => setConfirmingId(placement.id)}
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                    </button>
+                  </>
+                )}
               </div>
-            </div>
+            </article>
           ))}
-        </div>
+        </section>
       )}
-    </Layout>
+    </AppShell>
   )
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(value))
 }

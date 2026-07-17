@@ -1,9 +1,11 @@
+import { ArrowLeft, Globe2, ImagePlus, Sparkles, Type } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { GenerationProgress, type AgentPrompt, type AgentStep } from '../components/GenerationProgress'
 import { GenerationReferences } from '../components/GenerationReferences'
-import { Layout } from '../components/Layout'
+import { AppShell } from '../components/AppShell'
+import { InlineNotice } from '../components/ui/Feedback'
 import { insforge } from '../lib/insforge'
 import { uploadReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import { normalizeReferenceContext } from '../lib/references'
@@ -163,114 +165,195 @@ export function CampaignWizardPage() {
   const working = phase === 'creating' || phase === 'analyzing' || phase === 'generating'
 
   return (
-    <Layout>
-      <div className="hero-card">
-        <span className="eyebrow">Paste a link, get an on-brand poster</span>
-        <h1>Tell us about your product</h1>
-        <p>
-          We read your site and any supporting references, then generate a poster with a tracked QR for every placement.
-        </p>
-      </div>
+    <AppShell
+      breadcrumbs={[
+        { label: 'Campaigns', to: '/' },
+        { label: draftId ? 'Campaign draft' : 'New campaign' },
+      ]}
+      actions={(
+        <Link to="/" className="toolbar-button">
+          <ArrowLeft size={15} aria-hidden="true" />
+          Cancel
+        </Link>
+      )}
+    >
+      <header className="page-heading page-heading-compact">
+        <div>
+          <h1>{working ? 'Building your poster' : 'Create campaign'}</h1>
+          <p>{working ? 'The style board and agent stages update as generation progresses.' : 'Set the source, message, and tracked destination.'}</p>
+        </div>
+      </header>
 
       {working && steps.length > 0 ? (
-        <GenerationProgress headline={PHASE_LABEL[phase]} screenshotUrl={screenshotUrl} steps={steps} layout={layout} />
+        <GenerationProgress
+          headline={PHASE_LABEL[phase]}
+          screenshotUrl={screenshotUrl}
+          steps={steps}
+          layout={layout}
+        />
       ) : working ? (
-        <div className="card center" style={{ padding: 56 }}>
-          <div className="spinner" style={{ margin: '0 auto 20px' }} />
-          <p style={{ fontSize: '1.05rem', fontWeight: 600 }}>{PHASE_LABEL[phase]}</p>
-          <p className="muted" style={{ marginTop: 6 }}>This usually takes less than a minute.</p>
+        <div className="creation-starting" aria-live="polite">
+          <span className="spinner" />
+          <div>
+            <strong>{PHASE_LABEL[phase]}</strong>
+            <p>Preparing the generation workspace.</p>
+          </div>
         </div>
       ) : (
-        <form className="card" onSubmit={handleSubmit}>
-          <div className="field field-num">
-            <label data-num="1">Product website URL <span className="req">required</span></label>
-            <input
-              className="input"
-              type="url"
-              required
-              placeholder="https://yourproduct.com"
-              value={productUrl}
-              onChange={(event) => setProductUrl(event.target.value)}
-            />
-            <div className="hint">We read this for brand style, imagery, and product details.</div>
-          </div>
+        <div className="wizard-layout">
+          <form className="campaign-form" onSubmit={handleSubmit}>
+            <section className="form-section" aria-labelledby="source-heading">
+              <div className="form-section-heading">
+                <span><Globe2 size={17} aria-hidden="true" /></span>
+                <div>
+                  <h2 id="source-heading">Product source</h2>
+                  <p>The website supplies the visual and product context.</p>
+                </div>
+              </div>
+              <div className="field-grid">
+                <div className="field field-wide">
+                  <label htmlFor="product-url">Website URL <span className="required-label">Required</span></label>
+                  <input
+                    id="product-url"
+                    className="input"
+                    type="url"
+                    required
+                    placeholder="https://yourproduct.com"
+                    value={productUrl}
+                    onChange={(event) => setProductUrl(event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="product-name">Product name <span className="required-label">Required</span></label>
+                  <input
+                    id="product-name"
+                    className="input"
+                    required
+                    placeholder="Northstar Reports"
+                    value={productName}
+                    onChange={(event) => setProductName(event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="tagline">Tagline <span className="optional-label">Optional</span></label>
+                  <input
+                    id="tagline"
+                    className="input"
+                    placeholder="Reports your team can act on"
+                    value={tagline}
+                    onChange={(event) => setTagline(event.target.value)}
+                  />
+                </div>
+              </div>
+            </section>
 
-          <div className="field field-num">
-            <label data-num="2">Product name <span className="req">required</span></label>
-            <input
-              className="input"
-              required
-              placeholder="Acme Analytics"
-              value={productName}
-              onChange={(event) => setProductName(event.target.value)}
-            />
-          </div>
+            <section className="form-section" aria-labelledby="message-heading">
+              <div className="form-section-heading">
+                <span><Type size={17} aria-hidden="true" /></span>
+                <div>
+                  <h2 id="message-heading">Campaign action</h2>
+                  <p>Define the poster action and its tracked destination.</p>
+                </div>
+              </div>
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="cta-text">Call to action <span className="required-label">Required</span></label>
+                  <input
+                    id="cta-text"
+                    className="input"
+                    required
+                    placeholder="Start free trial"
+                    value={ctaText}
+                    onChange={(event) => setCtaText(event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="destination-url">Destination URL <span className="required-label">Required</span></label>
+                  <input
+                    id="destination-url"
+                    className="input"
+                    type="url"
+                    required
+                    placeholder="https://yourproduct.com/signup"
+                    value={destinationUrl}
+                    onChange={(event) => setDestinationUrl(event.target.value)}
+                  />
+                </div>
+              </div>
+            </section>
 
-          <div className="field field-num">
-            <label data-num="3">Tagline <span className="hint">(optional)</span></label>
-            <input
-              className="input"
-              placeholder="The fastest way to ship dashboards"
-              value={tagline}
-              onChange={(event) => setTagline(event.target.value)}
-            />
-          </div>
-
-          <div className="row wrap" style={{ gap: 18, alignItems: 'flex-start' }}>
-            <div className="field field-num" style={{ flex: '1 1 180px' }}>
-              <label data-num="4">Call to action <span className="req">required</span></label>
-              <input
-                className="input"
-                required
-                placeholder="Start free trial"
-                value={ctaText}
-                onChange={(event) => setCtaText(event.target.value)}
+            <section className="form-section" aria-labelledby="references-heading">
+              <div className="form-section-heading">
+                <span><ImagePlus size={17} aria-hidden="true" /></span>
+                <div>
+                  <h2 id="references-heading">Generation references</h2>
+                  <p>Add direction or images that are not present on the website.</p>
+                </div>
+              </div>
+              <GenerationReferences
+                context={referenceContext}
+                onContextChange={setReferenceContext}
+                existingImages={[]}
+                onRemoveExisting={() => {}}
+                pendingFiles={referenceFiles}
+                onPendingFilesChange={setReferenceFiles}
               />
-            </div>
-            <div className="field field-num" style={{ flex: '2 1 280px' }}>
-              <label data-num="5">Destination URL <span className="req">required</span></label>
-              <input
-                className="input"
-                type="url"
-                required
-                placeholder="https://yourproduct.com/signup"
-                value={destinationUrl}
-                onChange={(event) => setDestinationUrl(event.target.value)}
-              />
-              <div className="hint">Where the QR sends visitors after the visit is recorded.</div>
-            </div>
-          </div>
+            </section>
 
-          <div className="reference-section">
-            <h3>Generation references</h3>
-            <p className="muted">Give the generator visual material or context that the website does not contain.</p>
-            <GenerationReferences
-              context={referenceContext}
-              onContextChange={setReferenceContext}
-              existingImages={[]}
-              onRemoveExisting={() => {}}
-              pendingFiles={referenceFiles}
-              onPendingFilesChange={setReferenceFiles}
-            />
-          </div>
+            {error && (
+              <InlineNotice tone="error">
+                <strong>Campaign draft saved.</strong>
+                <span>{error} Correct the issue and retry this draft.</span>
+              </InlineNotice>
+            )}
 
-          {error && (
-            <div className="form-error" role="alert">
-              <strong>Campaign draft saved.</strong>
-              <span>{error} Correct the issue and retry this same draft.</span>
+            <div className="form-actions">
+              <button className="button button-primary" type="submit">
+                <Sparkles size={16} aria-hidden="true" />
+                {draftId ? 'Retry generation' : 'Generate poster'}
+              </button>
+              <button type="button" className="button button-secondary" onClick={() => navigate('/')}>
+                Cancel
+              </button>
             </div>
-          )}
+          </form>
 
-          <div className="row wrap" style={{ marginTop: 18 }}>
-            <button className="btn" type="submit">
-              {draftId ? 'Retry generation' : 'Generate poster'} <span className="btn-icon">-&gt;</span>
-            </button>
-            <button type="button" className="btn ghost" onClick={() => navigate('/')}>
-              Cancel
-            </button>
-          </div>
-        </form>
+          <aside className="campaign-summary" aria-label="Campaign summary">
+            <div className="summary-poster">
+              <span className="summary-poster-mark">P</span>
+              <strong>{productName.trim() || 'Untitled campaign'}</strong>
+              <span>{tagline.trim() || 'Poster preview pending'}</span>
+            </div>
+            <dl>
+              <div>
+                <dt>Source</dt>
+                <dd>{summarizeUrl(productUrl) || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Action</dt>
+                <dd>{ctaText.trim() || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>Destination</dt>
+                <dd>{summarizeUrl(destinationUrl) || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt>References</dt>
+                <dd>{referenceFiles.length} image{referenceFiles.length === 1 ? '' : 's'}</dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
       )}
-    </Layout>
+    </AppShell>
   )
+}
+
+function summarizeUrl(value: string) {
+  if (!value.trim()) return ''
+  try {
+    return new URL(value).hostname.replace(/^www\./, '')
+  } catch {
+    return value
+  }
 }
