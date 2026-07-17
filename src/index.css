@@ -2050,6 +2050,11 @@ img {
 .inspector-actions {
   display: grid;
   gap: 7px;
+  margin-top: 10px;
+}
+
+.selection-note + .inspector-actions {
+  margin-top: 0;
 }
 
 .inspector-actions .button {
