@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  deriveGenerationProvidedImages,
   deriveGenerationPreflight,
-  generationTraceAvailability,
+  deriveGenerationUsedImages,
   reconstructLegacyImageAssets,
 } from '../src/lib/generationTraces.ts'
 import type {
   Campaign,
-  GenerationStageTrace,
   PosterGeneration,
+  TraceImageAsset,
 } from '../src/lib/types.ts'
 
 const CURRENT = {
@@ -114,6 +115,19 @@ test('preflight and legacy reconstruction localize generated helper copy', () =>
     reconstructLegacyImageAssets(CURRENT, null, 'zh-CN')[0].purpose,
     '品牌标志快照。',
   )
+  assert.equal(
+    deriveGenerationProvidedImages({
+      ...CURRENT,
+      reference_images: [{
+        key: 'references/support.png',
+        url: 'https://assets.example/support.png',
+        name: 'support.png',
+        mime_type: 'image/png',
+        size_bytes: 120,
+      }],
+    } as PosterGeneration, 'zh-CN')[0].label,
+    '参考图片 1',
+  )
 })
 
 test('legacy reconstruction is explicitly partial and follows painter priority', () => {
@@ -141,33 +155,126 @@ test('legacy reconstruction is explicitly partial and follows painter priority',
   assert.deepEqual(assets.map((asset) => asset.model_position), [1, 2, 3, 4, 5])
 })
 
-test('trace availability distinguishes legacy, complete, and incomplete captures', () => {
-  const terminalTraces = (['hero', 'designer', 'analyze'] as const).map((stage) => ({
-    stage,
-    status: stage === 'analyze' ? 'skipped' : 'succeeded',
-  })) as GenerationStageTrace[]
+test('provided image summaries preserve the persisted reference order', () => {
+  const generation = {
+    ...CURRENT,
+    reference_images: [
+      {
+        key: 'references/first.png',
+        url: 'https://assets.example/first.png',
+        name: 'first.png',
+        mime_type: 'image/png',
+        size_bytes: 120,
+      },
+      {
+        key: 'references/second.jpg',
+        url: 'https://assets.example/second.jpg',
+        name: 'second.jpg',
+        mime_type: 'image/jpeg',
+        size_bytes: 240,
+      },
+    ],
+  } as PosterGeneration
 
-  assert.equal(generationTraceAvailability(
-    { ...CURRENT, trace_schema_version: null } as PosterGeneration,
-    [],
-  ), 'legacy')
-  assert.equal(generationTraceAvailability(CURRENT, terminalTraces), 'exact')
-  assert.equal(generationTraceAvailability(
-    { ...CURRENT, trace_incomplete: true } as PosterGeneration,
-    terminalTraces,
-  ), 'incomplete')
-  assert.equal(generationTraceAvailability(CURRENT, terminalTraces.slice(0, 2)), 'incomplete')
-
-  const v2Traces = [
-    ...terminalTraces,
-    { stage: 'assets', status: 'succeeded' },
-  ] as GenerationStageTrace[]
-  assert.equal(generationTraceAvailability(
-    { ...CURRENT, trace_schema_version: 2 } as PosterGeneration,
-    v2Traces,
-  ), 'exact')
-  assert.equal(generationTraceAvailability(
-    { ...CURRENT, trace_schema_version: 2 } as PosterGeneration,
-    terminalTraces,
-  ), 'incomplete')
+  const images = deriveGenerationProvidedImages(generation)
+  assert.deepEqual(images.map((image) => image.label), [
+    'Supporting image 1',
+    'Supporting image 2',
+  ])
+  assert.deepEqual(images.map((image) => image.filename), ['first.png', 'second.jpg'])
 })
+
+test('traced image summaries use only hero attachments in model order', () => {
+  const heroAttachedImages = [
+    traceImage('product', 'product-b.png', 5, 5),
+    traceImage('previous-poster', 'previous.png', 1, 1),
+    traceImage('product', 'product-a.png', 4, 4),
+    traceImage('user-reference', 'support.png', 2, 2),
+    traceImage('logo', 'logo.png', 3, 3),
+    traceImage('style-board', 'board.png', 6, 6),
+  ]
+
+  const images = deriveGenerationUsedImages({
+    generation: CURRENT,
+    parent: SELECTED,
+    heroAttachedImages,
+  })
+
+  assert.deepEqual(images?.map((image) => image.source), [
+    'previous-poster',
+    'user-reference',
+    'logo',
+    'product',
+    'product',
+    'style-board',
+  ])
+  assert.deepEqual(images?.map((image) => image.label), [
+    'Previous poster',
+    'Supporting image 1',
+    'Brand logo',
+    'Product image 1',
+    'Product image 2',
+    'Style board',
+  ])
+})
+
+test('traced versions do not reconstruct a missing hero image set', () => {
+  assert.equal(deriveGenerationUsedImages({
+    generation: CURRENT,
+    parent: SELECTED,
+    heroAttachedImages: null,
+  }), null)
+  assert.deepEqual(deriveGenerationUsedImages({
+    generation: CURRENT,
+    parent: SELECTED,
+    heroAttachedImages: [],
+  }), [])
+})
+
+test('pre-trace versions derive a labeled image summary from saved snapshots', () => {
+  const legacy = {
+    ...CURRENT,
+    trace_schema_version: null,
+    reference_images: [{
+      key: 'references/support.png',
+      url: 'https://assets.example/support.png',
+      name: 'support.png',
+      mime_type: 'image/png',
+      size_bytes: 120,
+    }],
+  } as PosterGeneration
+
+  const images = deriveGenerationUsedImages({
+    generation: legacy,
+    parent: SELECTED,
+    heroAttachedImages: null,
+    locale: 'zh-CN',
+  })
+  assert.deepEqual(images?.map((image) => image.label), [
+    '上一版海报',
+    '参考图片 1',
+    '品牌标志',
+    '产品图片 1',
+    '风格板',
+  ])
+})
+
+function traceImage(
+  source: TraceImageAsset['source'],
+  filename: string,
+  candidatePosition: number,
+  modelPosition: number,
+): TraceImageAsset {
+  return {
+    source,
+    purpose: 'Fixture',
+    url: `https://assets.example/${filename}`,
+    key: `fixtures/${filename}`,
+    filename,
+    mime_type: 'image/png',
+    size_bytes: 120,
+    storage_source: 'fixture',
+    candidate_position: candidatePosition,
+    model_position: modelPosition,
+  }
+}

@@ -93,9 +93,10 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
   const expected: Partial<Record<TranslationKey, string>> = {
     Campaigns: '推广活动',
     Placement: '投放点',
-    Assets: '素材',
     Versions: '版本',
     Analytics: '数据分析',
+    'Images provided': '提供的图片',
+    'Images used for the poster': '海报使用的图片',
     'Tracked link': '追踪链接',
     'Create an account': '创建新账户',
     'Reset code': '验证码',

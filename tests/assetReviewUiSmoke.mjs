@@ -46,7 +46,8 @@ try {
   await testAutosaveFailureRetry(browser)
   await testMobileZeroSelectionConfirmation(browser)
   await testActivityRouting(browser)
-  await testHistoricalAssetAudit(browser)
+  await testGenerationDetailsSummary(browser)
+  await testFailedGenerationDetails(browser)
   await testCampaignWizardPreference(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
@@ -211,16 +212,35 @@ async function testActivityRouting(browserInstance) {
   await context.close()
 }
 
-async function testHistoricalAssetAudit(browserInstance) {
+async function testGenerationDetailsSummary(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
+  await context.addInitScript(() => {
+    window.__generationDetailsClipboardWrites = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText(value) {
+          window.__generationDetailsClipboardWrites.push(String(value))
+          return Promise.resolve()
+        },
+      },
+    })
+  })
   const state = createState({ editorReady: true })
   state.currentGeneration = {
     ...state.currentGeneration,
     trace_schema_version: 2,
+    reference_images: [{
+      key: 'references/support.svg',
+      url: `${BASE_URL}/fixture/support.svg`,
+      name: 'support.svg',
+      mime_type: 'image/svg+xml',
+      size_bytes: 120,
+    }],
     asset_selection_mode: 'yolo',
     asset_selection_status: 'completed',
     asset_selection_method: 'rules_fallback',
@@ -255,17 +275,113 @@ async function testHistoricalAssetAudit(browserInstance) {
 
   const dialog = page.getByRole('dialog', { name: 'Generation details' })
   await dialog.waitFor()
-  await dialog.getByRole('tab', { name: 'Assets' }).click()
-  await dialog.getByRole('heading', { name: 'Selection audit' }).waitFor()
+  const prompt = dialog.getByRole('region', { name: 'User prompt' })
+  const provided = dialog.getByRole('region', { name: 'Images provided' })
+  const used = dialog.getByRole('region', { name: 'Images used for the poster' })
+  await used.getByRole('img', { name: 'Previous poster' }).waitFor()
 
-  assert.match(await dialog.locator('.asset-audit-summary').innerText(), /Yolo[\s\S]*Rules fallback[\s\S]*2[\s\S]*Rules fallback/)
+  assert.equal(await prompt.locator('p').innerText(), 'Increase visual contrast.')
   assert.deepEqual(
-    await dialog.locator('.asset-audit-decision').allTextContents(),
-    ['Included · 1', 'Included · 2', 'Excluded', 'Excluded'],
+    await provided.locator('figcaption strong').allTextContents(),
+    ['Supporting image 1'],
   )
-  await dialog.getByText('Hero could not fetch the frozen style board.').waitFor()
+  assert.deepEqual(
+    await used.locator('figcaption strong').allTextContents(),
+    ['Previous poster', 'Style board'],
+  )
+  assert.equal(await dialog.getByRole('tab').count(), 0)
+  assert.deepEqual(
+    await dialog.getByRole('button').evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute('aria-label'))
+    ),
+    ['Close generation details'],
+  )
+  const dialogText = await dialog.innerText()
+  for (const secret of [
+    'PRIVATE_SYSTEM_PROMPT',
+    'PRIVATE_COMPILED_USER_PROMPT',
+    'PRIVATE_IMAGE_PROMPT',
+    'PRIVATE_PROVIDER',
+    'PRIVATE_MODEL_ID',
+    'PRIVATE_PROVIDER_SETTING',
+    'PRIVATE_MANIFEST_VALUE',
+    'PRIVATE_ARTIFACT_VALUE',
+    'PRIVATE_SKIP_DETAIL',
+    'PRIVATE_STAGE_FAILURE_CODE',
+    'PRIVATE_STAGE_FAILURE_MESSAGE',
+    'PRIVATE_FAILURE_METADATA',
+  ]) {
+    assert.equal(dialogText.includes(secret), false, secret)
+  }
+  assert.equal(dialogText.includes('Selection audit'), false)
+  assert.equal(dialogText.includes('Request manifest'), false)
+  assert.equal(dialogText.includes('Copy manifest'), false)
+  assert.equal(dialogText.includes('Stage artifacts'), false)
+  assert.equal(await dialog.getByRole('button', { name: /copy/i }).count(), 0)
+  assert.equal(await dialog.locator('details, summary').count(), 0)
+  assert.ok(state.traceRequests.length >= 1)
+  for (const requestUrl of state.traceRequests) {
+    const traceRequest = new URL(requestUrl)
+    assert.equal(traceRequest.searchParams.get('select'), 'attached_images')
+    assert.equal(traceRequest.searchParams.get('generation_id'), `eq.${state.currentGeneration.id}`)
+    assert.equal(traceRequest.searchParams.get('stage'), 'eq.hero')
+  }
   await assertNoOverflow(page)
-  await page.screenshot({ path: `${OUTPUT_DIR}/historical-audit-desktop.png`, fullPage: true })
+  await page.screenshot({ path: `${OUTPUT_DIR}/generation-details-summary-desktop.png`, fullPage: true })
+  await dialog.getByRole('button', { name: 'Close generation details' }).click()
+  await dialog.waitFor({ state: 'detached' })
+  assert.deepEqual(
+    await page.evaluate(() => window.__generationDetailsClipboardWrites),
+    [],
+  )
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testFailedGenerationDetails(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1180, height: 820 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  state.failedGenerations = [{
+    ...state.currentGeneration,
+    id: 'generation-failed',
+    parent_generation_id: state.currentGeneration.id,
+    version_number: null,
+    status: 'failed',
+    instruction: 'Use a bolder headline.',
+    hero_image_url: null,
+    hero_image_key: null,
+    completed_at: null,
+    failed_at: state.now,
+    failure_stage: 'hero',
+    failure_code: 'PRIVATE_FAILURE_CODE',
+    failure_message: 'PRIVATE_FAILURE_MESSAGE',
+    trace_schema_version: 2,
+  }]
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  await page.getByRole('button', { name: 'Toggle versions panel' }).click()
+  const versions = page.getByRole('region', { name: 'Versions' })
+  await versions.getByText('Incomplete attempts', { exact: true }).click()
+  await versions.locator('.failed-generation-row').click()
+
+  const dialog = page.getByRole('dialog', { name: 'Generation details' })
+  await dialog.getByText('The generation did not complete.', { exact: true }).waitFor()
+  const dialogText = await dialog.innerText()
+  assert.equal(dialogText.includes('PRIVATE_FAILURE_CODE'), false)
+  assert.equal(dialogText.includes('PRIVATE_FAILURE_MESSAGE'), false)
+  await dialog.getByText('Images used are unavailable for this version.', {
+    exact: true,
+  }).waitFor()
+  await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
   await context.close()
 }
@@ -518,7 +634,8 @@ async function installBackendMock(context, state) {
 
   await context.route('**/api/**', async (route) => {
     const request = route.request()
-    const path = new URL(request.url()).pathname
+    const requestUrl = new URL(request.url())
+    const path = requestUrl.pathname
     const body = request.postData()
       ? JSON.parse(request.postData())
       : {}
@@ -596,14 +713,25 @@ async function installBackendMock(context, state) {
     }
     if (path === '/api/database/records/poster_generations') {
       return json(route, state.editorReady
-        ? [state.currentGeneration]
+        ? [state.currentGeneration, ...state.failedGenerations]
         : [state.reviewGeneration])
     }
     if (path === '/api/database/records/generation_assets') {
       return json(route, state.assets)
     }
     if (path === '/api/database/records/generation_stage_traces') {
-      return json(route, state.traces)
+      state.traceRequests.push(request.url())
+      const generationId = requestUrl.searchParams.get('generation_id')?.replace(/^eq\./, '')
+      const hero = state.traces.find((trace) =>
+        trace.generation_id === generationId && trace.stage === 'hero'
+      ) ?? null
+      if (!hero) return json(route, null)
+      return json(
+        route,
+        requestUrl.searchParams.get('select') === 'attached_images'
+          ? { attached_images: hero.attached_images }
+          : hero,
+      )
     }
     if (path === '/api/database/records/placements') {
       return json(route, [state.placement])
@@ -733,6 +861,8 @@ function createState({
     confirmedSelections: [],
     cancelCalls: 0,
     enqueueModes: [],
+    failedGenerations: [],
+    traceRequests: [],
     traces: [],
   }
   applySelection(state, selectedIds)
@@ -777,9 +907,53 @@ function createTraceFixtures(state) {
     id: `trace-${stage}`,
     stage,
     candidate_images: stage === 'assets' ? candidateImages : [],
-    failure_metadata: stage === 'assets'
-      ? { ai_attempts: 2, fallback: true }
-      : {},
+    attached_images: stage === 'hero'
+      ? candidateImages.filter((image) => image.model_position !== null)
+      : [],
+    model_calls: stage === 'hero'
+      ? [{
+          attempt: 1,
+          operation: 'image',
+          provider: 'PRIVATE_PROVIDER',
+          model_id: 'PRIVATE_MODEL_ID',
+          status: 'succeeded',
+          started_at: state.now,
+          completed_at: state.now,
+          prompt: {
+            system: 'PRIVATE_SYSTEM_PROMPT',
+            user: 'PRIVATE_COMPILED_USER_PROMPT',
+            image: 'PRIVATE_IMAGE_PROMPT',
+          },
+          provider_settings: { marker: 'PRIVATE_PROVIDER_SETTING' },
+          content_manifest: [{
+            position: 1,
+            role: 'user',
+            type: 'text',
+            text: 'PRIVATE_MANIFEST_VALUE',
+          }],
+          failure: null,
+        }]
+      : [],
+    skipped_images: stage === 'hero'
+      ? [{
+          asset: candidateImages[2],
+          reason: 'fetch_failed',
+          detail: 'PRIVATE_SKIP_DETAIL',
+        }]
+      : [],
+    artifacts: stage === 'hero'
+      ? [{
+          kind: 'poster',
+          snapshot: { marker: 'PRIVATE_ARTIFACT_VALUE' },
+        }]
+      : [],
+    failure_code: stage === 'hero' ? 'PRIVATE_STAGE_FAILURE_CODE' : null,
+    failure_message: stage === 'hero' ? 'PRIVATE_STAGE_FAILURE_MESSAGE' : null,
+    failure_metadata: stage === 'hero'
+      ? { marker: 'PRIVATE_FAILURE_METADATA' }
+      : stage === 'assets'
+        ? { ai_attempts: 2, fallback: true }
+        : {},
   }))
 }
 

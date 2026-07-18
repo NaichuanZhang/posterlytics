@@ -1,18 +1,22 @@
 import { insforge } from './insforge'
-import { TRACE_STAGE_ORDER } from './generationTraces'
-import type { GenerationStageTrace } from './types'
+import type { TraceImageAsset } from './types'
 
-export async function fetchGenerationStageTraces(
+interface GenerationHeroImagesRow {
+  attached_images: TraceImageAsset[]
+}
+
+export async function fetchGenerationHeroImages(
   generationId: string,
-): Promise<GenerationStageTrace[]> {
+): Promise<TraceImageAsset[] | null> {
   const { data, error } = await insforge.database
     .from('generation_stage_traces')
-    .select('*')
+    .select('attached_images')
     .eq('generation_id', generationId)
+    .eq('stage', 'hero')
+    .maybeSingle()
 
   if (error) throw new Error(error.message)
-  const traces = (data ?? []) as GenerationStageTrace[]
-  return traces.sort(
-    (a, b) => TRACE_STAGE_ORDER.indexOf(a.stage) - TRACE_STAGE_ORDER.indexOf(b.stage),
-  )
+  if (!data) return null
+  const row = data as GenerationHeroImagesRow
+  return Array.isArray(row.attached_images) ? row.attached_images : []
 }

@@ -45,6 +45,7 @@ try {
   await waitForServer()
   browser = await chromium.launch({ headless: true })
   await testDesktop(browser)
+  await testGenerationDetailsLiveRefresh(browser)
   await testMobile(browser)
   console.log(`durable generation UI smoke passed; screenshots: ${OUTPUT_DIR}`)
 } finally {
@@ -186,7 +187,64 @@ async function testMobile(browserInstance) {
   await context.close()
 }
 
-async function installBackendMock(context) {
+async function testGenerationDetailsLiveRefresh(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 860 },
+    deviceScaleFactor: 1,
+    reducedMotion: 'reduce',
+  })
+  const controls = await installBackendMock(context, { liveDetails: true })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-active`)
+  const runningVersionRow = page
+    .getByRole('region', { name: 'Versions' })
+    .locator('.active-version-row')
+    .filter({ hasText: 'Designing layout' })
+  await runningVersionRow
+    .getByRole('button', { name: 'Generation details' })
+    .click()
+
+  const dialog = page.getByRole('dialog', { name: 'Generation details' })
+  const status = dialog.locator('.generation-details-status')
+  const used = dialog.getByRole('region', { name: 'Images used for the poster' })
+  await status.getByText('Generation in progress', { exact: true }).waitFor()
+  await used.getByText('Images used will appear when the poster is generated.', {
+    exact: true,
+  }).waitFor()
+  const pendingTraceRequests = controls.traceRequests
+  assert.ok(pendingTraceRequests >= 1)
+  controls.heroAvailable = true
+
+  await used.getByRole('img', { name: 'Previous poster' }).waitFor({ timeout: 7000 })
+  assert.ok(controls.traceRequests > pendingTraceRequests)
+  await status.getByText('Poster ready', { exact: true }).waitFor({ timeout: 9000 })
+  assert.equal(
+    await dialog.getByRole('region', { name: 'User prompt' }).locator('p').innerText(),
+    'Make the launch message more direct.',
+  )
+
+  await waitFor(
+    () => controls.terminalTraceRequests >= 1,
+    2000,
+    () => 'Generation details did not settle after completion.',
+  )
+  const terminalTraceRequests = controls.traceRequests
+  await page.waitForTimeout(3400)
+  assert.equal(controls.traceRequests, terminalTraceRequests)
+  await assertNoPageOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/generation-details-live-refresh.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function installBackendMock(context, { liveDetails = false } = {}) {
   await context.addCookies([{
     name: 'insforge_csrf_token',
     value: 'ui-smoke-csrf',
@@ -194,6 +252,13 @@ async function installBackendMock(context) {
   }])
   let notificationsRead = false
   const fixtures = createFixtures()
+  const controls = {
+    completed: false,
+    heroAvailable: false,
+    readyGenerationReturned: false,
+    terminalTraceRequests: 0,
+    traceRequests: 0,
+  }
 
   await context.route('**/fixture/old-poster.svg', async (route) => {
     await route.fulfill({
@@ -205,7 +270,8 @@ async function installBackendMock(context) {
 
   await context.route('**/api/**', async (route) => {
     const request = route.request()
-    const path = new URL(request.url()).pathname
+    const requestUrl = new URL(request.url())
+    const path = requestUrl.pathname
 
     if (path === '/api/auth/refresh') {
       return json(route, {
@@ -215,11 +281,25 @@ async function installBackendMock(context) {
     }
 
     if (path === '/api/database/rpc/generation_activity') {
-      const items = fixtures.activities.map((item) => (
-        notificationsRead && item.notification_id
-          ? { ...item, read_at: item.read_at ?? fixtures.now }
+      const items = fixtures.activities.map((item) => {
+        const completedItem = liveDetails
+          && controls.completed
+          && item.generation_id === fixtures.activeGeneration.id
+          ? {
+              ...item,
+              status: 'succeeded',
+              stage: 'hero',
+              generation_status: 'ready',
+              completed_at: fixtures.now,
+            }
           : item
-      ))
+        return notificationsRead && completedItem.notification_id
+          ? {
+              ...completedItem,
+              read_at: completedItem.read_at ?? fixtures.now,
+            }
+          : completedItem
+      })
       return json(route, {
         items,
         unread_count: notificationsRead ? 0 : 2,
@@ -237,7 +317,39 @@ async function installBackendMock(context) {
     }
 
     if (path === '/api/database/records/poster_generations') {
-      return json(route, [fixtures.activeGeneration, fixtures.currentGeneration])
+      const activeGeneration = liveDetails && controls.completed
+        ? {
+            ...fixtures.activeGeneration,
+            status: 'ready',
+            hero_image_url: `${BASE_URL}/fixture/old-poster.svg`,
+            hero_image_key: 'posters/campaign-active/version-2.svg',
+            design_status: 'ready',
+            completed_at: fixtures.now,
+          }
+        : fixtures.activeGeneration
+      if (activeGeneration.status === 'ready') controls.readyGenerationReturned = true
+      return json(route, [activeGeneration, fixtures.currentGeneration])
+    }
+
+    if (path === '/api/database/records/generation_stage_traces') {
+      controls.traceRequests += 1
+      if (controls.readyGenerationReturned) controls.terminalTraceRequests += 1
+      if (!liveDetails || !controls.heroAvailable) return json(route, null)
+      controls.completed = true
+      return json(route, {
+        attached_images: [{
+          source: 'previous-poster',
+          purpose: 'Parent poster snapshot.',
+          url: `${BASE_URL}/fixture/old-poster.svg`,
+          key: 'posters/campaign-active/version-1.svg',
+          filename: 'Version 1',
+          mime_type: 'image/svg+xml',
+          size_bytes: 120,
+          storage_source: 'poster-version',
+          candidate_position: 1,
+          model_position: 1,
+        }],
+      })
     }
 
     if (path === '/api/database/records/placements') {
@@ -246,6 +358,7 @@ async function installBackendMock(context) {
 
     return json(route, [])
   })
+  return controls
 }
 
 function createFixtures() {

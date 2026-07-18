@@ -2,8 +2,6 @@ import type { PendingReference } from './references'
 import type { TranslationKey } from '../i18n/messages'
 import type {
   Campaign,
-  GenerationStageTrace,
-  GenerationTraceStage,
   PosterGeneration,
   TraceImageAsset,
   TraceImageSource,
@@ -13,15 +11,6 @@ import {
   translate,
   type SupportedLocale,
 } from './i18n'
-
-export const TRACE_STAGE_ORDER: GenerationTraceStage[] = ['hero', 'designer', 'assets', 'analyze']
-
-export const TRACE_STAGE_LABEL_KEYS: Record<GenerationTraceStage, TranslationKey> = {
-  hero: 'Image model',
-  designer: 'Designer',
-  assets: 'Assets',
-  analyze: 'Analyze',
-}
 
 export const TRACE_SOURCE_LABEL_KEYS: Record<TraceImageSource, TranslationKey> = {
   'previous-poster': 'Previous poster',
@@ -39,22 +28,65 @@ const PAINTER_PRIORITY: Record<TraceImageSource, number> = {
   'style-board': 4,
 }
 
-export type GenerationTraceAvailability = 'exact' | 'incomplete' | 'legacy'
+export interface GenerationDetailImage {
+  id: string
+  source: TraceImageSource
+  label: string
+  filename: string | null
+  url: string | null
+}
 
-export function generationTraceAvailability(
+export function deriveGenerationProvidedImages(
   generation: PosterGeneration,
-  traces: readonly GenerationStageTrace[],
-): GenerationTraceAvailability {
-  if (generation.trace_schema_version === null) return 'legacy'
-  const expectedTraceCount = generation.trace_schema_version >= 2 ? 4 : 3
-  if (generation.trace_incomplete || traces.length !== expectedTraceCount) return 'incomplete'
-  if (
-    (generation.status === 'ready' || generation.status === 'failed')
-    && traces.some((trace) => trace.status === 'pending' || trace.status === 'running')
-  ) {
-    return 'incomplete'
-  }
-  return 'exact'
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): GenerationDetailImage[] {
+  return generation.reference_images.map((image, index) => ({
+    id: `provided-${image.key || image.url}-${index}`,
+    source: 'user-reference',
+    label: translate(locale, 'Supporting image {number}', { number: index + 1 }),
+    filename: image.name,
+    url: image.url,
+  }))
+}
+
+export function deriveGenerationUsedImages(args: {
+  generation: PosterGeneration
+  parent: PosterGeneration | null
+  heroAttachedImages: readonly TraceImageAsset[] | null
+  locale?: SupportedLocale
+}): GenerationDetailImage[] | null {
+  const {
+    generation,
+    parent,
+    heroAttachedImages,
+    locale = DEFAULT_LOCALE,
+  } = args
+  const sourceImages = generation.trace_schema_version === null
+    ? reconstructLegacyImageAssets(generation, parent, locale)
+    : heroAttachedImages
+  if (sourceImages === null) return null
+
+  const ordered = sourceImages
+    .map((image, index) => ({ image, index }))
+    .sort((a, b) =>
+      (a.image.model_position ?? Number.MAX_SAFE_INTEGER)
+      - (b.image.model_position ?? Number.MAX_SAFE_INTEGER)
+      || a.index - b.index
+    )
+    .map(({ image }) => image)
+  const sourceCounts: Partial<Record<TraceImageSource, number>> = {}
+
+  return ordered.map((image, index) => {
+    const sourceIndex = (sourceCounts[image.source] ?? 0) + 1
+    sourceCounts[image.source] = sourceIndex
+    return {
+      id: `used-${image.key || image.url || image.filename || image.source}-${index}`,
+      source: image.source,
+      label: generationDetailImageLabel(image.source, sourceIndex, locale),
+      filename: image.filename,
+      url: image.url,
+    }
+  })
 }
 
 export interface GenerationPreflightAsset {
@@ -288,6 +320,26 @@ function runtimeAsset(
     url: null,
     runtime: true,
   }
+}
+
+function generationDetailImageLabel(
+  source: TraceImageSource,
+  sourceIndex: number,
+  locale: SupportedLocale,
+): string {
+  if (source === 'previous-poster') {
+    return translate(locale, 'Previous poster')
+  }
+  if (source === 'user-reference') {
+    return translate(locale, 'Supporting image {number}', { number: sourceIndex })
+  }
+  if (source === 'logo') {
+    return translate(locale, 'Brand logo')
+  }
+  if (source === 'product') {
+    return translate(locale, 'Product image {number}', { number: sourceIndex })
+  }
+  return translate(locale, 'Style board')
 }
 
 function filenameFromUrl(
