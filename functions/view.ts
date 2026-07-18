@@ -1,18 +1,20 @@
 import {
   CORS,
+  decorateDestinationUrl,
   env,
   parseUA,
   resolveRequestGeo,
   visitorHash,
   readCookie,
   createAnonClient,
+  type RedirectAttribution,
 } from './_shared.ts';
 
 // `view` is the QR target — a pure tracked redirect. It:
 //   1. resolves the placement by ?code=
 //   2. ensures a first-party visitor cookie (plv)
-//   3. logs one visit through the log_visit RPC
-//   4. 302s straight to the campaign's real destination URL
+//   3. logs one visit through the attributed visit RPC
+//   4. adds non-destructive UTM attribution and 302s to the real destination
 // A null result means the code is unknown OR the campaign isn't published;
 // distinguish the two via link_status so we can explain rather than 404 blindly.
 export default async function (req: Request): Promise<Response> {
@@ -37,10 +39,11 @@ export default async function (req: Request): Promise<Response> {
     resolveRequestGeo(req.headers),
   ]);
 
-  // Log the visit and get the destination in one round-trip. The
-  // published-check lives inside the RPC; a null/missing result means the code is
-  // unknown or the campaign isn't live.
+  // Log the visit and get the destination plus attribution in one round-trip.
+  // The published-check lives inside the RPC; a null/missing result means the
+  // code is unknown or the campaign isn't live.
   let destination: string | null = null;
+  let attribution: RedirectAttribution | null = null;
   try {
     const baseParams = {
       p_code: code,
@@ -48,25 +51,52 @@ export default async function (req: Request): Promise<Response> {
       p_os: os,
       p_visitor_hash: vhash,
     };
-    let result = await client.database.rpc('log_visit', {
+    const geoParams = {
       ...baseParams,
       p_country: geo.country,
       p_city: geo.city,
-    });
-    // If the function deploy wins the rollout race, retry against the old
-    // four-argument RPC. The migration's defaulted geo arguments cover the
-    // inverse order.
+    };
+    let result = await client.database.rpc('log_visit_attributed', geoParams);
+    // If the view deploy wins either migration rollout race, retry the current
+    // text RPC with geo and then its original four-argument contract. Applying
+    // the migration first is safe because that text contract remains available.
     if (result.error) {
-      result = await client.database.rpc('log_visit', baseParams);
+      result = await client.database.rpc('log_visit', geoParams);
+      if (result.error) result = await client.database.rpc('log_visit', baseParams);
     }
-    if (!result.error && typeof result.data === 'string') destination = result.data;
+    if (!result.error) {
+      const details = visitDetails(result.data);
+      destination = details?.destination ?? null;
+      attribution = details?.attribution ?? null;
+    }
   } catch {
     destination = null;
   }
 
   if (!destination) return await statusResponse(client, code, setCookie);
 
-  return redirect(destination, setCookie);
+  const location = attribution
+    ? decorateDestinationUrl(destination, attribution)
+    : destination;
+  return redirect(location, setCookie);
+}
+
+function visitDetails(data: unknown): {
+  destination: string;
+  attribution: RedirectAttribution | null;
+} | null {
+  if (typeof data === 'string') {
+    return { destination: data, attribution: null };
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+
+  const record = data as Record<string, unknown>;
+  if (typeof record.destination_url !== 'string') return null;
+  const attribution =
+    typeof record.campaign_name === 'string' && typeof record.placement_code === 'string'
+      ? { campaign: record.campaign_name, placementCode: record.placement_code }
+      : null;
+  return { destination: record.destination_url, attribution };
 }
 
 function redirect(location: string, setCookie?: string | null): Response {

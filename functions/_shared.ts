@@ -236,6 +236,35 @@ export function readCookie(req: Request, name: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+export interface RedirectAttribution {
+  campaign: string;
+  placementCode: string;
+}
+
+// Add customer-visible attribution without overriding campaign-owner choices.
+// URL parsing and serialization also place the query before any fragment.
+export function decorateDestinationUrl(
+  destinationUrl: string,
+  attribution: RedirectAttribution,
+): string {
+  try {
+    const url = new URL(destinationUrl);
+    const parameters = [
+      ['utm_source', 'posterlytics'],
+      ['utm_medium', 'qr'],
+      ['utm_campaign', attribution.campaign],
+      ['utm_content', attribution.placementCode],
+    ] as const;
+
+    for (const [key, value] of parameters) {
+      if (!url.searchParams.has(key)) url.searchParams.append(key, value);
+    }
+    return url.toString();
+  } catch {
+    return destinationUrl;
+  }
+}
+
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 export class UpstreamError extends Error {

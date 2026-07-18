@@ -581,7 +581,7 @@ GRANT UPDATE (
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.placements TO authenticated;
 GRANT SELECT ON public.scans TO authenticated;
 
-CREATE FUNCTION public.log_visit(
+CREATE FUNCTION public.log_visit_attributed(
   p_code TEXT,
   p_device TEXT,
   p_os TEXT,
@@ -589,7 +589,7 @@ CREATE FUNCTION public.log_visit(
   p_country TEXT DEFAULT NULL,
   p_city TEXT DEFAULT NULL
 )
-RETURNS TEXT
+RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
@@ -638,8 +638,35 @@ BEGIN
     p_visitor_hash
   );
 
-  RETURN v_campaign.destination_url;
+  RETURN jsonb_build_object(
+    'destination_url', v_campaign.destination_url,
+    'campaign_name', v_campaign.product_name,
+    'placement_code', v_placement.code
+  );
 END;
+$$;
+
+CREATE FUNCTION public.log_visit(
+  p_code TEXT,
+  p_device TEXT,
+  p_os TEXT,
+  p_visitor_hash TEXT,
+  p_country TEXT DEFAULT NULL,
+  p_city TEXT DEFAULT NULL
+)
+RETURNS TEXT
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT public.log_visit_attributed(
+    p_code,
+    p_device,
+    p_os,
+    p_visitor_hash,
+    p_country,
+    p_city
+  ) ->> 'destination_url';
 $$;
 
 CREATE FUNCTION public.link_status(p_code TEXT)
@@ -1044,6 +1071,7 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.log_visit_attributed(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.log_visit(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.link_status(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.placement_stats(UUID) FROM PUBLIC;
@@ -1052,6 +1080,7 @@ REVOKE ALL ON FUNCTION public.create_poster_generation(UUID, TEXT, JSONB, BOOLEA
 REVOKE ALL ON FUNCTION public.complete_poster_generation(UUID, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.activate_poster_generation(UUID) FROM PUBLIC;
 
+GRANT EXECUTE ON FUNCTION public.log_visit_attributed(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION public.log_visit(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION public.link_status(TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION public.placement_stats(UUID) TO authenticated;
