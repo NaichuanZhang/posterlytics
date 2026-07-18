@@ -1140,6 +1140,14 @@
   color: var(--public-accent) !important;
 }
 
+.public-auth-back-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
 .public-auth-heading span {
   color: var(--public-accent);
   font-family: 'IBM Plex Mono', monospace;
@@ -1202,6 +1210,14 @@
   gap: 7px;
 }
 
+.public-auth-field-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .public-auth-field label {
   color: var(--public-ink);
   font-family: 'IBM Plex Mono', monospace;
@@ -1231,20 +1247,92 @@
   color: #747b78;
 }
 
+.public-auth-field input:disabled {
+  background: var(--public-paper-dim);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.public-auth-inline-button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--public-ink-soft);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.public-auth-inline-button:hover {
+  color: var(--public-accent);
+}
+
+.public-auth-recovery-form,
+.public-auth-success {
+  margin-top: 30px;
+}
+
+.public-auth-recovery-meta {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.public-auth-back-step {
+  justify-self: center;
+}
+
 .public-auth-submit {
   width: 100%;
   margin-top: 3px;
 }
 
-.public-auth-submit svg.is-spinning {
+.public-auth svg.is-spinning {
   animation: public-spin 800ms linear infinite;
 }
 
 .public-auth .inline-notice {
-  border-color: #be3029;
   border-radius: 3px;
+}
+
+.public-auth .inline-notice-error {
+  border-color: #be3029;
   background: #fff0ec;
   color: #7e201c;
+}
+
+.public-auth .inline-notice-info {
+  border-color: #94a69c;
+  background: #edf3ef;
+  color: #34483e;
+}
+
+.public-auth .inline-notice-info > svg {
+  color: #567565;
+}
+
+.public-auth .inline-notice-success {
+  border-color: #779682;
+  background: #e8f2eb;
+  color: #294333;
+}
+
+.public-auth .inline-notice-success > svg {
+  color: #497158;
+}
+
+.public-auth button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
 }
 
 .public-auth-loading {
@@ -1300,10 +1388,30 @@
     background: #2b3330;
   }
 
-  .public-auth .inline-notice {
+  .public-auth .inline-notice-error {
     border-color: #ff7b68;
     background: #3a211f;
     color: #ffd3cc;
+  }
+
+  .public-auth .inline-notice-info {
+    border-color: #71867b;
+    background: #202c27;
+    color: #d5e4dc;
+  }
+
+  .public-auth .inline-notice-info > svg {
+    color: #9eb9aa;
+  }
+
+  .public-auth .inline-notice-success {
+    border-color: #71917c;
+    background: #203128;
+    color: #d4eadb;
+  }
+
+  .public-auth .inline-notice-success > svg {
+    color: #9bc4a8;
   }
 
   .public-auth-field input::placeholder {

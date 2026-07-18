@@ -49,6 +49,7 @@ try {
   await testAuthenticatedHome(browser)
   await testAuthenticatedNotFound(browser)
   await testSignupMode(browser)
+  await testPasswordRecovery(browser)
   await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
   await captureVisualMatrix(browser)
@@ -145,6 +146,70 @@ async function testSignupMode(browserInstance) {
   assert.equal(await signupMode.getAttribute('aria-pressed'), 'true')
   await page.evaluate(() => document.fonts.ready)
   await assertSamplePosterGeometry(page, 'signup mobile')
+
+  await context.close()
+}
+
+async function testPasswordRecovery(browserInstance) {
+  const context = await browserInstance.newContext({
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+  })
+  const authState = { authenticated: false, resetCalls: [] }
+  await installBackendMock(context, authState)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/signin`)
+  await page.getByRole('button', { name: 'Forgot password?' }).click()
+  await page.getByRole('heading', { name: 'Reset your password' }).waitFor()
+
+  await page.getByLabel('Email').fill('locked-out@posterlytics.test')
+  await page.getByRole('button', { name: 'Send reset code' }).click()
+  await page.getByRole('heading', { name: 'Enter the code' }).waitFor()
+  await page.getByText(
+    'If an account exists, a code was sent. Check your inbox and spam folder.',
+  ).waitFor()
+
+  const resendButton = page.getByRole('button', { name: /Resend in \d+s/ })
+  assert.equal(await resendButton.isDisabled(), true)
+
+  await page.getByLabel('Reset code').fill('123456')
+  await page.getByRole('button', { name: 'Verify code' }).click()
+  await page.getByRole('heading', { name: 'Create a new password' }).waitFor()
+
+  await page.getByLabel('New password', { exact: true }).fill('new-secure-password')
+  await page.getByLabel('Confirm new password').fill('new-secure-password')
+  await page.getByRole('button', { name: 'Reset password' }).click()
+  await page.getByRole('heading', { name: 'Password updated' }).waitFor()
+  await page.getByText('Your password has been changed.').waitFor()
+
+  assert.deepEqual(authState.resetCalls, [
+    {
+      endpoint: 'send',
+      body: { email: 'locked-out@posterlytics.test' },
+    },
+    {
+      endpoint: 'exchange',
+      body: { email: 'locked-out@posterlytics.test', code: '123456' },
+    },
+    {
+      endpoint: 'reset',
+      body: {
+        newPassword: 'new-secure-password',
+        otp: 'marketing-reset-token',
+      },
+    },
+  ])
+
+  await page.getByRole('button', { name: 'Sign in with new password' }).click()
+  await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('Email').inputValue(),
+    'locked-out@posterlytics.test',
+  )
+  assert.deepEqual(pageErrors, [])
 
   await context.close()
 }
@@ -282,6 +347,39 @@ async function installBackendMock(context, authState) {
         accessToken: 'marketing-ui-access-token',
         user: fixtures.user,
       })
+    }
+
+    if (path === '/api/auth/email/send-reset-password' && request.method() === 'POST') {
+      authState.resetCalls?.push({
+        endpoint: 'send',
+        body: request.postDataJSON(),
+      })
+      return json(route, {
+        success: true,
+        message: 'Reset code sent.',
+      })
+    }
+
+    if (
+      path === '/api/auth/email/exchange-reset-password-token'
+      && request.method() === 'POST'
+    ) {
+      authState.resetCalls?.push({
+        endpoint: 'exchange',
+        body: request.postDataJSON(),
+      })
+      return json(route, {
+        token: 'marketing-reset-token',
+        expiresAt: '2026-07-18T19:00:00.000Z',
+      })
+    }
+
+    if (path === '/api/auth/email/reset-password' && request.method() === 'POST') {
+      authState.resetCalls?.push({
+        endpoint: 'reset',
+        body: request.postDataJSON(),
+      })
+      return json(route, { message: 'Password reset.' })
     }
 
     if (path === '/api/database/rpc/generation_activity') {

@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, LoaderCircle } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { PasswordRecoveryFlow } from '../auth/PasswordRecoveryFlow'
 import { InlineNotice } from '../components/ui/Feedback'
 import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
@@ -13,6 +14,7 @@ export function SignInPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [recoveringPassword, setRecoveringPassword] = useState(false)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { user, loading, refresh } = useAuth()
@@ -28,7 +30,14 @@ export function SignInPage() {
     params.set('mode', nextMode)
     if (searchParams.has('next')) params.set('next', nextPath)
     setSearchParams(params, { replace: true })
+    setRecoveringPassword(false)
     setError(null)
+  }
+
+  function returnToSignIn(recoveryEmail: string) {
+    setEmail(recoveryEmail)
+    setPassword('')
+    changeMode('signin')
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -75,92 +84,128 @@ export function SignInPage() {
 
       <main className="public-auth-main">
         <section className="public-auth-panel" aria-labelledby="auth-heading">
-          <Link to="/" className="public-auth-back">
-            <ArrowLeft size={15} aria-hidden="true" />
-            Back to Posterlytics
-          </Link>
-          <div className="public-auth-heading">
-            <span>Poster attribution workspace</span>
-            <h1 id="auth-heading">{mode === 'signin' ? 'Sign in' : 'Create an account'}</h1>
-            <p>
-              {mode === 'signin'
-                ? 'Return to your campaigns, posters, and placement data.'
-                : 'Start with a product website and build the first campaign.'}
-            </p>
-          </div>
-
-          <div className="public-auth-mode" aria-label="Authentication mode">
+          {recoveringPassword ? (
             <button
               type="button"
-              className={mode === 'signin' ? 'is-active' : ''}
-              aria-pressed={mode === 'signin'}
-              onClick={() => changeMode('signin')}
+              className="public-auth-back public-auth-back-button"
+              onClick={() => returnToSignIn(email)}
             >
-              Sign in
+              <ArrowLeft size={15} aria-hidden="true" />
+              Back to sign in
             </button>
-            <button
-              type="button"
-              className={mode === 'signup' ? 'is-active' : ''}
-              aria-pressed={mode === 'signup'}
-              onClick={() => changeMode('signup')}
-            >
-              Create account
-            </button>
-          </div>
-
-          {loading || user ? (
-            <div className="public-auth-loading" aria-label="Loading account" aria-busy="true">
-              <span className="public-auth-skeleton" />
-              <span className="public-auth-skeleton" />
-              <span className="public-auth-skeleton" />
-            </div>
           ) : (
-            <form className="public-auth-form" onSubmit={handleSubmit}>
-              <div className="public-auth-field">
-                <label htmlFor="email">Email</label>
-                <input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@company.com"
-                  autoComplete="email"
-                />
-              </div>
-              <div className="public-auth-field">
-                <label htmlFor="password">Password</label>
-                <input
-                  id="password"
-                  type="password"
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="At least 6 characters"
-                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                />
+            <Link to="/" className="public-auth-back">
+              <ArrowLeft size={15} aria-hidden="true" />
+              Back to Posterlytics
+            </Link>
+          )}
+
+          {recoveringPassword ? (
+            <PasswordRecoveryFlow
+              initialEmail={email}
+              onEmailChange={setEmail}
+              onReturnToSignIn={returnToSignIn}
+            />
+          ) : (
+            <>
+              <div className="public-auth-heading">
+                <span>Poster attribution workspace</span>
+                <h1 id="auth-heading">{mode === 'signin' ? 'Sign in' : 'Create an account'}</h1>
+                <p>
+                  {mode === 'signin'
+                    ? 'Return to your campaigns, posters, and placement data.'
+                    : 'Start with a product website and build the first campaign.'}
+                </p>
               </div>
 
-              {error && <InlineNotice tone="error">{error}</InlineNotice>}
+              <div className="public-auth-mode" aria-label="Authentication mode">
+                <button
+                  type="button"
+                  className={mode === 'signin' ? 'is-active' : ''}
+                  aria-pressed={mode === 'signin'}
+                  onClick={() => changeMode('signin')}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  className={mode === 'signup' ? 'is-active' : ''}
+                  aria-pressed={mode === 'signup'}
+                  onClick={() => changeMode('signup')}
+                >
+                  Create account
+                </button>
+              </div>
 
-              <button
-                className="public-button public-button-primary public-auth-submit"
-                disabled={busy}
-              >
-                {busy ? (
-                  <>
-                    <LoaderCircle className="is-spinning" size={16} aria-hidden="true" />
-                    {mode === 'signup' ? 'Creating account' : 'Signing in'}
-                  </>
-                ) : (
-                  <>
-                    {mode === 'signup' ? 'Create account' : 'Sign in'}
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </>
-                )}
-              </button>
-            </form>
+              {loading || user ? (
+                <div className="public-auth-loading" aria-label="Loading account" aria-busy="true">
+                  <span className="public-auth-skeleton" />
+                  <span className="public-auth-skeleton" />
+                  <span className="public-auth-skeleton" />
+                </div>
+              ) : (
+                <form className="public-auth-form" onSubmit={handleSubmit}>
+                  <div className="public-auth-field">
+                    <label htmlFor="email">Email</label>
+                    <input
+                      id="email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="you@company.com"
+                      autoComplete="email"
+                    />
+                  </div>
+                  <div className="public-auth-field">
+                    <div className="public-auth-field-heading">
+                      <label htmlFor="password">Password</label>
+                      {mode === 'signin' && (
+                        <button
+                          type="button"
+                          className="public-auth-inline-button"
+                          onClick={() => {
+                            setError(null)
+                            setRecoveringPassword(true)
+                          }}
+                        >
+                          Forgot password?
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      id="password"
+                      type="password"
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="At least 6 characters"
+                      autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                    />
+                  </div>
+
+                  {error && <InlineNotice tone="error">{error}</InlineNotice>}
+
+                  <button
+                    className="public-button public-button-primary public-auth-submit"
+                    disabled={busy}
+                  >
+                    {busy ? (
+                      <>
+                        <LoaderCircle className="is-spinning" size={16} aria-hidden="true" />
+                        {mode === 'signup' ? 'Creating account' : 'Signing in'}
+                      </>
+                    ) : (
+                      <>
+                        {mode === 'signup' ? 'Create account' : 'Sign in'}
+                        <ArrowRight size={16} aria-hidden="true" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+            </>
           )}
         </section>
       </main>
