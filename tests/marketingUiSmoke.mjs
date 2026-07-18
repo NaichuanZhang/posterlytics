@@ -47,6 +47,7 @@ try {
 
   await testGuestHome(browser)
   await testAuthenticatedHome(browser)
+  await testAuthenticatedNotFound(browser)
   await testSignupMode(browser)
   await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
@@ -89,6 +90,43 @@ async function testAuthenticatedHome(browserInstance) {
   await page.goto(`${BASE_URL}/`)
   await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor()
   assert.equal(await page.getByRole('heading', { name: 'Posterlytics', exact: true }).count(), 0)
+
+  await context.close()
+}
+
+async function testAuthenticatedNotFound(browserInstance) {
+  const context = await browserInstance.newContext({
+    viewport: { width: 1440, height: 960 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, { authenticated: true })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/campaigns/stale-link/details`)
+  await page.getByRole('heading', { name: 'Page not found', exact: true }).waitFor()
+  const rail = page.getByRole('complementary')
+  await rail.waitFor()
+  const primaryNavigation = rail.getByRole('navigation', { name: 'Primary navigation' })
+  await primaryNavigation.waitFor()
+  assert.equal(
+    await primaryNavigation.getByRole('link', { name: 'Campaigns', exact: true }).count(),
+    1,
+  )
+  assert.equal(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    true,
+  )
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/not-found-authenticated.png`,
+    fullPage: true,
+  })
+
+  await page.getByRole('link', { name: 'Back to campaigns' }).click()
+  await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/')
+  assert.deepEqual(pageErrors, [])
 
   await context.close()
 }

@@ -49,11 +49,11 @@ export function AppShell({
   return (
     <div className={`app-shell app-shell-${mode}`}>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <aside className="app-rail" aria-label="Primary navigation">
+      <aside className="app-rail">
         <Link to="/" className="rail-brand" aria-label="Posterlytics" data-tooltip="Posterlytics">
           P
         </Link>
-        <nav className="rail-nav">
+        <nav className="rail-nav" aria-label="Primary navigation">
           <NavLink
             to="/"
             end

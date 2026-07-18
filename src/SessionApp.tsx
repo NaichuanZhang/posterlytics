@@ -29,6 +29,9 @@ const PlacementsPage = lazy(() =>
 const AnalyticsPage = lazy(() =>
   import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage }))
 )
+const NotFoundPage = lazy(() =>
+  import('./pages/NotFoundPage').then((module) => ({ default: module.NotFoundPage }))
+)
 const AuthenticatedActivityScope = lazy(
   () => import('./activity/AuthenticatedActivityScope'),
 )
@@ -81,6 +84,7 @@ export default function SessionApp() {
             />
             <Route path="/campaigns/:id/placements" element={<ProtectedPage><PlacementsPage /></ProtectedPage>} />
             <Route path="/campaigns/:id/analytics" element={<ProtectedPage><AnalyticsPage /></ProtectedPage>} />
+            <Route path="*" element={<ProtectedPage><NotFoundPage /></ProtectedPage>} />
           </Routes>
         </BrowserRouter>
       </ToastProvider>
