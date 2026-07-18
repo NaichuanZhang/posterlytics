@@ -551,4 +551,5 @@ export interface CampaignBreakdowns {
   devices: BreakdownBucket[]
   os: BreakdownBucket[]
   countries: BreakdownBucket[]
+  bots_filtered: number
 }

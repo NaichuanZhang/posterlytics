@@ -2,6 +2,7 @@ import {
   CORS,
   env,
   parseUA,
+  resolveRequestGeo,
   visitorHash,
   readCookie,
   createAnonClient,
@@ -30,21 +31,35 @@ export default async function (req: Request): Promise<Response> {
     visitorId = crypto.randomUUID();
     setCookie = `plv=${visitorId}; Path=/; Max-Age=31536000; SameSite=Lax; Secure; HttpOnly`;
   }
-  const vhash = await visitorHash(env('VISITOR_SALT'), visitorId);
   const { device, os } = parseUA(req.headers.get('user-agent') ?? '');
+  const [vhash, geo] = await Promise.all([
+    visitorHash(env('VISITOR_SALT'), visitorId),
+    resolveRequestGeo(req.headers),
+  ]);
 
   // Log the visit and get the destination in one round-trip. The
   // published-check lives inside the RPC; a null/missing result means the code is
   // unknown or the campaign isn't live.
   let destination: string | null = null;
   try {
-    const { data, error } = await client.database.rpc('log_visit', {
+    const baseParams = {
       p_code: code,
       p_device: device,
       p_os: os,
       p_visitor_hash: vhash,
+    };
+    let result = await client.database.rpc('log_visit', {
+      ...baseParams,
+      p_country: geo.country,
+      p_city: geo.city,
     });
-    if (!error && typeof data === 'string') destination = data;
+    // If the function deploy wins the rollout race, retry against the old
+    // four-argument RPC. The migration's defaulted geo arguments cover the
+    // inverse order.
+    if (result.error) {
+      result = await client.database.rpc('log_visit', baseParams);
+    }
+    if (!result.error && typeof result.data === 'string') destination = result.data;
   } catch {
     destination = null;
   }

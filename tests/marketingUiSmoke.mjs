@@ -195,6 +195,10 @@ async function testProtectedReturnPath(browserInstance) {
   await page.getByLabel('Password').fill('sample-password')
   await page.getByRole('button', { name: 'Sign in', exact: true }).last().click()
   await page.getByRole('heading', { name: 'Analytics', exact: true }).waitFor()
+  assert.equal(
+    await page.locator('.analytics-filter-note').innerText(),
+    'Bots filtered: 17',
+  )
 
   const returnedUrl = new URL(page.url())
   assert.equal(
@@ -413,6 +417,7 @@ function createFixtures() {
     devices: [{ key: 'Mobile', visits: 161 }, { key: 'Desktop', visits: 23 }],
     os: [{ key: 'iOS', visits: 111 }, { key: 'Android', visits: 73 }],
     countries: [{ key: 'United States', visits: 122 }, { key: 'Canada', visits: 62 }],
+    bots_filtered: 17,
   }
 
   return {

@@ -113,6 +113,11 @@ export function AnalyticsPage() {
           <Metric label="Repeat visit share" value={`${returnRate}%`} />
         </section>
       )}
+      {!breakdownsLoading && !breakdownsError && (
+        <p className="analytics-filter-note">
+          Bots filtered: <strong>{breakdowns.bots_filtered}</strong>
+        </p>
+      )}
 
       <section className="analytics-table-section" aria-labelledby="placement-comparison-heading">
         <div className="section-heading">

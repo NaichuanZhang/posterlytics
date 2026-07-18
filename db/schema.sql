@@ -585,7 +585,9 @@ CREATE FUNCTION public.log_visit(
   p_code TEXT,
   p_device TEXT,
   p_os TEXT,
-  p_visitor_hash TEXT
+  p_visitor_hash TEXT,
+  p_country TEXT DEFAULT NULL,
+  p_city TEXT DEFAULT NULL
 )
 RETURNS TEXT
 LANGUAGE plpgsql
@@ -618,6 +620,8 @@ BEGIN
     user_id,
     device,
     os,
+    country,
+    city,
     visitor_hash
   )
   VALUES (
@@ -626,6 +630,11 @@ BEGIN
     v_placement.user_id,
     p_device,
     p_os,
+    CASE
+      WHEN BTRIM(p_country) ~ '^[A-Za-z]{2}$' THEN UPPER(BTRIM(p_country))
+      ELSE NULL
+    END,
+    LEFT(NULLIF(BTRIM(p_city), ''), 120),
     p_visitor_hash
   );
 
@@ -681,7 +690,9 @@ AS $$
     COUNT(s.id) AS visits,
     COUNT(DISTINCT s.visitor_hash) AS unique_visitors
   FROM public.placements pl
-  LEFT JOIN public.scans s ON s.placement_id = pl.id
+  LEFT JOIN public.scans s
+    ON s.placement_id = pl.id
+    AND s.device IS DISTINCT FROM 'bot'
   WHERE pl.campaign_id = p_campaign_id
     AND pl.user_id = (SELECT auth.uid())
   GROUP BY pl.id, pl.label, pl.code, pl.created_at
@@ -695,14 +706,19 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
-  WITH owned AS (
-    SELECT
-      COALESCE(NULLIF(s.device, ''), 'Unknown') AS device,
-      COALESCE(NULLIF(s.os, ''), 'Unknown') AS os,
-      COALESCE(NULLIF(s.country, ''), 'Unknown') AS country
+  WITH owned_scans AS (
+    SELECT s.device, s.os, s.country
     FROM public.scans s
     WHERE s.campaign_id = p_campaign_id
       AND s.user_id = (SELECT auth.uid())
+  ),
+  filtered AS (
+    SELECT
+      COALESCE(NULLIF(device, ''), 'Unknown') AS device,
+      COALESCE(NULLIF(os, ''), 'Unknown') AS os,
+      COALESCE(NULLIF(country, ''), 'Unknown') AS country
+    FROM owned_scans
+    WHERE device IS DISTINCT FROM 'bot'
   ),
   devices AS (
     SELECT jsonb_agg(
@@ -711,7 +727,7 @@ AS $$
     ) AS items
     FROM (
       SELECT device, COUNT(*) AS visit_count
-      FROM owned
+      FROM filtered
       GROUP BY device
     ) rows
   ),
@@ -722,7 +738,7 @@ AS $$
     ) AS items
     FROM (
       SELECT os, COUNT(*) AS visit_count
-      FROM owned
+      FROM filtered
       GROUP BY os
     ) rows
   ),
@@ -733,14 +749,19 @@ AS $$
     ) AS items
     FROM (
       SELECT country, COUNT(*) AS visit_count
-      FROM owned
+      FROM filtered
       GROUP BY country
     ) rows
   )
   SELECT jsonb_build_object(
     'devices', COALESCE((SELECT items FROM devices), '[]'::jsonb),
     'os', COALESCE((SELECT items FROM operating_systems), '[]'::jsonb),
-    'countries', COALESCE((SELECT items FROM countries), '[]'::jsonb)
+    'countries', COALESCE((SELECT items FROM countries), '[]'::jsonb),
+    'bots_filtered', (
+      SELECT COUNT(*)
+      FROM owned_scans
+      WHERE device = 'bot'
+    )
   );
 $$;
 
@@ -1023,7 +1044,7 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.log_visit(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.log_visit(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.link_status(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.placement_stats(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.campaign_breakdowns(UUID) FROM PUBLIC;
@@ -1031,7 +1052,7 @@ REVOKE ALL ON FUNCTION public.create_poster_generation(UUID, TEXT, JSONB, BOOLEA
 REVOKE ALL ON FUNCTION public.complete_poster_generation(UUID, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.activate_poster_generation(UUID) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION public.log_visit(TEXT, TEXT, TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION public.log_visit(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION public.link_status(TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION public.placement_stats(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.campaign_breakdowns(UUID) TO authenticated;

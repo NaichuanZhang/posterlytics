@@ -86,6 +86,141 @@ export function parseUA(ua: string): { device: string; os: string } {
   return { device, os };
 }
 
+export interface CoarseGeo {
+  country: string | null;
+  city: string | null;
+}
+
+export const GEO_LOOKUP_TIMEOUT_MS = 800;
+
+type GeoFetcher = (input: string, init?: RequestInit) => Promise<Response>;
+
+const GEO_HEADER_PAIRS = [
+  { country: 'cf-ipcountry', city: 'cf-ipcity' },
+  { country: 'x-vercel-ip-country', city: 'x-vercel-ip-city' },
+  { country: 'cloudfront-viewer-country', city: 'cloudfront-viewer-city' },
+  { country: 'x-geo-country', city: 'x-geo-city' },
+] as const;
+
+function normalizeCountry(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const country = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(country) && country !== 'XX' && country !== 'ZZ'
+    ? country
+    : null;
+}
+
+function normalizeCity(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // Keep an unescaped header value as-is.
+  }
+  const city = decoded.replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return city ? city.slice(0, 120) : null;
+}
+
+export function geoFromHeaders(headers: Headers): CoarseGeo | null {
+  for (const pair of GEO_HEADER_PAIRS) {
+    const country = normalizeCountry(headers.get(pair.country));
+    if (country) {
+      return {
+        country,
+        city: normalizeCity(headers.get(pair.city)),
+      };
+    }
+  }
+  return null;
+}
+
+function normalizeForwardedIp(value: string | null): string | null {
+  let candidate = value?.trim() ?? '';
+  if (!candidate || candidate.length > 64) return null;
+
+  const bracketed = /^\[([0-9a-f:.]+)\](?::\d{1,5})?$/i.exec(candidate);
+  if (bracketed) candidate = bracketed[1];
+
+  const ipv4 = /^(\d{1,3}(?:\.\d{1,3}){3})(?::\d{1,5})?$/.exec(candidate);
+  if (ipv4) {
+    const octets = ipv4[1].split('.').map(Number);
+    return octets.every((octet) => octet <= 255) ? ipv4[1] : null;
+  }
+
+  return candidate.includes(':') && /^[0-9a-f:.]+$/i.test(candidate)
+    ? candidate.toLowerCase()
+    : null;
+}
+
+export function forwardedClientIp(headers: Headers): string | null {
+  const candidates = [
+    headers.get('cf-connecting-ip'),
+    headers.get('x-real-ip'),
+    headers.get('x-forwarded-for')?.split(',', 1)[0] ?? null,
+  ];
+  for (const candidate of candidates) {
+    const ip = normalizeForwardedIp(candidate);
+    if (ip) return ip;
+  }
+  return null;
+}
+
+export function geoFromProviderPayload(payload: unknown): CoarseGeo | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  if (record.success !== true) return null;
+  const country = normalizeCountry(record.country_code);
+  if (!country) return null;
+  return {
+    country,
+    city: normalizeCity(record.city),
+  };
+}
+
+// Prefer location metadata already supplied by the hosting CDN. When it is
+// absent, briefly resolve the forwarded address and discard it immediately.
+// All failures return null geo fields; none are logged or allowed to escape.
+export async function resolveRequestGeo(
+  headers: Headers,
+  fetcher: GeoFetcher = fetch,
+  timeoutMs = GEO_LOOKUP_TIMEOUT_MS,
+): Promise<CoarseGeo> {
+  const headerGeo = geoFromHeaders(headers);
+  if (headerGeo) return headerGeo;
+
+  const clientIp = forwardedClientIp(headers);
+  if (!clientIp) return { country: null, city: null };
+
+  const controller = new AbortController();
+  const boundedTimeout = Math.min(Math.max(timeoutMs, 1), 2000);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, boundedTimeout);
+  });
+  const lookup = fetcher(
+    `https://ipwho.is/${encodeURIComponent(clientIp)}?fields=success,country_code,city`,
+    {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    },
+  )
+    .then(async (response) => {
+      if (!response.ok) return null;
+      return geoFromProviderPayload(await response.json());
+    })
+    .catch(() => null);
+
+  try {
+    return (await Promise.race([lookup, timeout])) ?? { country: null, city: null };
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 // SHA-256 hex of (salt | visitorId). Stable visitor identity from a first-party
 // cookie — no raw IP ever touches the database.
 export async function visitorHash(salt: string, visitorId: string): Promise<string> {

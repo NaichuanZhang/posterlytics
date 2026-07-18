@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { insforge } from '../lib/insforge'
 import type { CampaignBreakdowns } from '../lib/types'
 
-const EMPTY: CampaignBreakdowns = { devices: [], os: [], countries: [] }
+const EMPTY: CampaignBreakdowns = {
+  devices: [],
+  os: [],
+  countries: [],
+  bots_filtered: 0,
+}
 
 // Campaign-wide audience breakdowns (device / OS / country). The
 // campaign_breakdowns RPC returns a single JSONB object — not a row set — so we
@@ -31,6 +36,7 @@ export function useCampaignBreakdowns(campaignId: string | undefined) {
         devices: normalize(raw.devices),
         os: normalize(raw.os),
         countries: normalize(raw.countries),
+        bots_filtered: Number(raw.bots_filtered ?? 0),
       })
       setError(null)
     }
