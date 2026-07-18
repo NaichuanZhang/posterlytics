@@ -1,0 +1,60 @@
+import { AlertCircle, CheckCircle2, Clock3, LoaderCircle } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  deriveGenerationStages,
+  elapsedSeconds,
+  formatElapsed,
+  generationActivityLabel,
+} from '../lib/generationActivity'
+import type { GenerationActivityItem } from '../lib/types'
+import { GenerationStageProgress } from './GenerationStageProgress'
+
+export function DurableGenerationStatus({
+  item,
+  safeToLeave = false,
+}: {
+  item: GenerationActivityItem
+  safeToLeave?: boolean
+}) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (item.completed_at) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [item.completed_at])
+
+  const stages = useMemo(() => deriveGenerationStages(item), [item])
+  return (
+    <div className="durable-generation-status" aria-live="polite">
+      <div className="durable-generation-heading">
+        {item.status === 'succeeded' ? (
+          <CheckCircle2 className="is-ready" size={18} aria-hidden="true" />
+        ) : item.status === 'failed' ? (
+          <AlertCircle className="is-failed" size={18} aria-hidden="true" />
+        ) : (
+          <LoaderCircle
+            size={18}
+            className="generation-stage-spinner"
+            aria-hidden="true"
+          />
+        )}
+        <div>
+          <strong>{generationActivityLabel(item)}</strong>
+          {safeToLeave && item.status !== 'failed' && item.status !== 'succeeded' && (
+            <span>Generation started. Safe to leave Posterlytics.</span>
+          )}
+        </div>
+        <span className="generation-elapsed">
+          <Clock3 size={13} aria-hidden="true" />
+          {formatElapsed(elapsedSeconds(item, now))}
+        </span>
+      </div>
+      <GenerationStageProgress stages={stages} />
+      {item.status === 'retrying' && item.last_error_message && (
+        <p className="generation-retry-note">
+          Attempt {Math.min(item.attempt_count + 1, item.max_attempts)} of {item.max_attempts}
+        </p>
+      )}
+    </div>
+  )
+}

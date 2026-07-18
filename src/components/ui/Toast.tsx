@@ -7,17 +7,21 @@ import {
   type ReactNode,
 } from 'react'
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react'
+import {
+  appendToast,
+  type ToastItem,
+  type ToastOptions,
+  type ToastTone,
+} from '../../lib/toast'
 
-type ToastTone = 'success' | 'error' | 'info'
-
-interface ToastItem {
-  id: number
-  message: string
-  tone: ToastTone
-}
+export type {
+  ToastItem,
+  ToastOptions,
+  ToastTone,
+} from '../../lib/toast'
 
 interface ToastContextValue {
-  notify: (message: string, tone?: ToastTone) => void
+  notify: (message: string, tone?: ToastTone, options?: ToastOptions) => void
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null)
@@ -29,10 +33,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
 
-  const notify = useCallback((message: string, tone: ToastTone = 'info') => {
+  const notify = useCallback((
+    message: string,
+    tone: ToastTone = 'info',
+    options: ToastOptions = {},
+  ) => {
     const id = Date.now() + Math.random()
-    setToasts((current) => [...current, { id, message, tone }])
-    window.setTimeout(() => dismiss(id), 3600)
+    setToasts((current) => appendToast(current, {
+      id,
+      message,
+      tone,
+      dedupeKey: options.dedupeKey,
+      action: options.action,
+    }))
+    window.setTimeout(() => dismiss(id), options.durationMs ?? (options.action ? 7000 : 3600))
   }, [dismiss])
 
   const value = useMemo(() => ({ notify }), [notify])
@@ -45,6 +59,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div key={toast.id} className={`toast toast-${toast.tone}`} role="status">
             <ToastIcon tone={toast.tone} />
             <span>{toast.message}</span>
+            {toast.action && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  toast.action?.onClick()
+                  dismiss(toast.id)
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
             <button
               type="button"
               className="toast-dismiss"

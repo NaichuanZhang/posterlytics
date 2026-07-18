@@ -13,7 +13,9 @@ import {
   markGenerationFailed,
   prepareImageReferences,
   resolvedImageModelId,
+  stageAlreadySucceeded,
   StageTraceRecorder,
+  type GenerationStageRunContext,
   type PosterLayout,
   type TypedImageReference,
 } from './_shared.ts';
@@ -44,21 +46,72 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: 'missing campaignId or generationId' }, 400);
   }
 
+  try {
+    return await runHeroStage({
+      client,
+      userId: userData.user.id,
+      campaignId: body.campaignId,
+      generationId: body.generationId,
+      finalizeFailure: true,
+      serverOwned: false,
+    });
+  } catch (error) {
+    const details = errorDetails(error);
+    await markGenerationFailed(
+      client,
+      body.generationId,
+      'hero',
+      error,
+      details.code,
+      userData.user.id,
+    );
+    return jsonResponse(
+      { error: details.message, code: details.code, retryable: details.retryable },
+      details.upstream_status ?? 500,
+    );
+  }
+}
+
+export async function runHeroStage(
+  context: GenerationStageRunContext,
+): Promise<Response> {
+  const {
+    client,
+    userId,
+    campaignId,
+    generationId,
+    finalizeFailure,
+    serverOwned,
+  } = context;
+
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
     .select('id, product_name, tagline')
-    .eq('id', body.campaignId)
+    .eq('id', campaignId)
+    .eq('user_id', userId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status')
-    .eq('id', body.generationId)
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key')
+    .eq('id', generationId)
     .eq('campaign_id', campaign.id)
+    .eq('user_id', userId)
     .maybeSingle();
   if (generationError || !generation) {
     return jsonResponse({ error: 'poster generation not found' }, 404);
+  }
+  const generationStatus = String((generation as Record<string, unknown>).status ?? '');
+  if (generationStatus === 'failed') {
+    return jsonResponse({ error: 'poster generation already failed' }, 409);
+  }
+  if (generationStatus === 'ready' || await stageAlreadySucceeded(context, 'hero')) {
+    return jsonResponse({
+      generation_id: generation.id,
+      poster_image_url: (generation as Record<string, unknown>).hero_image_url ?? null,
+      idempotent: true,
+    });
   }
 
   const parentId = String((generation as Record<string, unknown>).parent_generation_id ?? '');
@@ -68,6 +121,7 @@ export default async function (req: Request): Promise<Response> {
         .select('id, poster_layout, hero_image_url, hero_image_key')
         .eq('id', parentId)
         .eq('campaign_id', campaign.id)
+        .eq('user_id', userId)
         .eq('status', 'ready')
         .maybeSingle()
     : { data: null };
@@ -75,15 +129,25 @@ export default async function (req: Request): Promise<Response> {
   const { error: stageError } = await client.database
     .from('poster_generations')
     .update({ status: 'painting' })
-    .eq('id', generation.id);
+    .eq('id', generation.id)
+    .eq('user_id', userId);
   if (stageError) {
-    await markGenerationFailed(client, generation.id, 'hero', stageError, 'stage_transition_failed');
+    if (finalizeFailure) {
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'hero',
+        stageError,
+        'stage_transition_failed',
+        userId,
+      );
+    }
     return jsonResponse({ error: stageError.message }, 409);
   }
   const trace = new StageTraceRecorder(client, {
     generationId: String(generation.id),
     campaignId: String(campaign.id),
-    userId: userData.user.id,
+    userId,
     stage: 'hero',
   });
   await trace.start();
@@ -261,8 +325,17 @@ export default async function (req: Request): Promise<Response> {
       () => aiImage(prompt, '2:3', referenceImages),
     );
   } catch (e) {
-    await trace.fail(e, 'image_generation_failed');
-    await markGenerationFailed(client, generation.id, 'hero', e, 'image_generation_failed');
+    if (finalizeFailure) {
+      await trace.fail(e, 'image_generation_failed');
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'hero',
+        e,
+        'image_generation_failed',
+        userId,
+      );
+    }
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
@@ -284,18 +357,23 @@ export default async function (req: Request): Promise<Response> {
     const blob = await imageSourceToBlob(imageSource);
     posterMimeType = blob.type || posterMimeType;
     posterSizeBytes = blob.size;
+    const posterKey = `poster/${campaign.id}/${generation.id}/poster.png`;
+    await client.storage.from('assets').remove(posterKey).catch(() => {});
     const { data, error } = await client.storage
       .from('assets')
-      .upload(`poster/${campaign.id}/${generation.id}/${crypto.randomUUID()}.png`, blob);
+      .upload(posterKey, blob);
     if (error || !data) {
-      await trace.fail(error?.message ?? 'upload failed', 'poster_upload_failed');
-      await markGenerationFailed(
-        client,
-        generation.id,
-        'hero',
-        error?.message ?? 'upload failed',
-        'poster_upload_failed',
-      );
+      if (finalizeFailure) {
+        await trace.fail(error?.message ?? 'upload failed', 'poster_upload_failed');
+        await markGenerationFailed(
+          client,
+          generation.id,
+          'hero',
+          error?.message ?? 'upload failed',
+          'poster_upload_failed',
+          userId,
+        );
+      }
       logPipelineEvent({
         source: 'hero',
         campaignId: campaign.id,
@@ -310,8 +388,17 @@ export default async function (req: Request): Promise<Response> {
     url = data.url;
     key = data.key;
   } catch (e) {
-    await trace.fail(e, 'poster_upload_failed');
-    await markGenerationFailed(client, generation.id, 'hero', e, 'poster_upload_failed');
+    if (finalizeFailure) {
+      await trace.fail(e, 'poster_upload_failed');
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'hero',
+        e,
+        'poster_upload_failed',
+        userId,
+      );
+    }
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
@@ -330,23 +417,33 @@ export default async function (req: Request): Promise<Response> {
     mime_type: posterMimeType,
     size_bytes: posterSizeBytes,
   });
-  await trace.succeed();
 
-  const { data: completedGeneration, error: completeError } = await client.database
-    .rpc('complete_poster_generation', {
-      p_generation_id: generation.id,
-      p_hero_image_url: url,
-      p_hero_image_key: key,
-    });
+  const completionRpc = serverOwned
+    ? client.database.rpc('complete_poster_generation_for_worker', {
+        p_generation_id: generation.id,
+        p_user_id: userId,
+        p_hero_image_url: url,
+        p_hero_image_key: key,
+      })
+    : client.database.rpc('complete_poster_generation', {
+        p_generation_id: generation.id,
+        p_hero_image_url: url,
+        p_hero_image_key: key,
+      });
+  const { data: completedGeneration, error: completeError } = await completionRpc;
   if (completeError) {
     await client.storage.from('assets').remove(key).catch(() => {});
-    await markGenerationFailed(
-      client,
-      generation.id,
-      'complete',
-      completeError,
-      'generation_completion_failed',
-    );
+    if (finalizeFailure) {
+      await trace.fail(completeError, 'generation_completion_failed');
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'complete',
+        completeError,
+        'generation_completion_failed',
+        userId,
+      );
+    }
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
@@ -358,6 +455,7 @@ export default async function (req: Request): Promise<Response> {
     });
     return jsonResponse({ error: completeError.message }, 500);
   }
+  await trace.succeed();
 
   // Return the compiled text-to-image prompt for the generation loading UI.
   return jsonResponse({

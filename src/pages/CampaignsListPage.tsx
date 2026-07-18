@@ -2,6 +2,7 @@ import { GalleryVerticalEnd, Plus, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { EmptyState, InlineNotice, Skeleton } from '../components/ui/Feedback'
 import { insforge } from '../lib/insforge'
 import {
@@ -9,11 +10,13 @@ import {
   type CampaignStatusFilter,
 } from '../lib/campaignFilters'
 import type { Campaign } from '../lib/types'
+import type { GenerationActivityItem } from '../lib/types'
+import { activityForCampaign, generationActivityLabel } from '../lib/generationActivity'
 
 const STATUS_FILTERS: Array<{ value: CampaignStatusFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Draft' },
-  { value: 'analyzing', label: 'Generating' },
+  { value: 'generating', label: 'Generating' },
   { value: 'published', label: 'Published' },
 ]
 
@@ -23,6 +26,7 @@ export function CampaignsListPage() {
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<CampaignStatusFilter>('all')
+  const { items: generationActivity } = useGenerationActivity()
 
   const loadCampaigns = useCallback(async () => {
     setLoading(true)
@@ -49,9 +53,21 @@ export function CampaignsListPage() {
     void loadCampaigns()
   }, [loadCampaigns])
 
+  const campaignRows = useMemo(() => campaigns.map((campaign) => {
+    const activity = activityForCampaign(generationActivity, campaign.id)
+    return {
+      campaign,
+      activity,
+      product_name: campaign.product_name,
+      product_url: campaign.product_url,
+      status: campaign.status,
+      is_generating: !!activity,
+    }
+  }), [campaigns, generationActivity])
+
   const filteredCampaigns = useMemo(
-    () => filterCampaigns(campaigns, query, status),
-    [campaigns, query, status],
+    () => filterCampaigns(campaignRows, query, status),
+    [campaignRows, query, status],
   )
 
   return (
@@ -140,8 +156,8 @@ export function CampaignsListPage() {
         />
       ) : (
         <section className="campaign-browser" aria-label="Campaign files">
-          {filteredCampaigns.map((campaign) => (
-            <CampaignFile key={campaign.id} campaign={campaign} />
+          {filteredCampaigns.map(({ campaign, activity }) => (
+            <CampaignFile key={campaign.id} campaign={campaign} activity={activity} />
           ))}
         </section>
       )}
@@ -149,7 +165,13 @@ export function CampaignsListPage() {
   )
 }
 
-function CampaignFile({ campaign }: { campaign: Campaign }) {
+function CampaignFile({
+  campaign,
+  activity,
+}: {
+  campaign: Campaign
+  activity: GenerationActivityItem | null
+}) {
   const thumbnail = campaign.hero_image_url
     || campaign.brand_assets?.primary_image_url
     || campaign.brand_assets?.images?.[0]?.url
@@ -165,11 +187,14 @@ function CampaignFile({ campaign }: { campaign: Campaign }) {
             <GalleryVerticalEnd size={26} />
           </span>
         )}
-        <span className={`status-badge status-${campaign.status}`}>{campaign.status}</span>
+        <span className={`status-badge status-${activity ? 'generating' : campaign.status}`}>
+          {activity ? generationActivityLabel(activity) : campaign.status}
+        </span>
       </div>
       <div className="campaign-file-copy">
         <strong>{campaign.product_name}</strong>
         <span>{safeHostname(campaign.product_url)}</span>
+        {activity && <span className="campaign-generation-state">{generationActivityLabel(activity)}</span>}
         <time dateTime={campaign.created_at}>{formatDate(campaign.created_at)}</time>
       </div>
     </Link>

@@ -2,6 +2,7 @@ import {
   CORS,
   aiChat,
   buildTraceContentManifest,
+  errorDetails,
   extractJson,
   jsonResponse,
   createUserClient,
@@ -15,14 +16,17 @@ import {
   markGenerationFailed,
   prepareImageReferences,
   resolvedChatModelId,
+  stageAlreadySucceeded,
   StageTraceRecorder,
   userContentWithImageReferences,
   extractEventDetails,
   fetchLumaHtml,
   formatEventLines,
   isLumaHost,
+  type BackendClient,
   type DesignTokens,
   type EventDetails,
+  type GenerationStageRunContext,
   type TraceImageAsset,
   type TypedImageReference,
 } from './_shared.ts';
@@ -57,19 +61,61 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: 'colorScheme must be "light" or "dark"' }, 400);
   }
 
-  // Load the campaign (owner RLS guarantees it's the caller's).
+  try {
+    return await runAnalyzeStage({
+      client,
+      userId: userData.user.id,
+      campaignId: body.campaignId,
+      generationId: body.generationId,
+      colorScheme,
+      finalizeFailure: true,
+      serverOwned: false,
+    });
+  } catch (error) {
+    const details = errorDetails(error);
+    await markGenerationFailed(
+      client,
+      body.generationId,
+      'analyze',
+      error,
+      details.code,
+      userData.user.id,
+    );
+    return jsonResponse(
+      { error: details.message, code: details.code, retryable: details.retryable },
+      details.upstream_status ?? 500,
+    );
+  }
+}
+
+export async function runAnalyzeStage(
+  context: GenerationStageRunContext & { colorScheme: 'light' | 'dark' },
+): Promise<Response> {
+  const {
+    client,
+    userId,
+    campaignId,
+    generationId,
+    colorScheme,
+    finalizeFailure,
+  } = context;
+
+  // Admin workers are still explicitly owner-scoped; wrappers get the same
+  // defense in depth in addition to owner RLS.
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
     .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario')
-    .eq('id', body.campaignId)
+    .eq('id', campaignId)
+    .eq('user_id', userId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, generation_mode, instruction, reference_images, scenario, screenshot_url, screenshot_key')
-    .eq('id', body.generationId)
+    .select('id, campaign_id, status, generation_mode, instruction, reference_images, scenario, screenshot_url, screenshot_key')
+    .eq('id', generationId)
     .eq('campaign_id', campaign.id)
+    .eq('user_id', userId)
     .maybeSingle();
   if (generationError || !generation) {
     return jsonResponse({ error: 'poster generation not found' }, 404);
@@ -77,19 +123,39 @@ export default async function (req: Request): Promise<Response> {
   if ((generation as Record<string, unknown>).generation_mode !== 'website_refresh') {
     return jsonResponse({ error: 'analysis is only valid for website refresh generations' }, 409);
   }
+  const generationStatus = String((generation as Record<string, unknown>).status ?? '');
+  if (generationStatus === 'failed') {
+    return jsonResponse({ error: 'poster generation already failed' }, 409);
+  }
+  if (
+    ['designing', 'painting', 'ready'].includes(generationStatus)
+    || await stageAlreadySucceeded(context, 'analyze')
+  ) {
+    return jsonResponse({ generation_id: generation.id, idempotent: true });
+  }
 
   const { error: stageError } = await client.database
     .from('poster_generations')
     .update({ status: 'analyzing' })
-    .eq('id', generation.id);
+    .eq('id', generation.id)
+    .eq('user_id', userId);
   if (stageError) {
-    await markGenerationFailed(client, generation.id, 'analyze', stageError, 'stage_transition_failed');
+    if (finalizeFailure) {
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'analyze',
+        stageError,
+        'stage_transition_failed',
+        userId,
+      );
+    }
     return jsonResponse({ error: stageError.message }, 409);
   }
   const trace = new StageTraceRecorder(client, {
     generationId: String(generation.id),
     campaignId: String(campaign.id),
-    userId: userData.user.id,
+    userId,
     stage: 'analyze',
   });
   await trace.start();
@@ -191,11 +257,11 @@ export default async function (req: Request): Promise<Response> {
   // rehosts successfully. Image models 400 on SVG references, and the site's
   // canonical <link rel="logo"> is often an SVG — so skip past it to the
   // masthead PNG or apple-touch-icon rather than persisting an unusable URL.
-  for (const candidate of assets.logoCandidates.slice(0, 5)) {
+  for (const [index, candidate] of assets.logoCandidates.slice(0, 5).entries()) {
     const up = await rehost(
       client,
       candidate,
-      `brand/${campaign.id}/${generation.id}/logo-${crypto.randomUUID().slice(0, 8)}`,
+      `brand/${campaign.id}/${generation.id}/logo-${index + 1}`,
       { rasterOnly: true },
     );
     if (up) {
@@ -214,11 +280,11 @@ export default async function (req: Request): Promise<Response> {
       detail: `Found ${assets.logoCandidates.length} logo candidate(s) but none were fetchable raster images; painting with the product name instead.`,
     });
   }
-  for (const imgUrl of assets.images.slice(0, 2)) {
+  for (const [index, imgUrl] of assets.images.slice(0, 2).entries()) {
     const up = await rehost(
       client,
       imgUrl,
-      `brand/${campaign.id}/${generation.id}/img-${crypto.randomUUID().slice(0, 8)}`,
+      `brand/${campaign.id}/${generation.id}/img-${index + 1}`,
     );
     if (up) brand_assets.images.push({ url: up.url, key: up.key });
   }
@@ -235,9 +301,11 @@ export default async function (req: Request): Promise<Response> {
   if (capture.styleBoardDataUrl) {
     try {
       const blob = dataUrlToBlob(capture.styleBoardDataUrl);
+      const styleBoardKey = `style-board/${campaign.id}/${generation.id}/style-board.jpg`;
+      await client.storage.from('assets').remove(styleBoardKey).catch(() => {});
       const { data, error } = await client.storage
         .from('assets')
-        .upload(`style-board/${campaign.id}/${generation.id}/${crypto.randomUUID().slice(0, 8)}.jpg`, blob);
+        .upload(styleBoardKey, blob);
       if (!error && data) {
         screenshot_url = data.url;
         screenshot_key = data.key;
@@ -352,11 +420,21 @@ export default async function (req: Request): Promise<Response> {
         screenshot_url,
         screenshot_key,
       })
-      .eq('id', generation.id);
+      .eq('id', generation.id)
+      .eq('user_id', userId);
     if (upErrEv) {
       await discardUploadedAnalysisAssets();
-      await trace.fail(upErrEv, 'generation_persist_failed');
-      await markGenerationFailed(client, generation.id, 'analyze', upErrEv, 'generation_persist_failed');
+      if (finalizeFailure) {
+        await trace.fail(upErrEv, 'generation_persist_failed');
+        await markGenerationFailed(
+          client,
+          generation.id,
+          'analyze',
+          upErrEv,
+          'generation_persist_failed',
+          userId,
+        );
+      }
       logPipelineEvent({
         source: 'analyze', campaignId: campaign.id, generationId: generation.id, status: 'failed',
         code: 'generation_persist_failed',
@@ -531,11 +609,21 @@ export default async function (req: Request): Promise<Response> {
       screenshot_url,
       screenshot_key,
     })
-    .eq('id', generation.id);
+    .eq('id', generation.id)
+    .eq('user_id', userId);
   if (upErr) {
     await discardUploadedAnalysisAssets();
-    await trace.fail(upErr, 'generation_persist_failed');
-    await markGenerationFailed(client, generation.id, 'analyze', upErr, 'generation_persist_failed');
+    if (finalizeFailure) {
+      await trace.fail(upErr, 'generation_persist_failed');
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'analyze',
+        upErr,
+        'generation_persist_failed',
+        userId,
+      );
+    }
     logPipelineEvent({
       source: 'analyze',
       campaignId: campaign.id,
@@ -700,7 +788,7 @@ function stripToText(htmlText: string): string {
 }
 
 async function rehost(
-  client: ReturnType<typeof createUserClient>,
+  client: BackendClient,
   srcUrl: string,
   keyBase: string,
   opts: { rasterOnly?: boolean } = {},
@@ -719,7 +807,9 @@ async function rehost(
     const blob = await r.blob();
     if (blob.size === 0 || blob.size > 5_000_000) return null;
     const ext = ct.includes('png') ? 'png' : ct.includes('svg') ? 'svg' : ct.includes('webp') ? 'webp' : 'jpg';
-    const { data, error } = await client.storage.from('assets').upload(`${keyBase}.${ext}`, blob);
+    const key = `${keyBase}.${ext}`;
+    await client.storage.from('assets').remove(key).catch(() => {});
+    const { data, error } = await client.storage.from('assets').upload(key, blob);
     if (error || !data) return null;
     return { url: data.url, key: data.key };
   } catch {

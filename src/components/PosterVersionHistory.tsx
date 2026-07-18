@@ -1,10 +1,13 @@
 import { AlertTriangle, Check, History, ListTree, RotateCcw } from 'lucide-react'
-import type { PosterGeneration } from '../lib/types'
+import type { GenerationActivityItem, PosterGeneration } from '../lib/types'
+import { DurableGenerationStatus } from './DurableGenerationStatus'
 import { Skeleton } from './ui/Feedback'
 
 interface Props {
   generations: PosterGeneration[]
+  activeGenerations: PosterGeneration[]
   failedGenerations: PosterGeneration[]
+  activities: GenerationActivityItem[]
   selectedGeneration: PosterGeneration | null
   currentGenerationId: string | null
   loading: boolean
@@ -13,11 +16,14 @@ interface Props {
   onSelect: (generationId: string) => void
   onActivate: (generationId: string) => void
   onReview: (generation: PosterGeneration) => void
+  onRetry: (activity: GenerationActivityItem) => void
 }
 
 export function PosterVersionHistory({
   generations,
+  activeGenerations,
   failedGenerations,
+  activities,
   selectedGeneration,
   currentGenerationId,
   loading,
@@ -26,7 +32,13 @@ export function PosterVersionHistory({
   onSelect,
   onActivate,
   onReview,
+  onRetry,
 }: Props) {
+  const activeGeneration = activeGenerations[0] ?? null
+  const activeActivity = activeGeneration
+    ? activities.find((item) => item.generation_id === activeGeneration.id) ?? null
+    : null
+
   return (
     <section className="version-history" aria-labelledby="versions-heading">
       <div className="panel-heading">
@@ -36,6 +48,20 @@ export function PosterVersionHistory({
         </div>
         <span>{generations.length}</span>
       </div>
+
+      {activeGeneration && activeActivity && (
+        <div className="active-version-row">
+          <DurableGenerationStatus item={activeActivity} />
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            onClick={() => onReview(activeGeneration)}
+          >
+            <ListTree size={14} aria-hidden="true" />
+            Generation details
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="version-loading" aria-label="Loading versions" aria-busy="true">
@@ -137,21 +163,37 @@ export function PosterVersionHistory({
           </summary>
           <div>
             {failedGenerations.map((generation) => (
-              <button
-                key={generation.id}
-                type="button"
-                className="failed-generation-row"
-                onClick={() => onReview(generation)}
-              >
-                <span>
-                  <strong>{failureStageLabel(generation.failure_stage)}</strong>
-                  <time dateTime={generation.failed_at ?? generation.created_at}>
-                    {formatVersionDate(generation.failed_at ?? generation.created_at)}
-                  </time>
-                </span>
-                <small>{generation.failure_message || 'Generation did not complete.'}</small>
-                <ListTree size={14} aria-hidden="true" />
-              </button>
+              <div className="failed-generation-entry" key={generation.id}>
+                <button
+                  type="button"
+                  className="failed-generation-row"
+                  onClick={() => onReview(generation)}
+                >
+                  <span>
+                    <strong>{failureStageLabel(generation.failure_stage)}</strong>
+                    <time dateTime={generation.failed_at ?? generation.created_at}>
+                      {formatVersionDate(generation.failed_at ?? generation.created_at)}
+                    </time>
+                  </span>
+                  <small>{generation.failure_message || 'Generation did not complete.'}</small>
+                  <ListTree size={14} aria-hidden="true" />
+                </button>
+                {activities.find((item) => item.generation_id === generation.id)?.status === 'failed' && (
+                  <button
+                    type="button"
+                    className="failed-generation-retry"
+                    onClick={() => {
+                      const activity = activities.find(
+                        (item) => item.generation_id === generation.id,
+                      )
+                      if (activity) onRetry(activity)
+                    }}
+                  >
+                    <RotateCcw size={13} aria-hidden="true" />
+                    Retry with same inputs
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </details>

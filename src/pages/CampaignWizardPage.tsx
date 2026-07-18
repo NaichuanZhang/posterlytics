@@ -1,8 +1,9 @@
-import { ArrowLeft, Globe2, ImagePlus, Sparkles, Type } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Globe2, ImagePlus, Sparkles, Type } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
-import { GenerationProgress, type AgentPrompt, type AgentStep } from '../components/GenerationProgress'
+import { useGenerationActivity } from '../activity/GenerationActivityProvider'
+import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { GenerationReferences } from '../components/GenerationReferences'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
@@ -14,37 +15,27 @@ import {
   type PendingReference,
 } from '../lib/references'
 import {
-  createPosterGeneration,
-  failPosterGeneration,
-  invokeGenerationFunction,
+  enqueuePosterGeneration,
+  retryPosterGeneration,
 } from '../lib/generationApi'
-import type { PosterGenerationStage, PosterLayout } from '../lib/types'
 
-type Phase = 'form' | 'creating' | 'analyzing' | 'generating' | 'error'
+type Phase = 'form' | 'uploading' | 'started' | 'error'
 
 const PHASE_LABEL: Record<Phase, string> = {
   form: '',
-  creating: 'Creating campaign...',
-  analyzing: 'Reading your site - extracting brand, content, and design...',
-  generating: 'Generating your poster...',
+  uploading: 'Uploading inputs...',
+  started: 'Generation started',
   error: '',
 }
-
-const STEP_DEFS: Array<{ key: AgentStep['key']; label: string; blurb: string }> = [
-  { key: 'analyze', label: 'Analyze', blurb: 'Reading your site - brand, palette, copy' },
-  { key: 'designer', label: 'Designer', blurb: 'Designing a bespoke poster layout' },
-  { key: 'hero', label: 'Poster', blurb: 'Painting the AI poster image' },
-]
 
 export function CampaignWizardPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const { items: activityItems, refresh: refreshActivity } = useGenerationActivity()
   const [phase, setPhase] = useState<Phase>('form')
   const [error, setError] = useState<string | null>(null)
   const [draftId, setDraftId] = useState<string | null>(null)
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null)
-  const [steps, setSteps] = useState<AgentStep[]>([])
-  const [layout, setLayout] = useState<PosterLayout | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
 
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
@@ -53,10 +44,6 @@ export function CampaignWizardPage() {
   const [destinationUrl, setDestinationUrl] = useState('')
   const [referenceContext, setReferenceContext] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
-
-  function patchStep(key: AgentStep['key'], patch: Partial<AgentStep>) {
-    setSteps((previous) => previous.map((step) => (step.key === key ? { ...step, ...patch } : step)))
-  }
 
   async function persistDraft(): Promise<string> {
     if (!user) throw new Error('Sign in before creating a campaign.')
@@ -99,7 +86,7 @@ export function CampaignWizardPage() {
       return
     }
     setError(null)
-    setPhase('creating')
+    setPhase('uploading')
 
     let campaignId: string
     try {
@@ -111,66 +98,43 @@ export function CampaignWizardPage() {
     }
 
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
-    let generationId: string
     try {
       uploaded = await materializeReferenceImages(user.id, campaignId, pendingReferences)
-      const generation = await createPosterGeneration({
+      const result = await enqueuePosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(referenceContext),
         referenceImages: uploaded,
         refreshWebsite: true,
       })
-      generationId = generation.id
+      setJobId(result.job.id)
+      setPhase('started')
+      await refreshActivity()
     } catch (cause) {
       if (uploaded.length > 0) await deleteReferenceImages(uploaded)
       setError(cause instanceof Error ? cause.message : String(cause))
       setPhase('error')
-      return
     }
-
-    setScreenshotUrl(null)
-    setLayout(null)
-    setSteps(STEP_DEFS.map((definition) => ({ ...definition, status: 'pending' as const })))
-
-    let failureStage: PosterGenerationStage = 'analyze'
-    try {
-      setPhase('analyzing')
-      patchStep('analyze', { status: 'running' })
-      const analyzeData = await invokeGenerationFunction('analyze', campaignId, generationId)
-      const analyzeResult = analyzeData as { screenshot_url?: string | null; prompt?: AgentPrompt } | null
-      if (analyzeResult?.screenshot_url) setScreenshotUrl(analyzeResult.screenshot_url)
-      patchStep('analyze', { status: 'done', prompt: analyzeResult?.prompt })
-
-      failureStage = 'designer'
-      setPhase('generating')
-      patchStep('designer', { status: 'running' })
-      const designerData = await invokeGenerationFunction('designer', campaignId, generationId)
-      const designerResult = designerData as { prompt?: AgentPrompt; poster_layout?: PosterLayout } | null
-      if (designerResult?.poster_layout) setLayout(designerResult.poster_layout)
-      patchStep('designer', { status: 'done', prompt: designerResult?.prompt })
-
-      failureStage = 'hero'
-      patchStep('hero', { status: 'running' })
-      const heroData = await invokeGenerationFunction('hero', campaignId, generationId)
-      patchStep('hero', {
-        status: 'done',
-        prompt: (heroData as { prompt?: AgentPrompt } | null)?.prompt,
-      })
-    } catch (cause) {
-      await failPosterGeneration(generationId, failureStage, cause)
-      patchStep(failureStage === 'analyze' ? 'analyze' : failureStage === 'designer' ? 'designer' : 'hero', {
-        status: 'error',
-        error: cause instanceof Error ? cause.message : String(cause),
-      })
-      setError('Generation did not complete. Review the inputs and retry this same draft.')
-      setPhase('error')
-      return
-    }
-
-    navigate(`/campaigns/${campaignId}`)
   }
 
-  const working = phase === 'creating' || phase === 'analyzing' || phase === 'generating'
+  async function retryGeneration() {
+    if (!jobId) return
+    setError(null)
+    try {
+      const result = await retryPosterGeneration(jobId)
+      setJobId(result.job.id)
+      setPhase('started')
+      await refreshActivity()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const activity = activityItems.find((item) => item.job_id === jobId) ?? null
+  const working = phase === 'uploading' || (
+    phase === 'started'
+    && activity?.status !== 'succeeded'
+    && activity?.status !== 'failed'
+  )
 
   return (
     <AppShell
@@ -187,24 +151,79 @@ export function CampaignWizardPage() {
     >
       <header className="page-heading page-heading-compact">
         <div>
-          <h1>{working ? 'Building your poster' : 'Create campaign'}</h1>
-          <p>{working ? 'The style board and agent stages update as generation progresses.' : 'Set the source, message, and tracked destination.'}</p>
+          <h1>
+            {activity?.status === 'succeeded'
+              ? 'Poster ready'
+              : activity?.status === 'failed'
+                ? 'Generation failed'
+                : working
+                  ? 'Building your poster'
+                  : 'Create campaign'}
+          </h1>
+          <p>
+            {phase === 'uploading'
+              ? 'Keep this page open while the source files finish uploading.'
+              : working
+                ? 'Generation continues in the background after the inputs are queued.'
+                : 'Set the source, message, and tracked destination.'}
+          </p>
         </div>
       </header>
 
-      {working && steps.length > 0 ? (
-        <GenerationProgress
-          headline={PHASE_LABEL[phase]}
-          screenshotUrl={screenshotUrl}
-          steps={steps}
-          layout={layout}
-        />
-      ) : working ? (
+      {phase === 'uploading' ? (
         <div className="creation-starting" aria-live="polite">
           <span className="spinner" />
           <div>
             <strong>{PHASE_LABEL[phase]}</strong>
-            <p>Preparing the generation workspace.</p>
+            <p>Keep this page open until generation starts.</p>
+          </div>
+        </div>
+      ) : activity?.status === 'succeeded' ? (
+        <section className="generation-result generation-result-ready" aria-live="polite">
+          <div className="generation-result-copy">
+            <CheckCircle2 size={23} aria-hidden="true" />
+            <div>
+              <span>Version {activity.version_number ?? 1}</span>
+              <h2>{activity.campaign_name} is ready</h2>
+              <p>The completed poster is now the campaign's current version.</p>
+            </div>
+          </div>
+          {activity.hero_image_url && (
+            <img src={activity.hero_image_url} alt={`${activity.campaign_name} poster`} />
+          )}
+          <Link to={`/campaigns/${activity.campaign_id}`} className="button button-primary">
+            Open editor
+          </Link>
+        </section>
+      ) : activity?.status === 'failed' ? (
+        <section className="generation-result generation-result-failed" aria-live="polite">
+          <DurableGenerationStatus item={activity} />
+          <InlineNotice tone="error">
+            <strong>Poster generation did not complete.</strong>
+            <span>{activity.last_error_message || 'The final automatic attempt failed.'}</span>
+          </InlineNotice>
+          <div className="form-actions">
+            <button type="button" className="button button-primary" onClick={() => void retryGeneration()}>
+              <Sparkles size={15} aria-hidden="true" />
+              Retry with same inputs
+            </button>
+            <Link to="/" className="button button-secondary">Back to campaigns</Link>
+          </div>
+          {error && <InlineNotice tone="error">{error}</InlineNotice>}
+        </section>
+      ) : phase === 'started' && activity ? (
+        <section className="generation-result">
+          <DurableGenerationStatus item={activity} safeToLeave />
+          <Link to="/" className="button button-secondary">
+            Back to campaigns
+          </Link>
+        </section>
+      ) : phase === 'started' ? (
+        <div className="creation-starting" aria-live="polite">
+          <span className="spinner" />
+          <div>
+            <strong>Generation started</strong>
+            <p>Safe to leave Posterlytics. Activity will update shortly.</p>
           </div>
         </div>
       ) : (

@@ -1,30 +1,83 @@
 import { insforge } from './insforge'
 import { getDeviceColorScheme } from './colorScheme'
 import type {
+  GenerationActivity,
+  GenerationJob,
   PosterGeneration,
   PosterGenerationStage,
   ReferenceImage,
 } from './types'
+import { normalizeGenerationActivity } from './generationActivity'
 
 export type GenerationFunction = 'analyze' | 'designer' | 'hero'
 
+export interface EnqueuedPosterGeneration {
+  generation: PosterGeneration
+  job: GenerationJob
+}
+
+export async function enqueuePosterGeneration(args: {
+  campaignId: string
+  instruction: string | null
+  referenceImages: ReferenceImage[]
+  refreshWebsite: boolean
+}): Promise<EnqueuedPosterGeneration> {
+  const { data, error } = await insforge.database.rpc('enqueue_poster_generation', {
+    p_campaign_id: args.campaignId,
+    p_instruction: args.instruction,
+    p_reference_images: args.referenceImages,
+    p_refresh_website: args.refreshWebsite,
+    p_color_scheme: getDeviceColorScheme(),
+  })
+  if (error) throw new Error(error.message)
+
+  const result = rpcRow<EnqueuedPosterGeneration>(data)
+  if (!result?.generation?.id || !result.job?.id) {
+    throw new Error('Generation could not be queued.')
+  }
+  return result
+}
+
+// Compatibility for callers outside the SPA that still import the old helper.
 export async function createPosterGeneration(args: {
   campaignId: string
   instruction: string | null
   referenceImages: ReferenceImage[]
   refreshWebsite: boolean
 }): Promise<PosterGeneration> {
-  const { data, error } = await insforge.database.rpc('create_poster_generation', {
-    p_campaign_id: args.campaignId,
-    p_instruction: args.instruction,
-    p_reference_images: args.referenceImages,
-    p_refresh_website: args.refreshWebsite,
+  return (await enqueuePosterGeneration(args)).generation
+}
+
+export async function retryPosterGeneration(
+  jobId: string,
+): Promise<EnqueuedPosterGeneration> {
+  const { data, error } = await insforge.database.rpc('retry_poster_generation', {
+    p_job_id: jobId,
   })
   if (error) throw new Error(error.message)
 
-  const generation = rpcRow<PosterGeneration>(data)
-  if (!generation?.id) throw new Error('Generation could not be created.')
-  return generation
+  const result = rpcRow<EnqueuedPosterGeneration>(data)
+  if (!result?.generation?.id || !result.job?.id) {
+    throw new Error('Generation retry could not be queued.')
+  }
+  return result
+}
+
+export async function fetchGenerationActivity(): Promise<GenerationActivity> {
+  const { data, error } = await insforge.database.rpc('generation_activity', {
+    p_limit: 50,
+  })
+  if (error) throw new Error(error.message)
+  return normalizeGenerationActivity(rpcRow<unknown>(data))
+}
+
+export async function markGenerationNotificationsRead(
+  notificationIds: string[] | null,
+): Promise<void> {
+  const { error } = await insforge.database.rpc('mark_generation_notifications_read', {
+    p_notification_ids: notificationIds,
+  })
+  if (error) throw new Error(error.message)
 }
 
 export async function activatePosterGeneration(generationId: string): Promise<PosterGeneration> {

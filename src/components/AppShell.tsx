@@ -1,4 +1,5 @@
 import {
+  Activity,
   ChevronRight,
   LayoutGrid,
   LogOut,
@@ -7,6 +8,7 @@ import {
 import type { ReactNode } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
+import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import type { Campaign } from '../lib/types'
 
 export type CampaignSection = 'poster' | 'placements' | 'analytics'
@@ -36,6 +38,7 @@ export function AppShell({
   contentClassName = '',
 }: AppShellProps) {
   const { user, signOut } = useAuth()
+  const { unreadCount, openSheet } = useGenerationActivity()
   const navigate = useNavigate()
 
   async function handleSignOut() {
@@ -68,6 +71,20 @@ export function AppShell({
           >
             <Plus size={20} aria-hidden="true" />
           </NavLink>
+          <button
+            type="button"
+            className="rail-button rail-activity-button"
+            aria-label={`Generation activity${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+            data-tooltip="Generation activity"
+            onClick={openSheet}
+          >
+            <Activity size={19} aria-hidden="true" />
+            {unreadCount > 0 && (
+              <span className="rail-activity-badge" aria-hidden="true">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
         </nav>
         <div className="rail-account">
           {user?.email && (

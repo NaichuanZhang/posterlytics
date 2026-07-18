@@ -1,12 +1,17 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from './AuthProvider'
 import { Spinner } from '../components/ui/Spinner'
+import { signInPath } from '../lib/authRouting'
 
 // Gate protected routes on the cold-load auth state.
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
   if (loading) return <Spinner full />
-  if (!user) return <Navigate to="/signin" replace />
+  if (!user) {
+    const nextPath = `${location.pathname}${location.search}${location.hash}`
+    return <Navigate to={signInPath(nextPath)} replace />
+  }
   return <>{children}</>
 }

@@ -10,16 +10,14 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { useAuth } from '../auth/AuthProvider'
 import { AppShell } from '../components/AppShell'
+import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { GenerationDetailsSheet } from '../components/GenerationDetailsSheet'
 import { GenerationInputsReview } from '../components/GenerationInputsReview'
-import {
-  GenerationStageProgress,
-  type GenerationStageItem,
-} from '../components/GenerationStageProgress'
 import { GenerationReferences } from '../components/GenerationReferences'
 import { PosterCanvas } from '../components/PosterCanvas'
 import { PosterExportButton } from '../components/PosterExportButton'
@@ -34,10 +32,13 @@ import { usePosterGenerations } from '../hooks/usePosterGenerations'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import {
   activatePosterGeneration,
-  createPosterGeneration,
-  failPosterGeneration,
-  invokeGenerationFunction,
+  enqueuePosterGeneration,
 } from '../lib/generationApi'
+import {
+  activityForCampaign,
+  isActiveGenerationJob,
+  shouldAutoSelectGeneration,
+} from '../lib/generationActivity'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
@@ -47,26 +48,26 @@ import {
   pendingReferencesReady,
   type PendingReference,
 } from '../lib/references'
-import type { PosterGeneration, PosterGenerationStage } from '../lib/types'
+import type { PosterGeneration } from '../lib/types'
 import { buildViewUrl } from '../lib/viewUrl'
 
 type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete'
 type MobileSection = 'versions' | 'create' | 'export'
-
-const INITIAL_STAGES: GenerationStageItem[] = [
-  { key: 'analyze', label: 'Analyze', status: 'pending' },
-  { key: 'designer', label: 'Design', status: 'pending' },
-  { key: 'hero', label: 'Paint', status: 'pending' },
-]
 
 export function PosterEditorPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
   const { notify } = useToast()
+  const {
+    items: generationActivity,
+    refresh: refreshActivity,
+    retry: retryActivity,
+  } = useGenerationActivity()
   const { campaign, loading, reload, remove } = useCampaign(id)
   const {
     generations,
+    activeGenerations,
     failedGenerations,
     loading: generationsLoading,
     error: generationsError,
@@ -84,12 +85,13 @@ export function PosterEditorPage() {
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
   const [refreshWebsite, setRefreshWebsite] = useState(false)
   const [generationError, setGenerationError] = useState<string | null>(null)
-  const [stages, setStages] = useState<GenerationStageItem[]>(INITIAL_STAGES)
-  const [showStages, setShowStages] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [versionsDrawerOpen, setVersionsDrawerOpen] = useState(false)
   const [mobileSection, setMobileSection] = useState<MobileSection>('create')
   const [detailsGeneration, setDetailsGeneration] = useState<PosterGeneration | null>(null)
+  const deliberateSelectionRef = useRef(false)
+  const activitySnapshotRef = useRef<string | null>(null)
+  const trackedJobRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (user?.id) void ensureDefault()
@@ -112,6 +114,54 @@ export function PosterEditorPage() {
       return campaign.current_generation_id ?? generations[0].id
     })
   }, [campaign, generations])
+
+  const campaignActivity = id ? activityForCampaign(generationActivity, id) : null
+  const latestCampaignActivity = id
+    ? generationActivity.find((item) => item.campaign_id === id) ?? null
+    : null
+
+  useEffect(() => {
+    if (!latestCampaignActivity) return
+    const snapshot = [
+      latestCampaignActivity.job_id,
+      latestCampaignActivity.status,
+      latestCampaignActivity.stage,
+      latestCampaignActivity.updated_at,
+    ].join(':')
+    const previousSnapshot = activitySnapshotRef.current
+    activitySnapshotRef.current = snapshot
+
+    if (isActiveGenerationJob(latestCampaignActivity)) {
+      trackedJobRef.current = latestCampaignActivity.job_id
+    }
+    if (previousSnapshot === null || previousSnapshot === snapshot) return
+
+    void Promise.all([reload(), reloadGenerations()]).then(() => {
+      if (
+        latestCampaignActivity.status === 'succeeded'
+        && trackedJobRef.current === latestCampaignActivity.job_id
+        && shouldAutoSelectGeneration({
+          completedGenerationId: latestCampaignActivity.generation_id,
+          selectedGenerationId,
+          selectionWasDeliberate: deliberateSelectionRef.current,
+        })
+      ) {
+        setSelectedGenerationId(latestCampaignActivity.generation_id)
+      }
+      if (!isActiveGenerationJob(latestCampaignActivity)) {
+        trackedJobRef.current = null
+      }
+    })
+  }, [
+    latestCampaignActivity?.generation_id,
+    latestCampaignActivity?.job_id,
+    latestCampaignActivity?.stage,
+    latestCampaignActivity?.status,
+    latestCampaignActivity?.updated_at,
+    reload,
+    reloadGenerations,
+    selectedGenerationId,
+  ])
 
   const selectedPlacement =
     placements.find((placement) => placement.id === selectedPlacementId)
@@ -140,12 +190,13 @@ export function PosterEditorPage() {
   }
 
   const campaignId = campaign.id
-  const campaignScenario = campaign.scenario
   const previewCode = selectedPlacement?.code ?? null
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
-  const generating = busy === 'generate'
+  const uploadingInputs = busy === 'generate'
+  const generating = !!campaignActivity
+  const generationInputsDisabled = uploadingInputs || generating
   const currentGeneration =
     generations.find((generation) => generation.id === campaign.current_generation_id) ?? null
   const generationPreflight = deriveGenerationPreflight({
@@ -160,17 +211,8 @@ export function PosterEditorPage() {
     isVersionsDrawer ? versionsDrawerOpen : preferences.versionsPanelOpen
   )
 
-  function patchStage(
-    key: GenerationStageItem['key'],
-    status: GenerationStageItem['status'],
-  ) {
-    setStages((current) =>
-      current.map((stage) => stage.key === key ? { ...stage, status } : stage)
-    )
-  }
-
   async function generateVersion() {
-    if (!user || generating) return
+    if (!user || generating || uploadingInputs) return
     if (!pendingReferencesReady(pendingReferences)) {
       setGenerationError('Remove any image URL that could not load, or wait for its preview to finish.')
       return
@@ -178,74 +220,36 @@ export function PosterEditorPage() {
 
     setBusy('generate')
     setGenerationError(null)
-    setShowStages(true)
-    setStages(INITIAL_STAGES.map((stage) => ({
-      ...stage,
-      status: stage.key === 'analyze' && !effectiveRefreshWebsite ? 'skipped' : 'pending',
-    })))
 
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
-    let generationId: string | null = null
-    let failureStage: PosterGenerationStage = effectiveRefreshWebsite ? 'analyze' : 'designer'
 
     try {
       uploaded = await materializeReferenceImages(user.id, campaignId, pendingReferences)
-      const generation = await createPosterGeneration({
+      const result = await enqueuePosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(instruction),
         referenceImages: uploaded,
         refreshWebsite: effectiveRefreshWebsite,
       })
-      generationId = generation.id
-
-      if (effectiveRefreshWebsite) {
-        patchStage('analyze', 'running')
-        await invokeGenerationFunction('analyze', campaignId, generation.id)
-        patchStage('analyze', 'done')
-      }
-
-      if (campaignScenario === 'event') {
-        patchStage('designer', 'skipped')
-      } else {
-        failureStage = 'designer'
-        patchStage('designer', 'running')
-        await invokeGenerationFunction('designer', campaignId, generation.id)
-        patchStage('designer', 'done')
-      }
-
-      failureStage = 'hero'
-      patchStage('hero', 'running')
-      await invokeGenerationFunction('hero', campaignId, generation.id)
-      patchStage('hero', 'done')
-
-      setSelectedGenerationId(generation.id)
-      await Promise.all([reload(), reloadGenerations()])
+      deliberateSelectionRef.current = false
+      trackedJobRef.current = result.job.id
+      await Promise.all([refreshActivity(), reloadGenerations()])
       setInstruction('')
       setPendingReferences([])
       setRefreshWebsite(false)
-      setShowStages(false)
-      notify('New poster version created.', 'success')
+      notify('Generation started. Safe to leave Posterlytics.', 'success')
     } catch (cause) {
-      if (generationId) {
-        await failPosterGeneration(generationId, failureStage, cause)
-      } else if (uploaded.length > 0) {
-        await deleteReferenceImages(uploaded)
-      }
-      const key = failureStage === 'analyze'
-        ? 'analyze'
-        : failureStage === 'designer'
-          ? 'designer'
-          : 'hero'
-      patchStage(key, 'error')
+      if (uploaded.length > 0) await deleteReferenceImages(uploaded)
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
-      notify('Poster generation did not complete.', 'error')
+      notify('Generation could not be queued.', 'error')
     } finally {
       setBusy(null)
     }
   }
 
   async function useVersion(generationId: string) {
+    deliberateSelectionRef.current = true
     setBusy('activate')
     setGenerationError(null)
     try {
@@ -312,18 +316,37 @@ export function PosterEditorPage() {
     }
   }
 
+  function selectVersion(generationId: string) {
+    deliberateSelectionRef.current = true
+    setSelectedGenerationId(generationId)
+  }
+
+  async function retryGeneration(activity: Parameters<typeof retryActivity>[0]) {
+    setGenerationError(null)
+    deliberateSelectionRef.current = false
+    try {
+      await retryActivity(activity)
+      await Promise.all([refreshActivity(), reloadGenerations()])
+    } catch (cause) {
+      setGenerationError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
   const versionPanel = (
     <PosterVersionHistory
       generations={generations}
+      activeGenerations={activeGenerations}
       failedGenerations={failedGenerations}
+      activities={generationActivity.filter((item) => item.campaign_id === campaignId)}
       selectedGeneration={selectedGeneration}
       currentGenerationId={campaign.current_generation_id}
       loading={generationsLoading}
       error={generationsError}
       activating={busy === 'activate'}
-      onSelect={setSelectedGenerationId}
+      onSelect={selectVersion}
       onActivate={(generationId) => void useVersion(generationId)}
       onReview={setDetailsGeneration}
+      onRetry={(activity) => void retryGeneration(activity)}
     />
   )
 
@@ -342,7 +365,7 @@ export function PosterEditorPage() {
         onRemoveExisting={() => {}}
         pendingReferences={pendingReferences}
         onPendingReferencesChange={setPendingReferences}
-        disabled={generating}
+        disabled={generationInputsDisabled}
         contextLabel="What should change?"
         contextPlaceholder="Make the headline larger, replace the product image, or adjust the mood."
         contextHint="Everything else stays consistent."
@@ -351,25 +374,28 @@ export function PosterEditorPage() {
         <input
           type="checkbox"
           checked={effectiveRefreshWebsite}
-          disabled={generating || firstVersion}
+          disabled={generationInputsDisabled || firstVersion}
           onChange={(event) => setRefreshWebsite(event.target.checked)}
         />
         <span>Re-read website before generating</span>
       </label>
       <GenerationInputsReview
         preflight={generationPreflight}
-        disabled={generating}
+        disabled={generationInputsDisabled}
       />
       <button
         type="button"
         className="button button-primary inspector-primary"
-        disabled={!!busy || !pendingReferencesReady(pendingReferences)}
+        disabled={generationInputsDisabled || !!busy || !pendingReferencesReady(pendingReferences)}
         onClick={() => void generateVersion()}
       >
         <Sparkles size={15} aria-hidden="true" />
-        {generating ? 'Generating' : 'Generate version'}
+        {uploadingInputs
+          ? 'Uploading inputs'
+          : generating
+            ? 'Generation started'
+            : 'Generate version'}
       </button>
-      {showStages && <GenerationStageProgress stages={stages} />}
       {generationError && <InlineNotice tone="error">{generationError}</InlineNotice>}
     </section>
   )
@@ -555,6 +581,20 @@ export function PosterEditorPage() {
               Scans open an unpublished page until this campaign is published.
             </div>
           )}
+          {campaignActivity && (
+            <div className="editor-generation-status">
+              <DurableGenerationStatus item={campaignActivity} safeToLeave />
+              {activeGenerations[0] && (
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => setDetailsGeneration(activeGenerations[0])}
+                >
+                  Generation details
+                </button>
+              )}
+            </div>
+          )}
           <PosterCanvas
             campaign={previewCampaign}
             code={previewCode}
@@ -602,8 +642,12 @@ export function PosterEditorPage() {
       </div>
       {detailsGeneration && (
         <GenerationDetailsSheet
-          generation={detailsGeneration}
-          generations={[...generations, ...failedGenerations]}
+          generation={
+            [...generations, ...activeGenerations, ...failedGenerations]
+              .find((generation) => generation.id === detailsGeneration.id)
+            ?? detailsGeneration
+          }
+          generations={[...generations, ...activeGenerations, ...failedGenerations]}
           onClose={() => setDetailsGeneration(null)}
         />
       )}

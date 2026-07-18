@@ -80,6 +80,88 @@ export type PosterGenerationStage = 'analyze' | 'designer' | 'hero' | 'complete'
 
 export type GenerationTraceStage = 'analyze' | 'designer' | 'hero'
 
+export type GenerationJobStage = GenerationTraceStage
+
+export type GenerationJobStatus =
+  | 'queued'
+  | 'running'
+  | 'retrying'
+  | 'succeeded'
+  | 'failed'
+
+export type GenerationNotificationOutcome = 'ready' | 'failed'
+
+export interface GenerationJob {
+  id: string
+  generation_id: string
+  campaign_id: string
+  user_id: string
+  retry_of_job_id: string | null
+  status: GenerationJobStatus
+  stage: GenerationJobStage
+  color_scheme: 'light' | 'dark'
+  attempt_count: number
+  retry_count: number
+  max_attempts: number
+  available_at: string
+  lease_owner: string | null
+  lease_expires_at: string | null
+  last_error_code: string | null
+  last_error_message: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface GenerationNotification {
+  id: string
+  job_id: string
+  generation_id: string
+  campaign_id: string
+  user_id: string
+  outcome: GenerationNotificationOutcome
+  read_at: string | null
+  created_at: string
+}
+
+export interface GenerationActivityItem {
+  job_id: string
+  generation_id: string
+  campaign_id: string
+  campaign_name: string
+  status: GenerationJobStatus
+  stage: GenerationJobStage
+  color_scheme: 'light' | 'dark'
+  attempt_count: number
+  retry_count: number
+  max_attempts: number
+  available_at: string
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  last_error_code: string | null
+  last_error_message: string | null
+  generation_status: PosterGenerationStatus
+  version_number: number | null
+  generation_mode: PosterGenerationMode
+  scenario: CampaignScenario
+  instruction: string | null
+  hero_image_url: string | null
+  generation_created_at: string
+  notification_id: string | null
+  notification_outcome: GenerationNotificationOutcome | null
+  read_at: string | null
+  notification_created_at: string | null
+}
+
+export interface GenerationActivity {
+  items: GenerationActivityItem[]
+  unread_count: number
+  refreshed_at: string
+}
+
 export type GenerationStageTraceStatus =
   | 'pending'
   | 'running'

@@ -20,3 +20,8 @@ Key patterns:
 - Reference users with `auth.users(id)`; use `auth.uid()` in RLS policies.
 - For storage uploads, persist both the returned `url` and `key`.
 <!-- INSFORGE:END -->
+
+## Execution discipline
+
+- Complete large planned features end to end, including implementation, verification, and requested delivery. Do not stop after a partial slice when the remaining work is feasible.
+- When context is running low, write a compact checkpoint or handoff, then resume from it until the feature and its verification are complete.

@@ -4,18 +4,29 @@ import { StageTraceRecorder } from '../functions/_shared.ts'
 
 test('stage recorder preserves failed attempts, repair prompts, and resolved request settings', async () => {
   const updates: Array<Record<string, unknown>> = []
+  const requests: Array<{
+    table: string
+    operation: 'select' | 'update'
+    filters: Array<[string, unknown]>
+  }> = []
   const client = {
     database: {
-      from() {
+      from(table: string) {
+        let request: (typeof requests)[number] | null = null
         const builder = {
           select() {
+            request = { table, operation: 'select', filters: [] }
+            requests.push(request)
             return builder
           },
           update(patch: Record<string, unknown>) {
             updates.push(structuredClone(patch))
+            request = { table, operation: 'update', filters: [] }
+            requests.push(request)
             return builder
           },
-          eq() {
+          eq(column: string, value: unknown) {
+            request?.filters.push([column, value])
             return builder
           },
           maybeSingle() {
@@ -44,6 +55,18 @@ test('stage recorder preserves failed attempts, repair prompts, and resolved req
     stage: 'designer',
   })
   await recorder.start()
+  await recorder.addArtifact({
+    kind: 'layout',
+    snapshot: { composition: 'first' },
+  })
+  await recorder.addArtifact({
+    kind: 'layout',
+    snapshot: { composition: 'replacement' },
+  })
+  await recorder.addArtifact({
+    kind: 'analysis',
+    metadata: { scenario: 'product' },
+  })
 
   await assert.rejects(
     recorder.runModelCall({
@@ -85,4 +108,28 @@ test('stage recorder preserves failed attempts, repair prompts, and resolved req
     max_completion_tokens: 1800,
     timeout_ms: 30_000,
   })
+
+  const artifactUpdates = updates.filter((patch) => Array.isArray(patch.artifacts))
+  const finalArtifacts = artifactUpdates.at(-1)?.artifacts as Array<Record<string, unknown>>
+  assert.equal(finalArtifacts.length, 2)
+  assert.deepEqual(finalArtifacts.map((artifact) => artifact.kind), [
+    'layout',
+    'analysis',
+  ])
+  assert.deepEqual(finalArtifacts[0].snapshot, {
+    composition: 'replacement',
+  })
+
+  const traceRequests = requests.filter(
+    (request) => request.table === 'generation_stage_traces',
+  )
+  assert.ok(traceRequests.length > 0)
+  for (const request of traceRequests) {
+    assert.deepEqual(request.filters, [
+      ['generation_id', 'generation-1'],
+      ['campaign_id', 'campaign-1'],
+      ['user_id', 'user-1'],
+      ['stage', 'designer'],
+    ])
+  }
 })

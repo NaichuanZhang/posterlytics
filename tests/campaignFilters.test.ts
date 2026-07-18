@@ -17,6 +17,7 @@ const campaigns = [
     product_name: 'Transit Board',
     product_url: 'https://transit.example/north',
     status: 'analyzing' as const,
+    is_generating: true,
   },
 ]
 
@@ -37,4 +38,15 @@ test('filterCampaigns applies status and query together', () => {
 
 test('filterCampaigns preserves source ordering for an empty all filter', () => {
   assert.deepEqual(filterCampaigns(campaigns, '', 'all'), campaigns)
+})
+
+test('filterCampaigns uses durable activity for the Generating filter', () => {
+  assert.deepEqual(
+    filterCampaigns(campaigns, '', 'generating').map((campaign) => campaign.product_name),
+    ['Transit Board'],
+  )
+  assert.deepEqual(
+    filterCampaigns(campaigns, 'generating', 'all').map((campaign) => campaign.product_name),
+    ['Transit Board'],
+  )
 })

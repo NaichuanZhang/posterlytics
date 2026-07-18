@@ -2,6 +2,7 @@
 node_modules
 dist
 functions/dist
+test-results
 *.tsbuildinfo
 *.log
 

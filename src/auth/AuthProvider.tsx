@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { insforge } from '../lib/insforge'
+import { hasAuthHydrationSignal } from '../lib/authRouting'
 
 interface AuthUser {
   id: string
@@ -20,9 +21,14 @@ const AuthContext = createContext<AuthState>({
   signOut: async () => {},
 })
 
+function initialAuthLoading() {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return true
+  return hasAuthHydrationSignal(document.cookie, window.location.search)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(initialAuthLoading)
 
   async function hydrate() {
     const { data, error } = await insforge.auth.getCurrentUser()
@@ -32,6 +38,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
+    if (!initialAuthLoading()) {
+      setLoading(false)
+      return
+    }
+
     let cancelled = false
     insforge.auth.getCurrentUser().then(({ data, error }) => {
       if (cancelled) return

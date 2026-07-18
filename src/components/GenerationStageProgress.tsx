@@ -1,12 +1,13 @@
 import { Check, LoaderCircle, Minus, X } from 'lucide-react'
+import type {
+  GenerationStageItem,
+  GenerationStageStatus,
+} from '../lib/generationActivity'
 
-export type GenerationStageStatus = 'pending' | 'running' | 'done' | 'skipped' | 'error'
-
-export interface GenerationStageItem {
-  key: 'analyze' | 'designer' | 'hero'
-  label: string
-  status: GenerationStageStatus
-}
+export type {
+  GenerationStageItem,
+  GenerationStageStatus,
+} from '../lib/generationActivity'
 
 export function GenerationStageProgress({
   stages,

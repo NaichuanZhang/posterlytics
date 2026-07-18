@@ -1,5 +1,5 @@
 // Shared helpers for Posterlytics edge functions (Deno Subhosting).
-import { createClient } from 'npm:@insforge/sdk';
+import { createAdminClient, createClient } from 'npm:@insforge/sdk';
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -31,6 +31,42 @@ export function createUserClient(req: Request) {
     baseUrl: env('INSFORGE_BASE_URL'),
     edgeFunctionToken: token ?? undefined,
   });
+}
+
+// Project-admin client used only by scheduled server-side workers. Every stage
+// runner still scopes campaign, generation, and trace reads to an explicit
+// owner id so admin access never turns an omitted filter into cross-user work.
+export function createAdminGenerationClient() {
+  return createAdminClient({
+    baseUrl: env('INSFORGE_BASE_URL'),
+    apiKey: env('API_KEY'),
+  });
+}
+
+export type BackendClient = ReturnType<typeof createClient>;
+
+export interface GenerationStageRunContext {
+  client: BackendClient;
+  userId: string;
+  campaignId: string;
+  generationId: string;
+  finalizeFailure: boolean;
+  serverOwned: boolean;
+}
+
+export async function stageAlreadySucceeded(
+  context: Pick<GenerationStageRunContext, 'client' | 'userId' | 'campaignId' | 'generationId'>,
+  stage: 'analyze' | 'designer' | 'hero',
+): Promise<boolean> {
+  const { data, error } = await context.client.database
+    .from('generation_stage_traces')
+    .select('status')
+    .eq('generation_id', context.generationId)
+    .eq('campaign_id', context.campaignId)
+    .eq('user_id', context.userId)
+    .eq('stage', stage)
+    .maybeSingle();
+  return !error && (data as { status?: unknown } | null)?.status === 'succeeded';
 }
 
 // Classify a User-Agent into a coarse device + OS. Light regex, no library.
@@ -124,14 +160,15 @@ export function errorDetails(error: unknown): {
 }
 
 export async function markGenerationFailed(
-  client: ReturnType<typeof createUserClient>,
+  client: BackendClient,
   generationId: string,
   stage: 'analyze' | 'designer' | 'hero' | 'complete',
   error: unknown,
   code?: string,
+  userId?: string,
 ): Promise<void> {
   const details = errorDetails(error);
-  await client.database
+  let query = client.database
     .from('poster_generations')
     .update({
       status: 'failed',
@@ -140,8 +177,9 @@ export async function markGenerationFailed(
       failure_code: code ?? details.code,
       failure_message: details.message.slice(0, 2000),
     })
-    .eq('id', generationId)
-    .catch(() => {});
+    .eq('id', generationId);
+  if (userId) query = query.eq('user_id', userId);
+  await query.catch(() => {});
 }
 
 export function userContentWithImages(text: string, imageUrls: readonly string[]): string | unknown[] {
@@ -1164,10 +1202,8 @@ export interface TracedModelCall {
 }
 
 type GenerationTraceStage = 'analyze' | 'designer' | 'hero';
-type UserClient = ReturnType<typeof createUserClient>;
-
 export class StageTraceRecorder {
-  private client: UserClient;
+  private client: BackendClient;
   private generationId: string;
   private campaignId: string;
   private userId: string;
@@ -1177,7 +1213,7 @@ export class StageTraceRecorder {
   private markedIncomplete = false;
 
   constructor(
-    client: UserClient,
+    client: BackendClient,
     context: {
       generationId: string;
       campaignId: string;
@@ -1198,6 +1234,8 @@ export class StageTraceRecorder {
         .from('generation_stage_traces')
         .select('status, started_at, model_calls, artifacts')
         .eq('generation_id', this.generationId)
+        .eq('campaign_id', this.campaignId)
+        .eq('user_id', this.userId)
         .eq('stage', this.stage)
         .maybeSingle();
       if (error || !data) throw new Error(error?.message ?? 'Stage trace row is unavailable.');
@@ -1226,7 +1264,13 @@ export class StageTraceRecorder {
   }
 
   async addArtifact(artifact: GenerationTraceArtifact): Promise<void> {
-    this.artifacts.push(sanitizeTraceValue(artifact) as GenerationTraceArtifact);
+    const sanitized = sanitizeTraceValue(artifact) as GenerationTraceArtifact;
+    const existing = this.artifacts.findIndex((candidate) => candidate.kind === sanitized.kind);
+    if (existing === -1) {
+      this.artifacts.push(sanitized);
+    } else {
+      this.artifacts[existing] = sanitized;
+    }
     await this.persist({ artifacts: this.artifacts });
   }
 
@@ -1325,7 +1369,8 @@ export class StageTraceRecorder {
           .from('poster_generations')
           .update({ trace_incomplete: true })
           .eq('id', this.generationId)
-          .eq('campaign_id', this.campaignId);
+          .eq('campaign_id', this.campaignId)
+          .eq('user_id', this.userId);
       } catch {
         // Trace capture is explicitly non-fatal to poster generation.
       }

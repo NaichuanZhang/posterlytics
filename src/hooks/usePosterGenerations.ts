@@ -4,6 +4,7 @@ import type { PosterGeneration } from '../lib/types'
 
 export function usePosterGenerations(campaignId: string | undefined) {
   const [generations, setGenerations] = useState<PosterGeneration[]>([])
+  const [activeGenerations, setActiveGenerations] = useState<PosterGeneration[]>([])
   const [failedGenerations, setFailedGenerations] = useState<PosterGeneration[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -15,7 +16,6 @@ export function usePosterGenerations(campaignId: string | undefined) {
       .from('poster_generations')
       .select('*')
       .eq('campaign_id', campaignId)
-      .in('status', ['ready', 'failed'])
       .order('created_at', { ascending: false })
 
     if (queryError) {
@@ -28,6 +28,9 @@ export function usePosterGenerations(campaignId: string | undefined) {
           .filter((generation) => generation.status === 'ready')
           .sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0)),
       )
+      setActiveGenerations(rows.filter((generation) =>
+        ['created', 'analyzing', 'designing', 'painting'].includes(generation.status)
+      ))
       setFailedGenerations(rows.filter((generation) => generation.status === 'failed'))
     }
     setLoading(false)
@@ -37,5 +40,5 @@ export function usePosterGenerations(campaignId: string | undefined) {
     void reload()
   }, [reload])
 
-  return { generations, failedGenerations, loading, error, reload }
+  return { generations, activeGenerations, failedGenerations, loading, error, reload }
 }

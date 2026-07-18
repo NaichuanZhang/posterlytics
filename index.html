@@ -3,34 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Posterlytics - track every poster placement</title>
+    <title>Posterlytics | Turn product websites into tracked posters</title>
     <meta
       name="description"
-      content="Generate on-brand product posters with a unique tracked QR per placement, then compare visits and unique visitors by channel."
+      content="Turn any product website into an on-brand poster, create a distinct tracked QR for every placement, and see what gets scanned."
     />
-    <meta name="theme-color" content="#f7f7f8" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://posterlytics.insforge.site/" />
+    <meta name="theme-color" content="#f2f3f0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171a1b" media="(prefers-color-scheme: dark)" />
 
-    <!-- Branded favicon: cobalt rounded square with a P. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://3f9q2998.us-east.insforge.app" crossorigin />
     <link
-      rel="icon"
-      type="image/svg+xml"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b4ee0'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'%3EP%3C/text%3E%3C/svg%3E"
+      rel="preload"
+      as="image"
+      href="/marketing/photos/picsum-35.webp"
+      fetchpriority="high"
     />
 
-    <meta property="og:title" content="Posterlytics" />
+    <meta property="og:title" content="Posterlytics | Website to poster. Placement to signal." />
     <meta
       property="og:description"
-      content="On-brand product posters with per-placement QR attribution."
+      content="Turn any product website into an on-brand poster, then track every scan by placement."
     />
     <meta property="og:type" content="website" />
-
-    <!-- Space Grotesk for UI and poster bands; Geist Mono for analytics figures. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
+    <meta property="og:url" content="https://posterlytics.insforge.site/" />
+    <meta property="og:site_name" content="Posterlytics" />
+    <meta property="og:image" content="https://posterlytics.insforge.site/marketing/social-card.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Posterlytics landing page with three layered product posters"
     />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Posterlytics | Website to tracked poster" />
+    <meta
+      name="twitter:description"
+      content="Generate on-brand posters and compare every placement's response."
+    />
+    <meta
+      name="twitter:image"
+      content="https://posterlytics.insforge.site/marketing/social-card.jpg"
+    />
+
   </head>
   <body>
     <div id="root"></div>

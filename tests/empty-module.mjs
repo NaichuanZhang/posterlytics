@@ -2,4 +2,5 @@
 // resolves to a no-op function; the pure helpers under test never call them.
 const noop = () => ({})
 export const createClient = noop
+export const createAdminClient = noop
 export default noop

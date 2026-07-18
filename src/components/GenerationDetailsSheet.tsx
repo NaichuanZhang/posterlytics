@@ -43,6 +43,7 @@ export function GenerationDetailsSheet({
   const [copied, setCopied] = useState<string | null>(null)
   const sheetRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const generationRunning = isRunningGeneration(generation)
 
   const parent = generations.find(
     (candidate) => candidate.id === generation.parent_generation_id,
@@ -60,32 +61,40 @@ export function GenerationDetailsSheet({
 
   useEffect(() => {
     let cancelled = false
+    let timer: number | undefined
     if (generation.trace_schema_version === null) {
       setLoading(false)
       return
     }
 
-    setLoading(true)
-    void fetchGenerationStageTraces(generation.id)
-      .then((rows) => {
+    async function refreshTraces() {
+      try {
+        const rows = await fetchGenerationStageTraces(generation.id)
         if (!cancelled) {
           setTraces(rows)
           setError(null)
         }
-      })
-      .catch((cause) => {
+      } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : String(cause))
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+          if (generationRunning) {
+            timer = window.setTimeout(() => void refreshTraces(), 3000)
+          }
+        }
+      }
+    }
+
+    void refreshTraces()
 
     return () => {
       cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [generation.id, generation.trace_schema_version])
+  }, [generation.id, generation.trace_schema_version, generationRunning])
 
   useEffect(() => {
     setSelectedAsset(assets[0] ?? null)
@@ -159,7 +168,13 @@ export function GenerationDetailsSheet({
       >
         <header className="generation-details-header">
           <div>
-            <span>{generation.status === 'failed' ? 'Failed attempt' : `Version ${generation.version_number ?? '-'}`}</span>
+            <span>
+              {generation.status === 'failed'
+                ? 'Failed attempt'
+                : generationRunning
+                  ? 'Generation in progress'
+                  : `Version ${generation.version_number ?? '-'}`}
+            </span>
             <h2 id="generation-details-title">Generation details</h2>
           </div>
           <button
@@ -262,6 +277,10 @@ export function GenerationDetailsSheet({
       </aside>
     </div>
   )
+}
+
+function isRunningGeneration(generation: PosterGeneration): boolean {
+  return ['created', 'analyzing', 'designing', 'painting'].includes(generation.status)
 }
 
 function StageTraceView({

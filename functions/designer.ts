@@ -14,9 +14,11 @@ import {
   logPipelineEvent,
   prepareImageReferences,
   resolvedChatModelId,
+  stageAlreadySucceeded,
   StageTraceRecorder,
   userContentWithImageReferences,
   type DesignTokens,
+  type GenerationStageRunContext,
   type PosterLayout,
   type TypedImageReference,
 } from './_shared.ts';
@@ -48,21 +50,70 @@ export default async function (req: Request): Promise<Response> {
     return jsonResponse({ error: 'missing campaignId or generationId' }, 400);
   }
 
+  try {
+    return await runDesignerStage({
+      client,
+      userId: userData.user.id,
+      campaignId: body.campaignId,
+      generationId: body.generationId,
+      finalizeFailure: true,
+      serverOwned: false,
+    });
+  } catch (error) {
+    const details = errorDetails(error);
+    await markGenerationFailed(
+      client,
+      body.generationId,
+      'designer',
+      error,
+      details.code,
+      userData.user.id,
+    );
+    return jsonResponse(
+      { error: details.message, code: details.code, retryable: details.retryable },
+      details.upstream_status ?? 500,
+    );
+  }
+}
+
+export async function runDesignerStage(
+  context: GenerationStageRunContext,
+): Promise<Response> {
+  const {
+    client,
+    userId,
+    campaignId,
+    generationId,
+    finalizeFailure,
+  } = context;
+
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
     .select('id, product_name, tagline')
-    .eq('id', body.campaignId)
+    .eq('id', campaignId)
+    .eq('user_id', userId)
     .maybeSingle();
   if (cErr || !campaign) return jsonResponse({ error: 'campaign not found' }, 404);
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout')
-    .eq('id', body.generationId)
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout')
+    .eq('id', generationId)
     .eq('campaign_id', campaign.id)
+    .eq('user_id', userId)
     .maybeSingle();
   if (generationError || !generation) {
     return jsonResponse({ error: 'poster generation not found' }, 404);
+  }
+  const generationStatus = String((generation as Record<string, unknown>).status ?? '');
+  if (generationStatus === 'failed') {
+    return jsonResponse({ error: 'poster generation already failed' }, 409);
+  }
+  if (
+    ['painting', 'ready'].includes(generationStatus)
+    || await stageAlreadySucceeded(context, 'designer')
+  ) {
+    return jsonResponse({ generation_id: generation.id, idempotent: true });
   }
 
   const parentId = String((generation as Record<string, unknown>).parent_generation_id ?? '');
@@ -72,6 +123,7 @@ export default async function (req: Request): Promise<Response> {
         .select('id, poster_layout, hero_image_url, hero_image_key')
         .eq('id', parentId)
         .eq('campaign_id', campaign.id)
+        .eq('user_id', userId)
         .eq('status', 'ready')
         .maybeSingle()
     : { data: null };
@@ -79,15 +131,25 @@ export default async function (req: Request): Promise<Response> {
   const { error: stageError } = await client.database
     .from('poster_generations')
     .update({ status: 'designing', design_status: 'generating' })
-    .eq('id', generation.id);
+    .eq('id', generation.id)
+    .eq('user_id', userId);
   if (stageError) {
-    await markGenerationFailed(client, generation.id, 'designer', stageError, 'stage_transition_failed');
+    if (finalizeFailure) {
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'designer',
+        stageError,
+        'stage_transition_failed',
+        userId,
+      );
+    }
     return jsonResponse({ error: stageError.message }, 409);
   }
   const trace = new StageTraceRecorder(client, {
     generationId: String(generation.id),
     campaignId: String(campaign.id),
-    userId: userData.user.id,
+    userId,
     stage: 'designer',
   });
   await trace.start();
@@ -324,8 +386,17 @@ export default async function (req: Request): Promise<Response> {
         },
       );
     } catch (e) {
-      await trace.fail(e, 'layout_ai_failed');
-      await markGenerationFailed(client, generation.id, 'designer', e, 'layout_ai_failed');
+      if (finalizeFailure) {
+        await trace.fail(e, 'layout_ai_failed');
+        await markGenerationFailed(
+          client,
+          generation.id,
+          'designer',
+          e,
+          'layout_ai_failed',
+          userId,
+        );
+      }
       logPipelineEvent({
         source: 'designer',
         campaignId: campaign.id,
@@ -343,10 +414,20 @@ export default async function (req: Request): Promise<Response> {
   const { error: upErr } = await client.database
     .from('poster_generations')
     .update({ poster_layout: layout, design_status: 'ready' })
-    .eq('id', generation.id);
+    .eq('id', generation.id)
+    .eq('user_id', userId);
   if (upErr) {
-    await trace.fail(upErr, 'generation_persist_failed');
-    await markGenerationFailed(client, generation.id, 'designer', upErr, 'generation_persist_failed');
+    if (finalizeFailure) {
+      await trace.fail(upErr, 'generation_persist_failed');
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'designer',
+        upErr,
+        'generation_persist_failed',
+        userId,
+      );
+    }
     logPipelineEvent({
       source: 'designer',
       campaignId: campaign.id,
