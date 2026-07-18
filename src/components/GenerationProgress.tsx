@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useI18n } from '../i18n/I18nProvider'
 import type { Translate } from '../lib/i18n'
 import type { PosterLayout } from '../lib/types'
+import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
 import { LayoutPreview } from './LayoutPreview'
 
 // One prompt shown in the loading UI. `image` is the single text-to-image prompt
@@ -32,12 +33,19 @@ interface Props {
   // Designer style only: the bespoke layout, shown as a wireframe preview once the
   // Designer step finishes (while hero paints). Null/absent → no preview panel.
   layout?: PosterLayout | null
+  posterSize?: PosterSize
 }
 
 // The poster-generation loading screen: shows the captured site style board and a
 // live step list (analyze → designer → hero), revealing each agent's
 // real prompt as it finishes. Purely presentational — the wizard owns the state.
-export function GenerationProgress({ headline, screenshotUrl, steps, layout }: Props) {
+export function GenerationProgress({
+  headline,
+  screenshotUrl,
+  steps,
+  layout,
+  posterSize = DEFAULT_POSTER_SIZE,
+}: Props) {
   const { t } = useI18n()
   return (
     <section className="generation-workspace genprog" aria-live="polite">
@@ -72,7 +80,7 @@ export function GenerationProgress({ headline, screenshotUrl, steps, layout }: P
           <p className="muted genprog-sub" style={{ marginBottom: 12 }}>
             {t('Layout complete. Painting the poster now.')}
           </p>
-          <LayoutPreview layout={layout} width={300} />
+          <LayoutPreview layout={layout} width={300} posterSize={posterSize} />
         </div>
       )}
     </section>

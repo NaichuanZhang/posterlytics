@@ -13,6 +13,7 @@ const CAMPAIGN = {
   product_name: 'Posterlytics',
   status: 'published',
   current_generation_id: 'generation-2',
+  poster_format: 'luma_1x1',
   hero_image_url: 'https://example.com/current.png',
   hero_image_key: 'poster/current.png',
   screenshot_key: 'boards/current.jpg',
@@ -45,6 +46,7 @@ const GENERATION = {
   hero_image_url: 'https://example.com/v1.png',
   hero_image_key: 'poster/v1.png',
   instruction: 'Make the title larger',
+  poster_format: 'a4_2x3',
   reference_images: [],
 } as unknown as PosterGeneration
 
@@ -54,9 +56,34 @@ test('overlayGeneration previews a snapshot without changing campaign state', ()
   assert.equal(preview.hero_image_key, 'poster/v1.png')
   assert.equal(preview.brand_essence, 'Version one')
   assert.equal(preview.reference_context, 'Make the title larger')
+  assert.equal(preview.poster_format, 'a4_2x3')
   assert.equal(preview.status, 'published')
   assert.equal(preview.current_generation_id, 'generation-2')
+  assert.equal(CAMPAIGN.poster_format, 'luma_1x1')
   assert.equal(CAMPAIGN.hero_image_key, 'poster/current.png')
+})
+
+test('overlayGeneration defaults a legacy campaign without a poster format to A4', () => {
+  const legacyCampaign = {
+    ...CAMPAIGN,
+    poster_format: undefined,
+  } as unknown as Campaign
+
+  const preview = overlayGeneration(legacyCampaign, null)
+
+  assert.equal(preview.poster_format, 'a4_2x3')
+})
+
+test('overlayGeneration defaults a legacy generation without inheriting the campaign target', () => {
+  const legacyGeneration = {
+    ...GENERATION,
+    poster_format: undefined,
+  } as unknown as PosterGeneration
+
+  const preview = overlayGeneration(CAMPAIGN, legacyGeneration)
+
+  assert.equal(preview.poster_format, 'a4_2x3')
+  assert.equal(CAMPAIGN.poster_format, 'luma_1x1')
 })
 
 test('generation stage transitions allow only active forward progress or failure', () => {

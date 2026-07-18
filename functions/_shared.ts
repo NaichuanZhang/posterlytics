@@ -1,5 +1,18 @@
 // Shared helpers for Posterlytics edge functions (Deno Subhosting).
 import { createAdminClient, createClient } from 'npm:@insforge/sdk';
+import {
+  DEFAULT_POSTER_SIZE,
+  getPosterFrameLabel,
+  getPosterSize,
+  type PosterSize,
+} from '../src/lib/posterSize.ts';
+
+export {
+  DEFAULT_POSTER_SIZE,
+  getPosterFrameLabel,
+  getPosterSize,
+  type PosterSize,
+};
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -1834,7 +1847,7 @@ export interface PosterLayout {
     supporting?: string[];
     proportions?: WeightedPaletteColor[];
   };
-  zones: PosterLayoutZone[]; // top→lower; the artwork fills the full 2:3 frame (QR footer is outside it)
+  zones: PosterLayoutZone[]; // top→lower; artwork fills its frame (QR footer is outside it)
 }
 
 const LAYOUT_BANDS: LayoutBand[] = ['top', 'upper', 'mid', 'lower'];
@@ -1989,14 +2002,22 @@ export function buildParentContextPrompt(args: {
   parentLayout: PosterLayout | null;
   hasPreviousPoster: boolean;
   refreshWebsite?: boolean;
+  posterSize?: PosterSize;
+  parentPosterSize?: PosterSize | null;
 }): string {
   const instruction = args.instruction?.trim().slice(0, 4000) ||
     'Create a refined next version without introducing gratuitous changes.';
+  const posterSize = args.posterSize ?? DEFAULT_POSTER_SIZE;
+  const formatChange = args.parentPosterSize &&
+      args.parentPosterSize.slug !== posterSize.slug
+    ? `FORMAT CHANGE: The target frame is ${getPosterFrameLabel(posterSize)}. Recompose the poster for this frame.`
+    : '';
 
   if (!args.parentLayout && !args.hasPreviousPoster) {
     return [
       'VERSION CONTEXT: This is the first poster version.',
       `USER REQUEST: ${instruction}`,
+      formatChange,
       args.refreshWebsite
         ? 'Use the freshly captured website evidence as the visual source of truth.'
         : '',
@@ -2012,6 +2033,7 @@ export function buildParentContextPrompt(args: {
       ? 'The PREVIOUS-POSTER reference is the primary composition and image-editing source.'
       : 'The previous image is unavailable, so use the parent layout as the primary composition source.',
     `USER REQUEST: ${instruction}`,
+    formatChange,
     'PRESERVATION RULE: Keep every element, word, hierarchy choice, crop, color role, type treatment, texture, motif, spacing relationship, and composition decision that the user did not explicitly ask to change.',
     args.refreshWebsite
       ? 'WEBSITE REFRESH: Reconcile newly captured brand evidence only where it conflicts with stale brand facts; the requested delta and preservation rule still govern the edit.'
@@ -2022,12 +2044,13 @@ export function buildParentContextPrompt(args: {
 
 // Compile a PosterLayout into a text-to-image prompt. PURE + deterministic — the
 // testable seam between the agentic layout and the image model. Reuses hero.ts's
-// proven conventions: 2:3 framing, brand-honoring, "render only these exact
-// quoted strings", and an Avoid list. The artwork fills the complete frame —
-// the SPA composites the QR footer OUTSIDE the artwork on the A4 sheet.
+// proven conventions: registered framing, brand-honoring, "render only these
+// exact quoted strings", and an Avoid list. The artwork fills the complete frame
+// and the SPA composites the QR footer OUTSIDE it on the output sheet.
 export function compileLayoutPrompt(
   layout: PosterLayout,
   ctx: { product: string; essence: string; hasLogo?: boolean; hasStyleBoard?: boolean },
+  posterSize: PosterSize = DEFAULT_POSTER_SIZE,
 ): string {
   const p = layout.palette_roles;
   const bandLabel: Record<LayoutBand, string> = {
@@ -2076,7 +2099,7 @@ export function compileLayoutPrompt(
       'Preserve the source page\'s DENSE rhythm: layer the supplied zones and supporting visual detail while keeping every element legible.',
   };
 
-  return `Create a single PORTRAIT 2:3 product-promotion poster. Custom art-directed layout (NOT a generic template).
+  return `Create a single ${getPosterFrameLabel(posterSize)} product-promotion poster. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
 ${visualDirection ? `${visualDirection}\n` : ''}${sourceEvidence}
 
@@ -2103,7 +2126,7 @@ Avoid: garbled or misspelled text, copied navigation or web controls, painted bu
 
 export async function aiImage(
   prompt: string,
-  aspectRatio = '4:5',
+  aspectRatio = DEFAULT_POSTER_SIZE.providerAspectRatio,
   referenceImages: Array<TypedImageReference | string> = [],
   ordering: 'source' | 'painter' | 'preserve' = 'painter',
 ): Promise<string> {

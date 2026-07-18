@@ -2,27 +2,25 @@ import { useI18n } from '../i18n/I18nProvider'
 import type { TranslationKey } from '../i18n/messages'
 import type { LayoutBand, PosterLayout, PosterLayoutZone } from '../lib/types'
 import { parseColor } from '../lib/colorUtils'
-import { BAND_GEOMETRY, groupZonesByBand } from '../lib/layoutPreview'
+import { BAND_GEOMETRY, getBandHeight, groupZonesByBand } from '../lib/layoutPreview'
 import {
-  ARTWORK_HEIGHT,
-  ARTWORK_WIDTH,
-  FOOTER_H,
-  MATTE_GAP,
-  POSTER_HEIGHT,
-  POSTER_WIDTH,
-  SHEET_MARGIN_Y,
+  DEFAULT_POSTER_SIZE,
+  getPosterQrBandGeometry,
+  scaleQrBandValue,
+  type PosterSize,
 } from '../lib/posterSize'
 
 interface Props {
   layout: PosterLayout
   width?: number // rendered preview width in px
+  posterSize?: PosterSize
 }
 
 // A deterministic WIREFRAME of a designer-mode poster layout, rendered straight
 // from the `poster_layout` JSON the `designer` agent produced — shown while the AI
 // image is still painting (or in the editor before/if the paint is missing). It is
-// explicitly NOT the final poster: the same A4 sheet as AiPoster (matte, centered
-// full 2:3 artwork area, QR footer placeholder OUTSIDE the artwork), with
+// explicitly NOT the final poster: the same registered sheet as AiPoster
+// (matte, centered full artwork frame, QR footer placeholder OUTSIDE the art), with
 // palette-tinted blocks per zone showing the role + exact content text, sized by
 // emphasis, in the correct band. Same native-size + transform:scale idiom as
 // Poster/AiPoster so the proportions match what compileLayoutPrompt tells the
@@ -35,18 +33,23 @@ const BAND_LABEL_KEYS: Record<LayoutBand, TranslationKey> = {
   lower: 'LOWER',
 }
 
-export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
+export function LayoutPreview({
+  layout,
+  width = DEFAULT_PREVIEW_W,
+  posterSize = DEFAULT_POSTER_SIZE,
+}: Props) {
   const { t } = useI18n()
   const p = layout.palette_roles
-  const scale = width / POSTER_WIDTH
+  const scale = width / posterSize.sheet.width
   const groups = groupZonesByBand(layout)
   const zonesByBand = Object.fromEntries(groups.map((g) => [g.band, g.zones])) as Record<string, PosterLayoutZone[]>
+  const qrBand = getPosterQrBandGeometry(posterSize)
 
   return (
     <div
       style={{
         width,
-        height: POSTER_HEIGHT * scale,
+        height: posterSize.sheet.height * scale,
         overflow: 'hidden',
         borderRadius: 8,
         boxShadow: '0 8px 30px rgba(0,0,0,0.16)',
@@ -54,8 +57,8 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
     >
       <div
         style={{
-          width: POSTER_WIDTH,
-          height: POSTER_HEIGHT,
+          width: posterSize.sheet.width,
+          height: posterSize.sheet.height,
           transform: `scale(${scale})`,
           transformOrigin: 'top left',
           background: p.bg,
@@ -63,8 +66,8 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          paddingTop: SHEET_MARGIN_Y,
-          paddingBottom: SHEET_MARGIN_Y,
+          paddingTop: qrBand.sheetMarginY,
+          paddingBottom: qrBand.sheetMarginY,
           boxSizing: 'border-box',
           position: 'relative',
           fontFamily: 'Inter, system-ui, sans-serif',
@@ -89,11 +92,11 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
           {t('PREVIEW · bespoke layout')}
         </div>
 
-        {/* Full 2:3 artwork wireframe — the four content bands own the whole frame. */}
+        {/* Full artwork wireframe: the four content bands own the whole frame. */}
         <div
           style={{
-            width: ARTWORK_WIDTH,
-            height: ARTWORK_HEIGHT,
+            width: posterSize.artwork.width,
+            height: posterSize.artwork.height,
             flex: '0 0 auto',
             display: 'flex',
             flexDirection: 'column',
@@ -106,7 +109,7 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
             <ContentBand
               key={row.band}
               label={t(BAND_LABEL_KEYS[row.band])}
-              height={(row.heightPct / 100) * ARTWORK_HEIGHT}
+              height={getBandHeight(row, posterSize)}
               zones={zonesByBand[row.band] ?? []}
               palette={p}
             />
@@ -114,7 +117,7 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
         </div>
 
         {/* QR footer placeholder — composited by AiPoster OUTSIDE the artwork. */}
-        <FooterPlaceholder accent={p.accent} />
+        <FooterPlaceholder accent={p.accent} posterSize={posterSize} />
       </div>
     </div>
   )
@@ -221,44 +224,46 @@ function ZoneBlock({ zone, palette, count }: { zone: PosterLayoutZone; palette: 
   )
 }
 
-function FooterPlaceholder({ accent }: { accent: string }) {
+function FooterPlaceholder({ accent, posterSize }: { accent: string; posterSize: PosterSize }) {
   const { t } = useI18n()
+  const qrBand = getPosterQrBandGeometry(posterSize)
+  const scaled = (value: number) => scaleQrBandValue(posterSize, value)
   return (
     <div
       style={{
-        width: ARTWORK_WIDTH,
-        height: FOOTER_H,
+        width: posterSize.artwork.width,
+        height: qrBand.footerHeight,
         flex: '0 0 auto',
-        marginTop: MATTE_GAP,
+        marginTop: qrBand.gap,
         boxSizing: 'border-box',
         background: '#0b0c0b',
-        borderTop: `3px solid ${accent}`,
+        borderTop: `${scaled(3)}px solid ${accent}`,
         display: 'flex',
         alignItems: 'center',
-        gap: 28,
-        padding: '0 56px',
+        gap: scaled(28),
+        padding: `0 ${scaled(56)}px`,
       }}
     >
       <div
         style={{
-          width: 120,
-          height: 120,
-          borderRadius: 14,
+          width: scaled(120),
+          height: scaled(120),
+          borderRadius: scaled(14),
           background: '#fff',
           color: '#0b0c0b',
           display: 'grid',
           placeItems: 'center',
-          fontSize: 52,
+          fontSize: scaled(52),
           flex: '0 0 auto',
         }}
       >
         ▦
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 40, fontWeight: 800, color: '#fff' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: scaled(6) }}>
+        <span style={{ fontSize: scaled(40), fontWeight: 800, color: '#fff' }}>
           {t('QR footer')}
         </span>
-        <span style={{ fontSize: 26, color: 'rgba(255,255,255,0.72)' }}>
+        <span style={{ fontSize: scaled(26), color: 'rgba(255,255,255,0.72)' }}>
           {t('added automatically — below the artwork')}
         </span>
       </div>

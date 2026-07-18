@@ -7,7 +7,7 @@ import {
   stepCanvasZoom,
   type CanvasZoom,
 } from '../lib/workspace'
-import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
+import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
 import type { Campaign } from '../lib/types'
 import { LayoutPreview } from './LayoutPreview'
 import { Poster } from './Poster'
@@ -19,6 +19,7 @@ interface PosterCanvasProps {
   zoom: CanvasZoom
   versionLabel: string
   onZoomChange: (zoom: CanvasZoom) => void
+  posterSize?: PosterSize
 }
 
 interface ElementSize {
@@ -32,6 +33,7 @@ export function PosterCanvas({
   zoom,
   versionLabel,
   onZoomChange,
+  posterSize = DEFAULT_POSTER_SIZE,
 }: PosterCanvasProps) {
   const { t } = useI18n()
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -56,21 +58,21 @@ export function PosterCanvas({
     return calculateFitScale(
       viewport.width,
       viewport.height,
-      POSTER_WIDTH,
-      POSTER_HEIGHT,
+      posterSize.sheet.width,
+      posterSize.sheet.height,
       48,
     )
-  }, [viewport, zoom])
+  }, [posterSize, viewport, zoom])
 
   const fitZoom = calculateFitZoom(
     viewport.width,
     viewport.height,
-    POSTER_WIDTH,
-    POSTER_HEIGHT,
+    posterSize.sheet.width,
+    posterSize.sheet.height,
     48,
   )
-  const previewWidth = scale > 0 ? Math.max(120, Math.round(POSTER_WIDTH * scale)) : 0
-  const previewHeight = scale > 0 ? Math.round(POSTER_HEIGHT * scale) : 0
+  const previewWidth = scale > 0 ? Math.max(120, Math.round(posterSize.sheet.width * scale)) : 0
+  const previewHeight = scale > 0 ? Math.round(posterSize.sheet.height * scale) : 0
   const stageWidth = Math.max(viewport.width, previewWidth + 96)
   const stageHeight = Math.max(viewport.height, previewHeight + 96)
 
@@ -90,12 +92,21 @@ export function PosterCanvas({
           {previewWidth > 0 && (
             campaign.hero_image_url || !campaign.poster_layout ? (
               code ? (
-                <Poster campaign={campaign} code={code} width={previewWidth} />
+                <Poster
+                  campaign={campaign}
+                  code={code}
+                  width={previewWidth}
+                  posterSize={posterSize}
+                />
               ) : (
                 <div className="canvas-message">{t('Preparing the tracked placement')}</div>
               )
             ) : (
-              <LayoutPreview layout={campaign.poster_layout} width={previewWidth} />
+              <LayoutPreview
+                layout={campaign.poster_layout}
+                width={previewWidth}
+                posterSize={posterSize}
+              />
             )
           )}
         </div>

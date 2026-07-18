@@ -23,6 +23,7 @@ import { GenerationInputsReview } from '../components/GenerationInputsReview'
 import { GenerationReferences } from '../components/GenerationReferences'
 import { PosterCanvas } from '../components/PosterCanvas'
 import { PosterExportButton } from '../components/PosterExportButton'
+import { PosterFormatSelect } from '../components/PosterFormatSelect'
 import { PosterVersionHistory } from '../components/PosterVersionHistory'
 import { InlineNotice } from '../components/ui/Feedback'
 import { Spinner } from '../components/ui/Spinner'
@@ -45,6 +46,7 @@ import {
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
+import { getPosterSize, type PosterSizeSlug } from '../lib/posterSize'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -54,7 +56,7 @@ import {
 import type { PosterGeneration } from '../lib/types'
 import { buildViewUrl } from '../lib/viewUrl'
 
-type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete'
+type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete' | 'format'
 type MobileSection = 'versions' | 'create' | 'export'
 
 export function PosterEditorPage() {
@@ -173,12 +175,16 @@ export function PosterEditorPage() {
     ?? null
   const selectedGeneration =
     generations.find((generation) => generation.id === selectedGenerationId) ?? null
+  const currentGeneration = campaign?.current_generation_id
+    ? generations.find((generation) => generation.id === campaign.current_generation_id) ?? null
+    : null
+  const previewGeneration = selectedGeneration ?? currentGeneration
   const previewCampaign = useMemo(
-    () => campaign ? overlayGeneration(campaign, selectedGeneration) : null,
-    [campaign, selectedGeneration],
+    () => campaign ? overlayGeneration(campaign, previewGeneration) : null,
+    [campaign, previewGeneration],
   )
 
-  if (loading) {
+  if (loading || generationsLoading) {
     return (
       <AppShell mode="workspace" breadcrumbs={[
         { label: t('Campaigns'), to: '/' },
@@ -198,17 +204,22 @@ export function PosterEditorPage() {
       </AppShell>
     )
   }
-
   const campaignId = campaign.id
   const previewCode = selectedPlacement?.code ?? null
+  const previewPosterSize = getPosterSize(
+    previewGeneration
+      ? previewGeneration.poster_format
+      : campaign.current_generation_id
+        ? undefined
+        : campaign.poster_format,
+  )
+  const targetPosterSize = getPosterSize(campaign.poster_format)
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
   const generationInputsDisabled = uploadingInputs || generating
-  const currentGeneration =
-    generations.find((generation) => generation.id === campaign.current_generation_id) ?? null
   const generationPreflight = deriveGenerationPreflight({
     campaign,
     currentGeneration,
@@ -285,6 +296,28 @@ export function PosterEditorPage() {
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
       notify(t('The selected version could not be restored.'), 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function updatePosterFormat(posterFormat: PosterSizeSlug) {
+    if (posterFormat === targetPosterSize.slug) return
+
+    setBusy('format')
+    setGenerationError(null)
+    try {
+      const { error } = await insforge.database
+        .from('campaigns')
+        .update({ poster_format: posterFormat })
+        .eq('id', campaignId)
+      if (error) throw new Error(error.message)
+      await reload()
+      notify(t('Poster format updated for the next version.'), 'success')
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setGenerationError(message)
+      notify(t('Poster format could not be updated.'), 'error')
     } finally {
       setBusy(null)
     }
@@ -385,6 +418,12 @@ export function PosterEditorPage() {
           <h2 id="create-version-heading">{t('Create next version')}</h2>
         </div>
       </div>
+      <PosterFormatSelect
+        id="next-poster-format"
+        value={targetPosterSize.slug}
+        disabled={generationInputsDisabled || !!busy}
+        onChange={(posterFormat) => void updatePosterFormat(posterFormat)}
+      />
       <GenerationReferences
         context={instruction}
         onContextChange={setInstruction}
@@ -470,8 +509,8 @@ export function PosterEditorPage() {
               <PosterExportButton
                 campaign={previewCampaign}
                 placement={selectedPlacement}
-                label={t('Download poster')}
                 versionNumber={selectedGeneration?.version_number ?? undefined}
+                posterSize={previewPosterSize}
               />
             )}
             <button type="button" className="button button-secondary button-small" onClick={copyLink}>
@@ -648,6 +687,7 @@ export function PosterEditorPage() {
             campaign={previewCampaign}
             code={previewCode}
             zoom={preferences.zoom}
+            posterSize={previewPosterSize}
             versionLabel={selectedGeneration
               ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
               : t('Current poster')}

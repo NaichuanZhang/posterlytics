@@ -200,6 +200,8 @@ async function testActivityRouting(browserInstance) {
   const state = createState({ awaitingReviewActivity: true })
   await installBackendMock(context, state)
   const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
 
   await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
   await page.getByRole('link', { name: 'Review assets' }).waitFor()
@@ -209,6 +211,7 @@ async function testActivityRouting(browserInstance) {
   await dialog.getByRole('button', { name: 'Review assets' }).click()
   await page.waitForURL(reviewUrl())
   await page.getByText('2/6', { exact: true }).waitFor()
+  assert.deepEqual(pageErrors, [])
   await context.close()
 }
 
@@ -774,6 +777,7 @@ function createState({
     scenario: 'product',
     event_details: null,
     current_generation_id: 'generation-current',
+    poster_format: 'a4_2x3',
     status: 'draft',
     created_at: now,
   }
@@ -785,6 +789,7 @@ function createState({
     generation_mode: 'iteration',
     instruction: 'Increase visual contrast.',
     reference_images: [],
+    poster_format: 'a4_2x3',
     scenario: 'product',
     event_details: null,
     style_profile: null,
@@ -1021,6 +1026,7 @@ function activityFixture(state) {
     scenario: 'product',
     instruction: state.reviewGeneration.instruction,
     hero_image_url: null,
+    poster_format: 'a4_2x3',
     asset_selection_mode: 'editor',
     asset_selection_status: 'pending',
     asset_selection_method: null,

@@ -6,6 +6,7 @@ import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { GenerationReferences } from '../components/GenerationReferences'
+import { PosterFormatSelect } from '../components/PosterFormatSelect'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
@@ -21,6 +22,11 @@ import {
   enqueuePosterGeneration,
   retryPosterGeneration,
 } from '../lib/generationApi'
+import {
+  DEFAULT_POSTER_SIZE_SLUG,
+  getPosterSize,
+  type PosterSizeSlug,
+} from '../lib/posterSize'
 
 type Phase = 'form' | 'uploading' | 'started' | 'error'
 
@@ -40,6 +46,7 @@ export function CampaignWizardPage() {
   const [tagline, setTagline] = useState('')
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
+  const [posterFormat, setPosterFormat] = useState<PosterSizeSlug>(DEFAULT_POSTER_SIZE_SLUG)
   const [referenceContext, setReferenceContext] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
 
@@ -53,6 +60,7 @@ export function CampaignWizardPage() {
       tagline: tagline.trim() || null,
       cta_text: ctaText.trim() || 'Learn more',
       destination_url: destinationUrl.trim(),
+      poster_format: posterFormat,
       status: 'draft',
     }
 
@@ -147,6 +155,7 @@ export function CampaignWizardPage() {
   }
 
   const activity = activityItems.find((item) => item.job_id === jobId) ?? null
+  const activityPosterSize = activity ? getPosterSize(activity.poster_format) : null
   const working = phase === 'uploading' || (
     phase === 'started'
     && activity?.status !== 'succeeded'
@@ -210,6 +219,9 @@ export function CampaignWizardPage() {
             <img
               src={activity.hero_image_url}
               alt={t('{name} poster', { name: activity.campaign_name })}
+              style={{
+                aspectRatio: `${activityPosterSize!.artwork.width} / ${activityPosterSize!.artwork.height}`,
+              }}
             />
           )}
           <Link to={`/campaigns/${activity.campaign_id}`} className="button button-primary">
@@ -298,6 +310,11 @@ export function CampaignWizardPage() {
                     onChange={(event) => setTagline(event.target.value)}
                   />
                 </div>
+                <PosterFormatSelect
+                  id="poster-format"
+                  value={posterFormat}
+                  onChange={setPosterFormat}
+                />
               </div>
             </section>
 
@@ -410,6 +427,10 @@ export function CampaignWizardPage() {
                     count: pendingReferences.length,
                   })}
                 </dd>
+              </div>
+              <div>
+                <dt>{t('Format')}</dt>
+                <dd>{t(getPosterSize(posterFormat).label)}</dd>
               </div>
             </dl>
           </aside>

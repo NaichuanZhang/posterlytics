@@ -10,6 +10,9 @@ import { Spinner } from '../components/ui/Spinner'
 import { useToast } from '../components/ui/Toast'
 import { useCampaign } from '../hooks/useCampaign'
 import { usePlacements } from '../hooks/usePlacements'
+import { usePosterGenerations } from '../hooks/usePosterGenerations'
+import { overlayGeneration } from '../lib/generations'
+import { getPosterSize } from '../lib/posterSize'
 import { buildViewUrl } from '../lib/viewUrl'
 import { useI18n } from '../i18n/I18nProvider'
 
@@ -19,6 +22,11 @@ export function PlacementsPage() {
   const { user } = useAuth()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
+  const {
+    generations,
+    loading: generationsLoading,
+    error: generationsError,
+  } = usePosterGenerations(id)
   const { placements, addPlacement, removePlacement } = usePlacements(id, user?.id)
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -61,7 +69,7 @@ export function PlacementsPage() {
     setConfirmingId(null)
   }
 
-  if (loading) {
+  if (loading || generationsLoading) {
     return (
       <AppShell breadcrumbs={[
         { label: t('Campaigns'), to: '/' },
@@ -81,6 +89,17 @@ export function PlacementsPage() {
       </AppShell>
     )
   }
+
+  const currentGeneration =
+    generations.find((generation) => generation.id === campaign.current_generation_id) ?? null
+  const exportCampaign = campaign.current_generation_id
+    ? currentGeneration
+      ? overlayGeneration(campaign, currentGeneration)
+      : null
+    : campaign
+  const posterSize = exportCampaign
+    ? getPosterSize(exportCampaign.poster_format)
+    : null
 
   return (
     <AppShell
@@ -125,6 +144,7 @@ export function PlacementsPage() {
       </form>
 
       {error && <InlineNotice tone="error">{error}</InlineNotice>}
+      {generationsError && <InlineNotice tone="error">{generationsError}</InlineNotice>}
 
       {placements.length === 0 ? (
         <EmptyState
@@ -196,12 +216,15 @@ export function PlacementsPage() {
                     >
                       <Copy size={15} aria-hidden="true" />
                     </button>
-                    <PosterExportButton
-                      campaign={campaign}
-                      placement={placement}
-                      label={t('Download {name} poster', { name: placement.label })}
-                      variant="icon"
-                    />
+                    {exportCampaign && posterSize && (
+                      <PosterExportButton
+                        campaign={exportCampaign}
+                        placement={placement}
+                        versionNumber={currentGeneration?.version_number ?? undefined}
+                        variant="icon"
+                        posterSize={posterSize}
+                      />
+                    )}
                     <button
                       type="button"
                       className="icon-button icon-button-danger"

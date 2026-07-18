@@ -1,4 +1,5 @@
 // Shared types mirroring the InsForge schema.
+import type { PosterSizeSlug } from './posterSize'
 
 export type CampaignStatus = 'draft' | 'analyzing' | 'published'
 
@@ -157,6 +158,8 @@ export interface GenerationActivityItem {
   scenario: CampaignScenario
   instruction: string | null
   hero_image_url: string | null
+  // Optional only for responses served before the poster-format migration.
+  poster_format?: PosterSizeSlug | null
   asset_selection_mode: AssetSelectionMode | null
   asset_selection_status: AssetSelectionStatus | null
   asset_selection_method: AssetSelectionMethod | null
@@ -479,6 +482,8 @@ export interface Campaign {
   scenario: CampaignScenario
   event_details: EventDetails | null
   current_generation_id: string | null
+  // Optional only for responses served before the poster-format migration.
+  poster_format?: PosterSizeSlug | null
   status: CampaignStatus
   created_at: string
 }
@@ -492,6 +497,8 @@ export interface PosterGeneration {
   status: PosterGenerationStatus
   generation_mode: PosterGenerationMode
   instruction: string | null
+  // Optional only for responses served before the poster-format migration.
+  poster_format?: PosterSizeSlug | null
   reference_images: ReferenceImage[]
   scenario: CampaignScenario
   event_details: EventDetails | null

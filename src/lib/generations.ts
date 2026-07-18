@@ -6,6 +6,7 @@ import type {
   PosterGenerationStatus,
   ReferenceImage,
 } from './types'
+import { getPosterSize } from './posterSize'
 
 const ACTIVE_GENERATION_STATUSES = new Set<PosterGenerationStatus>([
   'created',
@@ -38,7 +39,12 @@ export function overlayGeneration(
   campaign: Campaign,
   generation: PosterGeneration | null,
 ): Campaign {
-  if (!generation) return campaign
+  if (!generation) {
+    return {
+      ...campaign,
+      poster_format: getPosterSize(campaign.poster_format).slug,
+    }
+  }
 
   return {
     ...campaign,
@@ -57,6 +63,7 @@ export function overlayGeneration(
     design_status: generation.design_status,
     hero_image_url: generation.hero_image_url,
     hero_image_key: generation.hero_image_key,
+    poster_format: getPosterSize(generation.poster_format).slug,
     reference_context: generation.instruction,
     reference_images: generation.reference_images,
   }

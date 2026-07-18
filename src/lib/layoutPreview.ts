@@ -1,11 +1,13 @@
 import type { LayoutBand, PosterLayout, PosterLayoutZone } from './types'
+import type { PosterSize } from './posterSize'
 
 // Pure helpers for the designer-mode layout WIREFRAME preview. These mirror the
 // band→vertical-position mapping that `compileLayoutPrompt` (functions/_shared.ts)
 // bakes into the image prompt, so the preview matches what `hero` will paint:
 //   top   0–12%   upper 12–42%   mid 42–72%   lower 72–100%
-// The artwork fills its full 2:3 frame; the QR footer lives OUTSIDE the artwork
-// on the A4 sheet (AiPoster composites it below), so no band is reserved.
+// The artwork fills its complete registered frame; the QR footer lives OUTSIDE
+// the artwork on the output sheet (AiPoster composites it below), so no band is
+// reserved.
 //
 // Kept separate from the JSX (and unit-tested) so the geometry stays a single
 // source of truth.
@@ -25,6 +27,10 @@ export const BAND_GEOMETRY: BandRow[] = [
   { band: 'mid', heightPct: 30 },
   { band: 'lower', heightPct: 28 },
 ]
+
+export function getBandHeight(row: BandRow, posterSize: PosterSize): number {
+  return (row.heightPct / 100) * posterSize.artwork.height
+}
 
 export interface BandGroup {
   band: LayoutBand

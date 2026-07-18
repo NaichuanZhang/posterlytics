@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import { Download } from 'lucide-react'
 import type { Campaign, Placement } from '../lib/types'
-import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
+import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
 import { AiPoster } from './posters/AiPoster'
 import { useToast } from './ui/Toast'
 import { useI18n } from '../i18n/I18nProvider'
@@ -10,15 +10,15 @@ import { useI18n } from '../i18n/I18nProvider'
 interface Props {
   campaign: Campaign
   placement: Placement
-  label?: string // button text; defaults to 'Export A4 PNG'
   versionNumber?: number
   variant?: 'button' | 'icon'
+  posterSize?: PosterSize
 }
 
-// Exports the poster with this placement's QR embedded as an A4 PNG
-// (2480×3508 — the 1240×1754 sheet captured at pixelRatio 2). AiPoster renders
-// off-screen at full size and html-to-image captures it (the QR is a
-// same-origin data-URL <img>, so no canvas taint).
+// Exports the poster with this placement's QR embedded at the descriptor's
+// native sheet dimensions and pixel ratio. AiPoster renders off-screen at full
+// size and html-to-image captures it (the QR is a same-origin data-URL <img>, so
+// no canvas taint).
 //
 // The AI hero lives on cross-origin Storage, which would taint the export canvas;
 // we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
@@ -26,16 +26,22 @@ interface Props {
 export function PosterExportButton({
   campaign,
   placement,
-  label,
   versionNumber,
   variant = 'button',
+  posterSize = DEFAULT_POSTER_SIZE,
 }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
   const { notify } = useToast()
   const { t } = useI18n()
-  const buttonLabel = label ?? t('Export A4 PNG')
+  const formatLabel = t(posterSize.label)
+  const buttonLabel = variant === 'icon'
+    ? t('Download {name} poster as {format} PNG', {
+        name: placement.label,
+        format: formatLabel,
+      })
+    : t('Export {format} PNG', { format: formatLabel })
 
   async function handleExport() {
     if (busy) return
@@ -68,16 +74,16 @@ export function PosterExportButton({
       // Give the QR image a tick to render.
       await new Promise((r) => setTimeout(r, 150))
       const dataUrl = await toPng(offscreenRef.current, {
-        width: POSTER_WIDTH,
-        height: POSTER_HEIGHT,
-        pixelRatio: 2,
+        width: posterSize.sheet.width,
+        height: posterSize.sheet.height,
+        pixelRatio: posterSize.export.pixelRatio,
         cacheBust: true,
         skipFonts: true,
       })
       const a = document.createElement('a')
       a.href = dataUrl
       const version = versionNumber ? `-v${versionNumber}` : ''
-      a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}-${placement.label.replace(/\W+/g, '-')}-A4.png`
+      a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}-${placement.label.replace(/\W+/g, '-')}-${posterSize.export.filenameSuffix}.png`
       a.click()
       notify(t('Poster export is ready.'), 'success')
     } catch (e) {
@@ -109,6 +115,7 @@ export function PosterExportButton({
           campaign={campaign}
           code={placement.code}
           imageSrcOverride={imgDataUrl ?? undefined}
+          posterSize={posterSize}
         />
       </div>
     </>

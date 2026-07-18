@@ -4,14 +4,10 @@ import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
 import { parseColor, toHex } from '../../lib/colorUtils'
 import {
-  ARTWORK_HEIGHT,
-  ARTWORK_WIDTH,
-  FOOTER_H,
-  MATTE_GAP,
-  POSTER_HEIGHT,
-  POSTER_WIDTH,
-  QR_PX,
-  SHEET_MARGIN_Y,
+  DEFAULT_POSTER_SIZE,
+  getPosterQrBandGeometry,
+  scaleQrBandValue,
+  type PosterSize,
 } from '../../lib/posterSize'
 import { QrCode } from '../QrCode'
 import { useI18n } from '../../i18n/I18nProvider'
@@ -23,14 +19,14 @@ interface Props {
   // pre-fetches the cross-origin hero to a data URL and passes it here so the
   // export canvas is never tainted by CORS. Falls back to hero_image_url.
   imageSrcOverride?: string
+  posterSize?: PosterSize
 }
 
-// A4 print sheet: the COMPLETE model-generated 2:3 illustration centered on a
-// portrait A4 canvas (matte-framed, object-fit: contain — never cropped,
-// stretched, or covered), with the REAL per-placement QR in a branded footer
-// row BELOW the artwork. The image model can't render a scannable QR, so we
-// composite ours — but outside the art, so no pixel the model painted is ever
-// hidden or faded.
+// Output sheet: the COMPLETE model-generated illustration centered on the
+// descriptor's canvas (matte-framed, object-fit: contain, never cropped,
+// stretched, or covered), with the REAL per-placement QR in a scaled branded
+// footer row BELOW the artwork. The image model can't render a scannable QR, so
+// we composite ours outside the art and never hide a painted pixel.
 //
 // The matte matches the analyzed brand background so the artwork (which the
 // prompt asks to fill edge-to-edge with that same bg) reads as one surface;
@@ -39,16 +35,8 @@ interface Props {
 // The QR card is ALWAYS white with dark modules, independent of brand palette,
 // so it stays scannable on any background. The footer is dark (posterColors.ink)
 // with a thin vivid brand-accent hairline on top for identity.
-const FOOTER_PAD_X = 56
-const FOOTER_GAP = 40
-const QR_CARD_PAD = 14
-const QR_CARD_RADIUS = 16
-const HAIRLINE = 3
-const CTA_TITLE_PX = 44
-const CTA_SUB_PX = 26
-
 export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
-  { campaign, code, imageSrcOverride },
+  { campaign, code, imageSrcOverride, posterSize = DEFAULT_POSTER_SIZE },
   ref,
 ) {
   const { t } = useI18n()
@@ -80,28 +68,30 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   const footerAccent = pc.accent
   const footerText = '#ffffff'
   const footerTextDim = 'rgba(255,255,255,0.72)'
+  const qrBand = getPosterQrBandGeometry(posterSize)
+  const scaled = (value: number) => scaleQrBandValue(posterSize, value)
 
   return (
     <div
       ref={ref}
       style={{
-        width: POSTER_WIDTH,
-        height: POSTER_HEIGHT,
+        width: posterSize.sheet.width,
+        height: posterSize.sheet.height,
         overflow: 'hidden',
         background: matte,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        paddingTop: SHEET_MARGIN_Y,
-        paddingBottom: SHEET_MARGIN_Y,
+        paddingTop: qrBand.sheetMarginY,
+        paddingBottom: qrBand.sheetMarginY,
         boxSizing: 'border-box',
       }}
     >
-      {/* Artwork area — the full 2:3 image, contained (never cropped). */}
+      {/* Complete registered artwork frame, contained and never cropped. */}
       <div
         style={{
-          width: ARTWORK_WIDTH,
-          height: ARTWORK_HEIGHT,
+          width: posterSize.artwork.width,
+          height: posterSize.artwork.height,
           flex: '0 0 auto',
           overflow: 'hidden',
         }}
@@ -137,40 +127,40 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
       {img && (
         <div
           style={{
-            width: ARTWORK_WIDTH,
-            height: FOOTER_H,
+            width: posterSize.artwork.width,
+            height: qrBand.footerHeight,
             flex: '0 0 auto',
-            marginTop: MATTE_GAP,
+            marginTop: qrBand.gap,
             background: footerBg,
-            borderTop: `${HAIRLINE}px solid ${footerAccent}`,
+            borderTop: `${scaled(3)}px solid ${footerAccent}`,
             display: 'flex',
             alignItems: 'center',
-            padding: `0 ${FOOTER_PAD_X}px`,
-            gap: FOOTER_GAP,
+            padding: `0 ${scaled(56)}px`,
+            gap: scaled(40),
             boxSizing: 'border-box',
           }}
         >
           {/* White QR card — light quiet-zone frame keeps the code scannable
               regardless of the footer/brand color. */}
           <div
-            style={{
-              background: '#ffffff',
-              padding: QR_CARD_PAD,
-              borderRadius: QR_CARD_RADIUS,
+              style={{
+                background: '#ffffff',
+                padding: scaled(14),
+                borderRadius: scaled(16),
               flex: '0 0 auto',
               display: 'flex',
             }}
           >
-            <QrCode value={buildViewUrl(code)} size={QR_PX} dark="#0b0c0b" light="#ffffff" />
+            <QrCode value={buildViewUrl(code)} size={qrBand.qrSize} dark="#0b0c0b" light="#ffffff" />
           </div>
 
           {/* Footer copy. For events: RSVP label + the real date/time/location/host
               lines (accurate, composited — never AI-painted). For products: the
               CTA caption + a "point your camera" nudge. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: isEvent ? 5 : 8, minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: scaled(isEvent ? 5 : 8), minWidth: 0 }}>
             <span
               style={{
-                fontSize: isEvent ? 36 : CTA_TITLE_PX,
+                fontSize: scaled(isEvent ? 36 : 44),
                 fontWeight: 800,
                 lineHeight: 1.05,
                 letterSpacing: '-0.01em',
@@ -184,7 +174,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
                 <span
                   key={i}
                   style={{
-                    fontSize: i === 0 ? 27 : 24,
+                    fontSize: scaled(i === 0 ? 27 : 24),
                     fontWeight: i === 0 ? 700 : 500,
                     lineHeight: 1.25,
                     color: i === 0 ? footerText : footerTextDim,
@@ -194,7 +184,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
                 </span>
               ))
             ) : (
-              <span style={{ fontSize: CTA_SUB_PX, fontWeight: 500, lineHeight: 1.2, color: footerTextDim }}>
+              <span style={{ fontSize: scaled(26), fontWeight: 500, lineHeight: 1.2, color: footerTextDim }}>
                 Point your camera here
               </span>
             )}

@@ -30,6 +30,16 @@ CREATE TABLE public.campaigns (
   reference_context TEXT,
   reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
   current_generation_id UUID,
+  poster_format TEXT NOT NULL DEFAULT 'a4_2x3',
+  CONSTRAINT campaigns_poster_format_valid
+    CHECK (
+      poster_format IN (
+        'a4_2x3',
+        'rednote_3x4',
+        'yt_thumb_16x9',
+        'luma_1x1'
+      )
+    ),
   CONSTRAINT campaigns_reference_context_length
     CHECK (reference_context IS NULL OR char_length(reference_context) <= 4000),
   CONSTRAINT campaigns_reference_images_shape
@@ -51,6 +61,7 @@ CREATE TABLE public.poster_generations (
   generation_mode TEXT NOT NULL,
   instruction TEXT,
   reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+  poster_format TEXT NOT NULL DEFAULT 'a4_2x3',
   scenario TEXT NOT NULL DEFAULT 'product',
   event_details JSONB,
   style_profile JSONB,
@@ -82,6 +93,15 @@ CREATE TABLE public.poster_generations (
     CHECK (generation_mode IN ('iteration', 'website_refresh')),
   CONSTRAINT poster_generations_instruction_length
     CHECK (instruction IS NULL OR char_length(instruction) <= 4000),
+  CONSTRAINT poster_generations_poster_format_valid
+    CHECK (
+      poster_format IN (
+        'a4_2x3',
+        'rednote_3x4',
+        'yt_thumb_16x9',
+        'luma_1x1'
+      )
+    ),
   CONSTRAINT poster_generations_reference_images_shape
     CHECK (
       jsonb_typeof(reference_images) = 'array'
@@ -173,6 +193,7 @@ BEGIN
     NEW.generation_mode,
     NEW.instruction,
     NEW.reference_images,
+    NEW.poster_format,
     NEW.trace_schema_version,
     NEW.created_at
   ) IS DISTINCT FROM (
@@ -183,6 +204,7 @@ BEGIN
     OLD.generation_mode,
     OLD.instruction,
     OLD.reference_images,
+    OLD.poster_format,
     OLD.trace_schema_version,
     OLD.created_at
   ) THEN
@@ -529,7 +551,8 @@ GRANT INSERT (
   status,
   scenario,
   reference_context,
-  reference_images
+  reference_images,
+  poster_format
 ) ON public.campaigns TO authenticated;
 GRANT UPDATE (
   product_url,
@@ -540,7 +563,8 @@ GRANT UPDATE (
   status,
   scenario,
   reference_context,
-  reference_images
+  reference_images,
+  poster_format
 ) ON public.campaigns TO authenticated;
 GRANT SELECT ON public.poster_generations TO authenticated;
 GRANT UPDATE (
@@ -872,6 +896,7 @@ BEGIN
     generation_mode,
     instruction,
     reference_images,
+    poster_format,
     scenario,
     event_details,
     style_profile,
@@ -893,6 +918,7 @@ BEGIN
     CASE WHEN p_refresh_website THEN 'website_refresh' ELSE 'iteration' END,
     v_instruction,
     v_reference_images,
+    v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
@@ -1505,6 +1531,7 @@ BEGIN
     generation_mode,
     instruction,
     reference_images,
+    poster_format,
     scenario,
     event_details,
     style_profile,
@@ -1526,6 +1553,7 @@ BEGIN
     CASE WHEN p_refresh_website THEN 'website_refresh' ELSE 'iteration' END,
     v_instruction,
     v_reference_images,
+    v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
@@ -1644,6 +1672,7 @@ BEGIN
     generation_mode,
     instruction,
     reference_images,
+    poster_format,
     scenario,
     event_details,
     style_profile,
@@ -1665,6 +1694,7 @@ BEGIN
     v_previous_generation.generation_mode,
     v_previous_generation.instruction,
     v_previous_generation.reference_images,
+    v_previous_generation.poster_format,
     v_previous_generation.scenario,
     v_previous_generation.event_details,
     v_previous_generation.style_profile,
@@ -2384,6 +2414,7 @@ BEGIN
     NEW.generation_mode,
     NEW.instruction,
     NEW.reference_images,
+    NEW.poster_format,
     NEW.trace_schema_version,
     NEW.asset_selection_mode,
     NEW.created_at
@@ -2395,6 +2426,7 @@ BEGIN
     OLD.generation_mode,
     OLD.instruction,
     OLD.reference_images,
+    OLD.poster_format,
     OLD.trace_schema_version,
     OLD.asset_selection_mode,
     OLD.created_at
@@ -3792,6 +3824,7 @@ BEGIN
     generation_mode,
     instruction,
     reference_images,
+    poster_format,
     scenario,
     event_details,
     style_profile,
@@ -3816,6 +3849,7 @@ BEGIN
     CASE WHEN p_refresh_website THEN 'website_refresh' ELSE 'iteration' END,
     v_instruction,
     v_reference_images,
+    v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
@@ -3946,6 +3980,7 @@ BEGIN
     generation_mode,
     instruction,
     reference_images,
+    poster_format,
     scenario,
     event_details,
     style_profile,
@@ -3972,6 +4007,7 @@ BEGIN
     v_previous_generation.generation_mode,
     v_previous_generation.instruction,
     v_previous_generation.reference_images,
+    v_previous_generation.poster_format,
     v_previous_generation.scenario,
     v_previous_generation.event_details,
     v_previous_generation.style_profile,
@@ -4192,6 +4228,7 @@ BEGIN
       g.scenario,
       g.instruction,
       g.hero_image_url,
+      g.poster_format,
       g.asset_selection_mode,
       g.asset_selection_status,
       g.asset_selection_method,
@@ -4246,6 +4283,7 @@ BEGIN
         'scenario', scenario,
         'instruction', instruction,
         'hero_image_url', hero_image_url,
+        'poster_format', poster_format,
         'asset_selection_mode', asset_selection_mode,
         'asset_selection_status', asset_selection_status,
         'asset_selection_method', asset_selection_method,

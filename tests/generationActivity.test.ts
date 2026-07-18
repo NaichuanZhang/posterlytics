@@ -38,6 +38,7 @@ function activity(
     scenario: 'product',
     instruction: null,
     hero_image_url: null,
+    poster_format: 'a4_2x3',
     asset_selection_mode: null,
     asset_selection_status: null,
     asset_selection_method: null,

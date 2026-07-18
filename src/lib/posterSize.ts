@@ -1,21 +1,160 @@
-// A4 print-sheet geometry — the single source of truth for the poster layout.
-// The sheet is portrait A4 at 150dpi; the export captures at pixelRatio 2 for a
-// 300-DPI 2480×3508 PNG. The complete 2:3 AI artwork sits centered on the sheet
-// (never cropped — object-fit: contain) with side mattes, and the QR footer is
-// its own row OUTSIDE the artwork. Every number here is pure and unit-tested
-// (tests/posterGeometry.test.ts) so the sheet always adds up exactly:
-//   width:  MATTE_X + ARTWORK_WIDTH + MATTE_X                    = 1240
-//   height: MARGIN_Y + ARTWORK_HEIGHT + GAP + FOOTER_H + MARGIN_Y = 1754
-export const POSTER_WIDTH = 1240
-export const POSTER_HEIGHT = 1754
+import type { TranslationKey } from '../i18n/messages'
 
-// The 2:3 artwork area (exactly 980:1470 = 2:3), centered horizontally.
-export const ARTWORK_WIDTH = 980
-export const ARTWORK_HEIGHT = 1470
-export const MATTE_X = (POSTER_WIDTH - ARTWORK_WIDTH) / 2 // 130px side mattes
+export interface PosterDimensions {
+  readonly width: number
+  readonly height: number
+}
 
-export const SHEET_MARGIN_Y = 24 // top and bottom sheet margins
-export const MATTE_GAP = 16 // gap between artwork and footer
-export const FOOTER_H = 220 // QR footer row, aligned with the artwork width
+export interface PosterSizeDescriptor<Slug extends string = string> {
+  readonly slug: Slug
+  readonly label: TranslationKey
+  readonly artwork: PosterDimensions
+  readonly sheet: PosterDimensions
+  readonly providerAspectRatio: string
+  readonly export: {
+    readonly pixelRatio: number
+    readonly filenameSuffix: string
+  }
+  readonly qrBand: {
+    readonly scale: number
+  }
+}
 
-export const QR_PX = 150
+// Every fixed footer measurement is multiplied by the preset's single QR-band
+// scale. The A4 values are the established render and export contract.
+export const BASE_QR_BAND_GEOMETRY = {
+  sheetMarginY: 24,
+  gap: 16,
+  footerHeight: 220,
+  qrSize: 150,
+} as const
+
+const BASE_QR_BAND_TOTAL_HEIGHT =
+  BASE_QR_BAND_GEOMETRY.sheetMarginY * 2
+  + BASE_QR_BAND_GEOMETRY.gap
+  + BASE_QR_BAND_GEOMETRY.footerHeight
+
+function catalogLabel<Key extends TranslationKey>(label: Key): Key {
+  return label
+}
+
+export const POSTER_SIZES = [
+  {
+    slug: 'a4_2x3',
+    label: catalogLabel('A4 poster (2:3 artwork)'),
+    artwork: { width: 980, height: 1470 },
+    sheet: { width: 1240, height: 1754 },
+    providerAspectRatio: '2:3',
+    export: {
+      pixelRatio: 2,
+      filenameSuffix: 'A4',
+    },
+    qrBand: {
+      scale: 1,
+    },
+  },
+  {
+    slug: 'rednote_3x4',
+    label: catalogLabel('RedNote portrait (3:4)'),
+    artwork: { width: 960, height: 1280 },
+    sheet: { width: 1242, height: 1656 },
+    providerAspectRatio: '3:4',
+    export: {
+      pixelRatio: 1,
+      filenameSuffix: 'RedNote-3x4',
+    },
+    qrBand: {
+      scale: (1656 - 1280) / BASE_QR_BAND_TOTAL_HEIGHT,
+    },
+  },
+  {
+    slug: 'yt_thumb_16x9',
+    label: catalogLabel('YouTube thumbnail (16:9)'),
+    artwork: { width: 800, height: 450 },
+    sheet: { width: 1280, height: 720 },
+    providerAspectRatio: '16:9',
+    export: {
+      pixelRatio: 1,
+      filenameSuffix: 'YouTube-16x9',
+    },
+    qrBand: {
+      scale: (720 - 450) / BASE_QR_BAND_TOTAL_HEIGHT,
+    },
+  },
+  {
+    slug: 'luma_1x1',
+    label: catalogLabel('Luma square (1:1)'),
+    artwork: { width: 800, height: 800 },
+    sheet: { width: 1080, height: 1080 },
+    providerAspectRatio: '1:1',
+    export: {
+      pixelRatio: 1,
+      filenameSuffix: 'Luma-1x1',
+    },
+    qrBand: {
+      scale: (1080 - 800) / BASE_QR_BAND_TOTAL_HEIGHT,
+    },
+  },
+] as const satisfies readonly PosterSizeDescriptor[]
+
+export type PosterSizeSlug = (typeof POSTER_SIZES)[number]['slug']
+export type PosterSize = PosterSizeDescriptor<PosterSizeSlug>
+
+export const DEFAULT_POSTER_SIZE_SLUG: PosterSizeSlug = 'a4_2x3'
+export const DEFAULT_POSTER_SIZE: PosterSize = POSTER_SIZES[0]
+
+const POSTER_SIZE_BY_SLUG = new Map<string, PosterSize>(
+  POSTER_SIZES.map((size) => [size.slug, size]),
+)
+
+export function isPosterSizeSlug(value: unknown): value is PosterSizeSlug {
+  return typeof value === 'string' && POSTER_SIZE_BY_SLUG.has(value)
+}
+
+// Nullish values are legacy rows created before poster_format existed. Any
+// present but unsupported value is data corruption and must fail explicitly.
+export function getPosterSize(value: unknown): PosterSize {
+  if (value === null || value === undefined) return DEFAULT_POSTER_SIZE
+  if (!isPosterSizeSlug(value)) {
+    throw new RangeError(`Unknown poster size: ${String(value)}`)
+  }
+  return POSTER_SIZE_BY_SLUG.get(value)!
+}
+
+export function scaleQrBandValue(size: PosterSize, value: number): number {
+  return value * size.qrBand.scale
+}
+
+export function getPosterQrBandGeometry(size: PosterSize) {
+  return {
+    sheetMarginY: scaleQrBandValue(size, BASE_QR_BAND_GEOMETRY.sheetMarginY),
+    gap: scaleQrBandValue(size, BASE_QR_BAND_GEOMETRY.gap),
+    footerHeight: scaleQrBandValue(size, BASE_QR_BAND_GEOMETRY.footerHeight),
+    qrSize: scaleQrBandValue(size, BASE_QR_BAND_GEOMETRY.qrSize),
+  }
+}
+
+export function getPosterMatteX(size: PosterSize): number {
+  return (size.sheet.width - size.artwork.width) / 2
+}
+
+export function getPosterFrameLabel(size: PosterSize): string {
+  const orientation = size.artwork.width === size.artwork.height
+    ? 'SQUARE'
+    : size.artwork.width > size.artwork.height
+      ? 'LANDSCAPE'
+      : 'PORTRAIT'
+  return `${orientation} ${size.providerAspectRatio}`
+}
+
+// Compatibility exports for code and tests outside the descriptor-aware render
+// path. They are derived from the default descriptor, never independent values.
+export const POSTER_WIDTH = DEFAULT_POSTER_SIZE.sheet.width
+export const POSTER_HEIGHT = DEFAULT_POSTER_SIZE.sheet.height
+export const ARTWORK_WIDTH = DEFAULT_POSTER_SIZE.artwork.width
+export const ARTWORK_HEIGHT = DEFAULT_POSTER_SIZE.artwork.height
+export const MATTE_X = getPosterMatteX(DEFAULT_POSTER_SIZE)
+export const SHEET_MARGIN_Y = getPosterQrBandGeometry(DEFAULT_POSTER_SIZE).sheetMarginY
+export const MATTE_GAP = getPosterQrBandGeometry(DEFAULT_POSTER_SIZE).gap
+export const FOOTER_H = getPosterQrBandGeometry(DEFAULT_POSTER_SIZE).footerHeight
+export const QR_PX = getPosterQrBandGeometry(DEFAULT_POSTER_SIZE).qrSize

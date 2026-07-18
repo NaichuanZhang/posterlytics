@@ -1363,7 +1363,6 @@ img {
   grid-column: 2;
   grid-row: 1 / span 2;
   width: 180px;
-  aspect-ratio: 2 / 3;
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   object-fit: contain;
@@ -2034,7 +2033,7 @@ img {
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   background: var(--canvas);
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .version-row-copy {

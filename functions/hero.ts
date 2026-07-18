@@ -9,6 +9,9 @@ import {
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
+  DEFAULT_POSTER_SIZE,
+  getPosterFrameLabel,
+  getPosterSize,
   loadFrozenGenerationImageReferences,
   logPipelineEvent,
   markGenerationFailed,
@@ -19,16 +22,18 @@ import {
   StageTraceRecorder,
   type GenerationStageRunContext,
   type PosterLayout,
+  type PosterSize,
   type TypedImageReference,
 } from './_shared.ts';
 
-// `hero` renders the poster (2:3) as a single AI image. Products compile the
-// LLM-designed poster_layout (produced by the `designer` agent) into the prompt
-// via the pure compileLayoutPrompt(); events use their own bespoke event prompt.
+// `hero` renders the registered artwork frame as a single AI image. Products
+// compile the LLM-designed poster_layout (produced by the `designer` agent) into
+// the prompt via the pure compileLayoutPrompt(); events use their own bespoke
+// event prompt.
 // The image model gets a compiled prompt plus bounded visual references. The
-// artwork fills its complete 2:3 frame — the SPA shows it uncropped on an A4
-// sheet with the QR footer composited OUTSIDE the artwork. Stored in the public
-// assets bucket.
+// artwork fills its complete frame; the SPA shows it uncropped on the registered
+// output sheet with the QR footer composited OUTSIDE the artwork. Stored in the
+// public assets bucket.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -96,7 +101,7 @@ export async function runHeroStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key, trace_schema_version, asset_selection_status')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, poster_format, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key, trace_schema_version, asset_selection_status')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -120,7 +125,7 @@ export async function runHeroStage(
   const { data: parent } = parentId
     ? await client.database
         .from('poster_generations')
-        .select('id, poster_layout, hero_image_url, hero_image_key')
+        .select('id, poster_format, poster_layout, hero_image_url, hero_image_key')
         .eq('id', parentId)
         .eq('campaign_id', campaign.id)
         .eq('user_id', userId)
@@ -158,6 +163,12 @@ export async function runHeroStage(
     ...(generation as Record<string, unknown>),
     ...(campaign as Record<string, unknown>),
   };
+  const posterSize = getPosterSize(
+    (generation as Record<string, unknown>).poster_format,
+  );
+  const parentPosterSize = parent
+    ? getPosterSize((parent as Record<string, unknown>).poster_format)
+    : null;
 
   // Event campaigns get their own promo-poster prompt; every product campaign
   // paints the designer layout (the fixed template modes were removed).
@@ -324,9 +335,11 @@ export async function runHeroStage(
     hasStyleBoard,
     ((parent as Record<string, unknown> | null)?.poster_layout ?? null) as PosterLayout | null,
     referenceImages.some((reference) => reference.kind === 'previous-poster'),
+    posterSize,
+    parentPosterSize,
   );
 
-  // Request 2:3 explicitly — aspect ratio only, never provider pixel dimensions
+  // Request the registered ratio explicitly, never provider pixel dimensions
   // (AiPoster shows the full image uncropped above the external QR footer).
   let imageSource: string;
   try {
@@ -346,14 +359,14 @@ export async function runHeroStage(
         prompt: { image: prompt },
         providerSettings: {
           modalities: ['image', 'text'],
-          image_config: { aspect_ratio: '2:3' },
+          image_config: { aspect_ratio: posterSize.providerAspectRatio },
           timeout_ms: 90_000,
         },
         contentManifest: buildTraceContentManifest(messages, preparedImages.attachedImages),
       },
       () => aiImage(
         prompt,
-        '2:3',
+        posterSize.providerAspectRatio,
         referenceImages,
         usesFrozenAssets ? 'preserve' : 'painter',
       ),
@@ -510,6 +523,8 @@ function buildPosterPrompt(
   hasStyleBoard = false,
   parentLayout: PosterLayout | null = null,
   hasPreviousPoster = false,
+  posterSize: PosterSize = DEFAULT_POSTER_SIZE,
+  parentPosterSize: PosterSize | null = null,
 ): string {
   const instruction = String(c.instruction ?? '').trim().slice(0, 4000);
   const referenceCount = Array.isArray(c.reference_images) ? c.reference_images.length : 0;
@@ -518,11 +533,13 @@ function buildPosterPrompt(
     parentLayout,
     hasPreviousPoster,
     refreshWebsite: c.generation_mode === 'website_refresh',
+    posterSize,
+    parentPosterSize,
   });
   const referenceBlock =
     `\n\n${parentContext}` +
     `\n${referenceCount} new supporting image(s) accompany this prompt. Use them only for the requested delta.`;
-  if (style === 'event') return buildEventPrompt(c, hasLogo) + referenceBlock;
+  if (style === 'event') return buildEventPrompt(c, hasLogo, posterSize) + referenceBlock;
   const layout = c.poster_layout as PosterLayout | null;
   const ctx = {
     product: String(c.product_name ?? 'the product'),
@@ -531,9 +548,9 @@ function buildPosterPrompt(
     hasStyleBoard,
   };
   if (layout && Array.isArray(layout.zones) && layout.zones.length > 0) {
-    return compileLayoutPrompt(layout, ctx) + referenceBlock;
+    return compileLayoutPrompt(layout, ctx, posterSize) + referenceBlock;
   }
-  return compileLayoutPrompt(fallbackLayout(c), ctx) + referenceBlock;
+  return compileLayoutPrompt(fallbackLayout(c), ctx, posterSize) + referenceBlock;
 }
 
 // A safe generic layout for when poster_layout is absent (designer failed or
@@ -597,11 +614,15 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
   };
 }
 
-// Compose the text-to-image prompt for an EVENT promo poster (2:3). The exact
+// Compose the text-to-image prompt for an EVENT promo poster. The exact
 // date/time/location are rendered as REAL text by the SPA (AiPoster's footer,
 // outside the artwork), NOT by the image model — so this prompt paints only the
-// ATMOSPHERE + event title + host, filling the complete 2:3 frame.
-function buildEventPrompt(c: Record<string, unknown>, hasLogo = false): string {
+// ATMOSPHERE + event title + host, filling the complete registered frame.
+function buildEventPrompt(
+  c: Record<string, unknown>,
+  hasLogo = false,
+  posterSize: PosterSize = DEFAULT_POSTER_SIZE,
+): string {
   const spec = (c.poster_spec ?? {}) as {
     title?: string; hook?: string; blurb?: string; host_line?: string;
   } & Record<string, unknown>;
@@ -616,7 +637,7 @@ function buildEventPrompt(c: Record<string, unknown>, hasLogo = false): string {
     ? '\nA reference image of the host/brand LOGO is provided — reproduce it faithfully (exact shape and colors) in the top brand area; do not redraw or distort it.\n'
     : '';
 
-  return `Create a single PORTRAIT 2:3 EVENT PROMOTION poster — an inviting, high-energy real-world event flyer
+  return `Create a single ${getPosterFrameLabel(posterSize)} EVENT PROMOTION poster — an inviting, high-energy real-world event flyer
 (the kind pinned to a bulletin board or shared as a story). Bold, editorial, atmospheric. NOT a product/SaaS mockup,
 NOT a web UI.
 

@@ -8,6 +8,8 @@ import {
   extractJson,
   jsonResponse,
   createUserClient,
+  getPosterFrameLabel,
+  getPosterSize,
   loadFrozenGenerationImageReferences,
   markGenerationFailed,
   normalizePosterLayout,
@@ -99,7 +101,7 @@ export async function runDesignerStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout, trace_schema_version, asset_selection_status')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, poster_format, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout, trace_schema_version, asset_selection_status')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -122,7 +124,7 @@ export async function runDesignerStage(
   const { data: parent } = parentId
     ? await client.database
         .from('poster_generations')
-        .select('id, poster_layout, hero_image_url, hero_image_key')
+        .select('id, poster_format, poster_layout, hero_image_url, hero_image_key')
         .eq('id', parentId)
         .eq('campaign_id', campaign.id)
         .eq('user_id', userId)
@@ -160,6 +162,12 @@ export async function runDesignerStage(
     ...(generation as Record<string, unknown>),
     ...(campaign as Record<string, unknown>),
   };
+  const posterSize = getPosterSize(
+    (generation as Record<string, unknown>).poster_format,
+  );
+  const parentPosterSize = parent
+    ? getPosterSize((parent as Record<string, unknown>).poster_format)
+    : null;
   const product = String(c.product_name ?? 'the product');
   const tagline = String(c.tagline ?? '');
   const essence = String(c.brand_essence ?? '');
@@ -303,10 +311,12 @@ export async function runDesignerStage(
       ? visualReferences.some((reference) => reference.kind === 'previous-poster')
       : !!(parent as Record<string, unknown> | null)?.hero_image_url,
     refreshWebsite: c.generation_mode === 'website_refresh',
+    posterSize,
+    parentPosterSize,
   });
 
   const sys =
-    'You are an award-winning poster art director creating the next version of a PORTRAIT 2:3 product poster. ' +
+    `You are an award-winning poster art director creating the next version of a ${getPosterFrameLabel(posterSize)} product poster. ` +
     'Follow the iteration contract exactly: preserve the parent composition and every unspecified choice, changing ' +
     'only what the user requested. Reference-purpose labels identify the previous poster, source style board, and ' +
     'supporting images. Use observed evidence rather than category assumptions or a generic template. Never pick a ' +
@@ -329,7 +339,7 @@ export async function runDesignerStage(
     'for sparse sources. Use the band labels to place the chosen zones across the full artwork. ' +
     'Keep every content string SHORT and legible. The palette_roles MUST use the real brand colors provided. ' +
     'Preserve color usage proportions: dominant neutrals remain dominant and small accents remain restrained. ' +
-    'This is a PRINTED POSTER IMAGE, not an app screen. The four bands together fill the COMPLETE 2:3 frame. ' +
+    `This is a PRINTED POSTER IMAGE, not an app screen. The four bands together fill the COMPLETE ${posterSize.providerAspectRatio} frame. ` +
     'CRITICAL: do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere — the tracked QR ' +
     'footer bar (printed separately below the artwork) IS the call-to-action, so a CTA zone would be redundant. ' +
     'Use the "lower" zone for a closing value prop or proof point instead. ' +

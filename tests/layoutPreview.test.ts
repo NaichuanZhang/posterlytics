@@ -1,6 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BAND_GEOMETRY, LAYOUT_BAND_ORDER, groupZonesByBand } from '../src/lib/layoutPreview.ts'
+import {
+  BAND_GEOMETRY,
+  getBandHeight,
+  LAYOUT_BAND_ORDER,
+  groupZonesByBand,
+} from '../src/lib/layoutPreview.ts'
+import { POSTER_SIZES } from '../src/lib/posterSize.ts'
 import type { PosterLayout } from '../src/lib/types.ts'
 
 const PALETTE = { bg: '#0b1020', text: '#e8ecf5', primary: '#3b82f6', accent: '#f97316' }
@@ -21,6 +27,16 @@ test('BAND_GEOMETRY matches the band ranges compileLayoutPrompt bakes into the i
   // top 0–12, upper 12–42, mid 42–72, lower 72–100
   assert.deepEqual(BAND_GEOMETRY.map((r) => r.heightPct), [12, 30, 30, 28])
 })
+
+for (const size of POSTER_SIZES) {
+  test(`BAND_GEOMETRY fills the complete ${size.slug} artwork height`, () => {
+    const height = BAND_GEOMETRY.reduce(
+      (total, row) => total + getBandHeight(row, size),
+      0,
+    )
+    assert.equal(height, size.artwork.height)
+  })
+}
 
 test('groupZonesByBand returns all four bands top→lower regardless of input order', () => {
   const groups = groupZonesByBand(

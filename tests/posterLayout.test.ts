@@ -7,6 +7,11 @@ import {
   buildParentContextPrompt,
   type PosterLayout,
 } from '../functions/_shared.ts'
+import {
+  getPosterFrameLabel,
+  getPosterSize,
+  POSTER_SIZES,
+} from '../src/lib/posterSize.ts'
 
 const PALETTE = { bg: '#0b1020', text: '#e8ecf5', primary: '#3b82f6', accent: '#f97316' }
 
@@ -86,16 +91,21 @@ test('compileLayoutPrompt orders zones top→lower regardless of input order', (
   assert.ok(iTop < iUpper && iUpper < iLower, 'top must come before upper before lower')
 })
 
-test('compileLayoutPrompt embeds exact zone text, palette, and 2:3 full-frame framing', () => {
-  const prompt = compileLayoutPrompt(LAYOUT, { product: 'Acme', essence: 'a crisp blue data brand' })
-  assert.ok(prompt.includes('"Start free today"'))
-  assert.ok(prompt.includes('"Ship dashboards fast"'))
-  assert.ok(prompt.includes('2:3'))
-  assert.ok(prompt.includes('#3b82f6') && prompt.includes('#f97316'))
-  assert.ok(prompt.includes('a crisp blue data brand'))
-  // never asks the model to draw a QR/barcode
-  assert.ok(/QR code or barcode drawn by you/i.test(prompt))
-})
+for (const size of POSTER_SIZES) {
+  test(`compileLayoutPrompt embeds exact content and ${size.slug} framing`, () => {
+    const prompt = compileLayoutPrompt(
+      LAYOUT,
+      { product: 'Acme', essence: 'a crisp blue data brand' },
+      size,
+    )
+    assert.ok(prompt.includes('"Start free today"'))
+    assert.ok(prompt.includes('"Ship dashboards fast"'))
+    assert.ok(prompt.includes(getPosterFrameLabel(size)))
+    assert.ok(prompt.includes('#3b82f6') && prompt.includes('#f97316'))
+    assert.ok(prompt.includes('a crisp blue data brand'))
+    assert.ok(/QR code or barcode drawn by you/i.test(prompt))
+  })
+}
 
 test('compileLayoutPrompt lets the artwork fill the frame — no crop or reserved-margin instructions', () => {
   // All four bands present, so every band label lands in the prompt.
@@ -196,4 +206,34 @@ test('buildParentContextPrompt identifies a first website-backed version', () =>
 
   assert.match(prompt, /first poster version/)
   assert.match(prompt, /freshly captured website evidence/)
+})
+
+test('buildParentContextPrompt gives one factual reflow instruction for a format change', () => {
+  const prompt = buildParentContextPrompt({
+    instruction: 'Keep the message.',
+    parentLayout: LAYOUT,
+    hasPreviousPoster: true,
+    parentPosterSize: getPosterSize('a4_2x3'),
+    posterSize: getPosterSize('rednote_3x4'),
+  })
+  const formatLines = prompt
+    .split('\n')
+    .filter((line) => line.startsWith('FORMAT CHANGE:'))
+
+  assert.deepEqual(formatLines, [
+    'FORMAT CHANGE: The target frame is PORTRAIT 3:4. Recompose the poster for this frame.',
+  ])
+})
+
+test('buildParentContextPrompt omits reflow instructions when the format is unchanged', () => {
+  const size = getPosterSize('yt_thumb_16x9')
+  const prompt = buildParentContextPrompt({
+    instruction: null,
+    parentLayout: LAYOUT,
+    hasPreviousPoster: true,
+    parentPosterSize: size,
+    posterSize: size,
+  })
+
+  assert.doesNotMatch(prompt, /FORMAT CHANGE/)
 })
