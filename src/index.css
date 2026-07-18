@@ -4087,6 +4087,26 @@ table.stats tr.winner td:first-child {
   gap: 5px;
 }
 
+.asset-mode-control [data-tooltip]::after {
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 240px;
+  overflow-wrap: break-word;
+  text-align: left;
+  white-space: normal;
+}
+
+.asset-mode-control:not(.is-compact) [data-tooltip]::after {
+  right: 0;
+  left: auto;
+  transform: translate(0, -2px);
+}
+
+.asset-mode-control:not(.is-compact) [data-tooltip]:hover::after,
+.asset-mode-control:not(.is-compact) [data-tooltip]:focus-visible::after {
+  transform: translate(0, 0);
+}
+
 .asset-mode-control.is-compact {
   align-items: flex-start;
   flex-direction: column;
@@ -4101,6 +4121,27 @@ table.stats tr.winner td:first-child {
   min-width: 0;
   flex: 1;
   justify-content: center;
+}
+
+.asset-mode-control.is-compact [data-tooltip]::after {
+  max-width: min(240px, calc(200% + 2px));
+}
+
+.asset-mode-control.is-compact .segmented-control button:first-child::after {
+  right: auto;
+  left: 0;
+  transform: translate(0, -2px);
+}
+
+.asset-mode-control.is-compact .segmented-control button:last-child::after {
+  right: 0;
+  left: auto;
+  transform: translate(0, -2px);
+}
+
+.asset-mode-control.is-compact .segmented-control button:hover::after,
+.asset-mode-control.is-compact .segmented-control button:focus-visible::after {
+  transform: translate(0, 0);
 }
 
 .asset-review-page {
@@ -4892,6 +4933,10 @@ table.stats tr.winner td:first-child {
 @media (max-width: 520px) {
   .asset-review-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .asset-mode-control:not(.is-compact) [data-tooltip]::after {
+    max-width: 220px;
   }
 
   .asset-review-header {

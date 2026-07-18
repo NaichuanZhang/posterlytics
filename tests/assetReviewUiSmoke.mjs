@@ -8,6 +8,8 @@ const HOST = '127.0.0.1'
 const PORT = 4174
 const BASE_URL = `http://${HOST}:${PORT}`
 const OUTPUT_DIR = 'test-results/asset-review'
+const EDITOR_MODE_DESCRIPTION = 'Review, include, exclude, and reorder images before generation.'
+const YOLO_MODE_DESCRIPTION = 'Let AI select and order images automatically, with no manual review step.'
 
 await mkdir(OUTPUT_DIR, { recursive: true })
 
@@ -45,6 +47,7 @@ try {
   await testActivityRouting(browser)
   await testHistoricalAssetAudit(browser)
   await testCampaignWizardPreference(browser)
+  await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
   console.log(`asset review UI smoke passed; screenshots: ${OUTPUT_DIR}`)
 } finally {
@@ -229,6 +232,86 @@ async function testCampaignWizardPreference(browserInstance) {
   await context.close()
 }
 
+async function testAssetModeTooltips(browserInstance) {
+  const desktopContext = await browserInstance.newContext({
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const desktopState = createState({ editorReady: true })
+  await installBackendMock(desktopContext, desktopState)
+  const desktopPage = await desktopContext.newPage()
+  const desktopErrors = []
+  desktopPage.on('pageerror', (error) => desktopErrors.push(error))
+
+  await desktopPage.goto(`${BASE_URL}/campaigns/new`)
+  await desktopPage.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  let mode = desktopPage.getByRole('group', { name: 'Asset selection mode' })
+  await assertModeTooltipBehavior(
+    desktopPage,
+    mode,
+    desktopPage.locator('.campaign-form'),
+  )
+  await desktopPage.screenshot({
+    path: `${OUTPUT_DIR}/mode-tooltip-wizard-desktop.png`,
+    fullPage: true,
+  })
+
+  await desktopPage.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await desktopPage.getByRole('heading', { name: 'Create next version' }).waitFor()
+  mode = desktopPage.getByRole('group', { name: 'Asset selection mode' })
+  await assertModeTooltipBehavior(
+    desktopPage,
+    mode,
+    desktopPage.locator('.editor-inspector'),
+  )
+  await desktopPage.screenshot({
+    path: `${OUTPUT_DIR}/mode-tooltip-editor-desktop.png`,
+    fullPage: true,
+  })
+  await assertNoOverflow(desktopPage)
+  assert.deepEqual(desktopErrors, [])
+  await desktopContext.close()
+
+  const mobileContext = await browserInstance.newContext({
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+  })
+  const mobileState = createState({ editorReady: true })
+  await installBackendMock(mobileContext, mobileState)
+  const mobilePage = await mobileContext.newPage()
+  const mobileErrors = []
+  mobilePage.on('pageerror', (error) => mobileErrors.push(error))
+
+  await mobilePage.goto(`${BASE_URL}/campaigns/new`)
+  await mobilePage.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  mode = mobilePage.getByRole('group', { name: 'Asset selection mode' })
+  await assertModeTooltipBehavior(
+    mobilePage,
+    mode,
+    mobilePage.locator('.campaign-form'),
+  )
+  await mobilePage.screenshot({
+    path: `${OUTPUT_DIR}/mode-tooltip-wizard-mobile.png`,
+    fullPage: true,
+  })
+
+  await mobilePage.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await mobilePage.getByRole('heading', { name: 'Create next version' }).waitFor()
+  mode = mobilePage.getByRole('group', { name: 'Asset selection mode' })
+  await assertModeTooltipBehavior(
+    mobilePage,
+    mode,
+    mobilePage.locator('.mobile-panel-content'),
+  )
+  await mobilePage.screenshot({
+    path: `${OUTPUT_DIR}/mode-tooltip-editor-mobile.png`,
+    fullPage: true,
+  })
+  await assertNoOverflow(mobilePage)
+  assert.deepEqual(mobileErrors, [])
+  await mobileContext.close()
+}
+
 async function testBothEntryModes(browserInstance) {
   const context = await browserInstance.newContext({
     viewport: { width: 1360, height: 900 },
@@ -254,6 +337,87 @@ async function testBothEntryModes(browserInstance) {
   assert.deepEqual(state.enqueueModes, ['yolo', 'editor'])
   await page.waitForURL(new RegExp('/campaigns/campaign-asset/generations/generated-2/assets$'))
   await context.close()
+}
+
+async function assertModeTooltipBehavior(page, mode, container) {
+  const editor = mode.getByRole('button', { name: 'Editor' })
+  const yolo = mode.getByRole('button', { name: 'Yolo' })
+  const editorDescriptionId = await assertModeDescription(editor, EDITOR_MODE_DESCRIPTION)
+  const yoloDescriptionId = await assertModeDescription(yolo, YOLO_MODE_DESCRIPTION)
+  assert.notEqual(editorDescriptionId, yoloDescriptionId)
+
+  await editor.hover()
+  await assertTooltipVisible(editor, EDITOR_MODE_DESCRIPTION)
+  await assertTooltipContained(editor, container)
+
+  await page.mouse.move(0, 0)
+  await editor.focus()
+  await page.keyboard.press('Tab')
+  assert.equal(await yolo.evaluate((element) => element === document.activeElement), true)
+  await assertTooltipVisible(yolo, YOLO_MODE_DESCRIPTION)
+  await assertTooltipContained(yolo, container)
+}
+
+async function assertModeDescription(button, expectedDescription) {
+  assert.equal(await button.getAttribute('data-tooltip'), expectedDescription)
+  const describedBy = await button.evaluate((element) => {
+    const id = element.getAttribute('aria-describedby')
+    return {
+      id,
+      text: id ? document.getElementById(id)?.textContent : null,
+    }
+  })
+  assert.ok(describedBy.id)
+  assert.equal(describedBy.text, expectedDescription)
+  return describedBy.id
+}
+
+async function assertTooltipVisible(button, expectedDescription) {
+  await button.page().waitForTimeout(30)
+  const tooltip = await button.evaluate((element) => {
+    const style = getComputedStyle(element, '::after')
+    return {
+      content: style.content,
+      opacity: style.opacity,
+      whiteSpace: style.whiteSpace,
+      width: Number.parseFloat(style.width),
+    }
+  })
+  assert.equal(tooltip.content.replace(/^["']|["']$/g, ''), expectedDescription)
+  assert.equal(tooltip.opacity, '1')
+  assert.equal(tooltip.whiteSpace, 'normal')
+  assert.ok(tooltip.width <= 240)
+}
+
+async function assertTooltipContained(button, container) {
+  const [tooltip, boundary] = await Promise.all([
+    button.evaluate((element) => {
+      const buttonRect = element.getBoundingClientRect()
+      const style = getComputedStyle(element, '::after')
+      const width = Number.parseFloat(style.width)
+      const height = Number.parseFloat(style.height)
+      const left = style.left === 'auto'
+        ? buttonRect.right - Number.parseFloat(style.right) - width
+        : buttonRect.left + Number.parseFloat(style.left)
+      const top = buttonRect.top + Number.parseFloat(style.top)
+      const transform = style.transform === 'none'
+        ? new DOMMatrixReadOnly()
+        : new DOMMatrixReadOnly(style.transform)
+      return {
+        top: top + transform.m42,
+        right: left + transform.m41 + width,
+        bottom: top + transform.m42 + height,
+        left: left + transform.m41,
+      }
+    }),
+    container.boundingBox(),
+  ])
+  assert.ok(boundary)
+  const geometry = JSON.stringify({ tooltip, boundary })
+  assert.ok(tooltip.left >= boundary.x - 1, geometry)
+  assert.ok(tooltip.right <= boundary.x + boundary.width + 1, geometry)
+  assert.ok(tooltip.top >= boundary.y - 1, geometry)
+  assert.ok(tooltip.bottom <= boundary.y + boundary.height + 1, geometry)
 }
 
 async function installBackendMock(context, state) {
