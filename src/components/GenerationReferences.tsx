@@ -272,18 +272,18 @@ export function GenerationReferences({
           </button>
 
           <div className={`reference-url-panel${isUnavailable ? ' is-disabled' : ''}`}>
-            <span className="reference-dropzone-icon" aria-hidden="true">
-              <Link2 size={20} strokeWidth={2} />
-            </span>
+            <label htmlFor={urlInputId}>Image URL</label>
             <div className="reference-url-content">
-              <label htmlFor={urlInputId}>Image URL</label>
+              <span className="reference-dropzone-icon" aria-hidden="true">
+                <Link2 size={20} strokeWidth={2} />
+              </span>
               <div className="reference-url-control">
                 <input
                   id={urlInputId}
                   type="url"
                   inputMode="url"
                   autoComplete="url"
-                  placeholder="https://example.com/image.jpg"
+                  placeholder="https://…/pic.jpg"
                   value={urlInput}
                   disabled={isUnavailable}
                   aria-describedby={[
@@ -300,7 +300,7 @@ export function GenerationReferences({
                   title="Add image URL"
                   onClick={submitUrl}
                 >
-                  <Plus size={17} strokeWidth={2.5} aria-hidden="true" />
+                  <Plus size={16} strokeWidth={2} aria-hidden="true" />
                 </button>
               </div>
             </div>
