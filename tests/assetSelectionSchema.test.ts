@@ -13,6 +13,13 @@ const skipReasonMigration = readFileSync(
   ),
   'utf8',
 )
+const rankSwapMigration = readFileSync(
+  new URL(
+    '../migrations/20260718053152_fix-generation-asset-rank-swaps.sql',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const baseline = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8')
 
 test('asset review schema is owner-readable and RPC-mutated only', () => {
@@ -29,6 +36,43 @@ test('selection constraints enforce availability, unique rank, and six-image RPC
   assert.match(migration, /cardinality\(v_ids\) > 6/)
   assert.match(migration, /selection contains duplicate ids/)
   assert.match(migration, /selection contains unavailable or unknown ids/)
+})
+
+test('selection updates clear existing ranks before assigning the next order', () => {
+  for (const sql of [rankSwapMigration, baseline]) {
+    const functionStart = sql.indexOf(
+      'CREATE OR REPLACE FUNCTION public.apply_generation_asset_selection(',
+    )
+    const functionEnd = sql.indexOf('\n$$;', functionStart)
+    const body = sql.slice(functionStart, functionEnd)
+    const validation = body.indexOf(
+      'PERFORM public.validate_generation_asset_ids(p_generation_id, v_ids);',
+    )
+    const clear = body.indexOf('included = FALSE,\n    selection_rank = NULL')
+    const assignment = body.indexOf('included = a.id = ANY(v_ids)')
+
+    assert.ok(functionStart >= 0)
+    assert.ok(functionEnd > functionStart)
+    assert.ok(validation >= 0 && validation < clear)
+    assert.ok(clear >= 0 && clear < assignment)
+    assert.match(
+      body,
+      /WHERE a\.generation_id = p_generation_id\s+AND a\.selection_rank IS NOT NULL;/,
+    )
+  }
+})
+
+test('rank swap migration no-ops after the owner-applied replacement', () => {
+  const inspection = rankSwapMigration.indexOf('SELECT pg_get_functiondef(')
+  const clearPhaseCheck = rankSwapMigration.indexOf(
+    "POSITION('AND a.selection_rank IS NOT NULL;' IN v_definition)",
+  )
+  const noOp = rankSwapMigration.indexOf('RETURN;', clearPhaseCheck)
+  const replacement = rankSwapMigration.indexOf('EXECUTE $replacement$', noOp)
+
+  assert.ok(inspection >= 0 && inspection < clearPhaseCheck)
+  assert.ok(clearPhaseCheck < noOp)
+  assert.ok(noOp < replacement)
 })
 
 test('review lifecycle includes active uniqueness, atomic resume, cancellation, and immutable completion', () => {

@@ -7,6 +7,7 @@ import {
   GripVertical,
   ImageOff,
   LoaderCircle,
+  RefreshCw,
   Save,
   Sparkles,
   X,
@@ -142,9 +143,10 @@ export function GenerationAssetReviewPage() {
     saveChainRef.current = save
     void save.then(() => {
       if (saveVersionRef.current === version) setSaveState('saved')
-    }).catch((cause) => {
-      if (saveVersionRef.current === version) setSaveState('error')
-      setError(cause instanceof Error ? cause.message : String(cause))
+    }).catch(() => {
+      if (saveVersionRef.current === version) {
+        setSaveState('error')
+      }
     })
   }
 
@@ -188,10 +190,13 @@ export function GenerationAssetReviewPage() {
     setError(null)
     try {
       await saveChainRef.current
-      await confirmGenerationAssetSelection(
-        generationId,
-        latestSelectionRef.current,
-      )
+    } catch {
+      setSaveState('error')
+      setConfirming(false)
+      return
+    }
+    try {
+      await confirmGenerationAssetSelection(generationId, latestSelectionRef.current)
       await refreshActivity()
       navigate(`/campaigns/${campaignId}`, { replace: true })
     } catch (cause) {
@@ -334,6 +339,19 @@ export function GenerationAssetReviewPage() {
               onMove={moveAsset}
             />
 
+            {saveState === 'error' && (
+              <InlineNotice tone="error">
+                <span>We couldn't save your image selection. Try again.</span>
+                <button
+                  type="button"
+                  className="button button-secondary button-small asset-save-retry"
+                  onClick={() => queueAutosave([...latestSelectionRef.current])}
+                >
+                  <RefreshCw size={14} aria-hidden="true" />
+                  Retry save
+                </button>
+              </InlineNotice>
+            )}
             {error && <InlineNotice tone="error">{error}</InlineNotice>}
 
             <footer className="asset-review-actions">

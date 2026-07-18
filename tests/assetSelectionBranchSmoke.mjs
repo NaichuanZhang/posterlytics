@@ -31,9 +31,7 @@ try {
   }
   console.log('asset selection branch smoke passed')
 } finally {
-  await Promise.allSettled([...campaignIds].map((id) =>
-    admin.database.from('campaigns').delete().eq('id', id)
-  ))
+  await Promise.allSettled([...campaignIds].map(deleteCampaign))
 }
 
 async function testEditorReviewAndRetryReuse() {
@@ -124,17 +122,36 @@ async function testEditorReviewAndRetryReuse() {
     p_asset_ids: [],
   })).error, 'non-owner saved another user review')
 
+  const initialOrder = [ids[0], ids[1]]
   await ok(owner.database.rpc('save_generation_asset_selection', {
     p_generation_id: review.generation.id,
-    p_asset_ids: [],
+    p_asset_ids: initialOrder,
   }))
+  await assertSelectionOrder(review.generation.id, initialOrder)
+
+  const frontInsertedOrder = [ids[2], ...initialOrder]
   await ok(owner.database.rpc('save_generation_asset_selection', {
     p_generation_id: review.generation.id,
-    p_asset_ids: [ids[1], ids[0]],
+    p_asset_ids: frontInsertedOrder,
   }))
+  await assertSelectionOrder(review.generation.id, frontInsertedOrder)
+
+  await ok(owner.database.rpc('save_generation_asset_selection', {
+    p_generation_id: review.generation.id,
+    p_asset_ids: initialOrder,
+  }))
+  await assertSelectionOrder(review.generation.id, initialOrder)
+
+  const reversedOrder = [...initialOrder].reverse()
+  await ok(owner.database.rpc('save_generation_asset_selection', {
+    p_generation_id: review.generation.id,
+    p_asset_ids: reversedOrder,
+  }))
+  await assertSelectionOrder(review.generation.id, reversedOrder)
+
   const confirmed = row(await ok(owner.database.rpc('confirm_generation_asset_selection', {
     p_generation_id: review.generation.id,
-    p_asset_ids: [ids[1], ids[0]],
+    p_asset_ids: initialOrder,
   })))
   assert.equal(confirmed.generation.asset_selection_status, 'completed')
   assert.equal(confirmed.generation.asset_selection_method, 'user')
@@ -146,7 +163,7 @@ async function testEditorReviewAndRetryReuse() {
     .eq('generation_id', review.generation.id)
     .eq('included', true)
     .order('selection_rank'))
-  assert.deepEqual(selected.map((asset) => asset.id), [ids[1], ids[0]])
+  assert.deepEqual(selected.map((asset) => asset.id), initialOrder)
   assert.equal((await trace(review.generation.id, 'assets')).status, 'succeeded')
   const unavailableSkips = (await trace(review.generation.id, 'assets')).skipped_images
   assert.deepEqual(unavailableSkips.map((skip) => skip.reason), ['fetch_failed'])
@@ -159,13 +176,13 @@ async function testEditorReviewAndRetryReuse() {
     p_generation_id: review.generation.id,
     p_stage: 'designer',
     p_skips: [{
-      asset: { asset_id: ids[1] },
+      asset: { asset_id: ids[0] },
       reason: 'fetch_failed',
       detail: 'Expected provider fetch failure.',
     }],
     p_user_id: ownerRow.id,
   }))
-  const skipped = await byId('generation_assets', ids[1])
+  const skipped = await byId('generation_assets', ids[0])
   assert.equal(skipped.provider_skips.length, 1)
   assert.equal(skipped.provider_skips[0].stage, 'designer')
 
@@ -176,7 +193,7 @@ async function testEditorReviewAndRetryReuse() {
   const completedMutation = await admin.database
     .from('generation_assets')
     .update({ included: false, selection_rank: null })
-    .eq('id', ids[1])
+    .eq('id', ids[0])
   assert.ok(completedMutation.error, 'completed selection bypassed its integrity guard')
 
   const designerJob = only(await claim('asset-review-designer', 1))
@@ -212,7 +229,7 @@ async function testEditorReviewAndRetryReuse() {
   assert.equal(reused.length, 8)
   assert.deepEqual(
     reused.filter((asset) => asset.included).map((asset) => asset.selection_rank),
-    [2, 1],
+    [1, 2],
   )
   assert.equal((await trace(retry.generation.id, 'assets')).status, 'succeeded')
   await deleteCampaign(campaignId)
@@ -401,6 +418,11 @@ async function createCampaign(name) {
 }
 
 async function deleteCampaign(id) {
+  cliUnrestrictedQuery(`
+    SET session_replication_role = replica;
+    DELETE FROM public.generation_assets WHERE campaign_id = '${id}'::uuid;
+    SET session_replication_role = origin;
+  `)
   await ok(admin.database.from('campaigns').delete().eq('id', id))
   campaignIds.delete(id)
 }
@@ -459,6 +481,16 @@ async function countIncludedAssets(generationId) {
     .select('id')
     .eq('generation_id', generationId)
     .eq('included', true))).length
+}
+
+async function assertSelectionOrder(generationId, expectedIds) {
+  const selected = await ok(admin.database
+    .from('generation_assets')
+    .select('id')
+    .eq('generation_id', generationId)
+    .eq('included', true)
+    .order('selection_rank'))
+  assert.deepEqual(selected.map((asset) => asset.id), expectedIds)
 }
 
 async function ok(request) {
@@ -528,4 +560,12 @@ function cliQuery(sql) {
     ['@insforge/cli', 'db', 'query', sql, '--json'],
     { encoding: 'utf8' },
   ))
+}
+
+function cliUnrestrictedQuery(sql) {
+  execFileSync(
+    'npx',
+    ['@insforge/cli', 'db', 'query', '--unrestricted', sql],
+    { encoding: 'utf8' },
+  )
 }

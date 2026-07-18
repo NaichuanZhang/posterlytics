@@ -4089,17 +4089,20 @@ table.stats tr.winner td:first-child {
 
 .asset-mode-control [data-tooltip]::after {
   box-sizing: border-box;
+  top: auto;
+  bottom: calc(100% + 7px);
   width: max-content;
   max-width: 240px;
   overflow-wrap: break-word;
   text-align: left;
+  transform: translate(-50%, 2px);
   white-space: normal;
 }
 
 .asset-mode-control:not(.is-compact) [data-tooltip]::after {
   right: 0;
   left: auto;
-  transform: translate(0, -2px);
+  transform: translate(0, 2px);
 }
 
 .asset-mode-control:not(.is-compact) [data-tooltip]:hover::after,
@@ -4130,13 +4133,13 @@ table.stats tr.winner td:first-child {
 .asset-mode-control.is-compact .segmented-control button:first-child::after {
   right: auto;
   left: 0;
-  transform: translate(0, -2px);
+  transform: translate(0, 2px);
 }
 
 .asset-mode-control.is-compact .segmented-control button:last-child::after {
   right: 0;
   left: auto;
-  transform: translate(0, -2px);
+  transform: translate(0, 2px);
 }
 
 .asset-mode-control.is-compact .segmented-control button:hover::after,
@@ -4438,6 +4441,10 @@ table.stats tr.winner td:first-child {
   margin-top: 28px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
+}
+
+.asset-save-retry {
+  margin-left: auto;
 }
 
 .asset-cancel-confirm {

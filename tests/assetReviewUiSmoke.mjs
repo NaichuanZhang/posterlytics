@@ -43,6 +43,7 @@ try {
   await waitForServer()
   browser = await chromium.launch({ headless: true })
   await testDesktopAutosaveResumeAndCancel(browser)
+  await testAutosaveFailureRetry(browser)
   await testMobileZeroSelectionConfirmation(browser)
   await testActivityRouting(browser)
   await testHistoricalAssetAudit(browser)
@@ -106,6 +107,59 @@ async function testDesktopAutosaveResumeAndCancel(browserInstance) {
   await page.waitForURL(`${BASE_URL}/campaigns/campaign-asset`)
   assert.equal(state.cancelCalls, 1)
   await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testAutosaveFailureRetry(browserInstance) {
+  const context = await browserInstance.newContext({
+    viewport: { width: 1180, height: 820 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ saveFailuresRemaining: 1 })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(reviewUrl())
+  await page.getByText('2/6', { exact: true }).waitFor()
+  const reorder = page.locator('.asset-card.is-included').nth(0)
+    .getByRole('button', { name: /Reorder/ })
+  await reorder.focus()
+  await page.keyboard.press('ArrowDown')
+  await waitFor(() => state.saveAttempts.length === 1)
+
+  await page.getByText("We couldn't save your image selection. Try again.").waitFor()
+  const retry = page.getByRole('button', { name: 'Retry save' })
+  await retry.waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: 'Confirm and generate' }).isDisabled(),
+    true,
+  )
+  assert.deepEqual(
+    await page.locator('.asset-card.is-included .asset-card-title strong').allTextContents(),
+    ['Style board', 'Previous poster'],
+  )
+  assert.equal(
+    (await page.locator('body').innerText()).includes('idx_generation_assets_selected_rank'),
+    false,
+  )
+  await assertNoOverflow(page)
+  await page.screenshot({ path: `${OUTPUT_DIR}/save-retry-desktop.png`, fullPage: true })
+
+  await retry.click()
+  await waitFor(() => state.saveAttempts.length === 2 && state.savedSelections.length === 1)
+  assert.deepEqual(state.saveAttempts, [
+    ['asset-b', 'asset-a'],
+    ['asset-b', 'asset-a'],
+  ])
+  await page.getByText('Saved', { exact: true }).waitFor()
+  assert.equal(await retry.count(), 0)
+  assert.equal(
+    await page.getByRole('button', { name: 'Confirm and generate' }).isEnabled(),
+    true,
+  )
   assert.deepEqual(pageErrors, [])
   await context.close()
 }
@@ -250,6 +304,7 @@ async function testAssetModeTooltips(browserInstance) {
     desktopPage,
     mode,
     desktopPage.locator('.campaign-form'),
+    desktopPage.getByRole('button', { name: 'Generate poster' }),
   )
   await desktopPage.screenshot({
     path: `${OUTPUT_DIR}/mode-tooltip-wizard-desktop.png`,
@@ -263,6 +318,7 @@ async function testAssetModeTooltips(browserInstance) {
     desktopPage,
     mode,
     desktopPage.locator('.editor-inspector'),
+    desktopPage.getByRole('button', { name: 'Generate version' }),
   )
   await desktopPage.screenshot({
     path: `${OUTPUT_DIR}/mode-tooltip-editor-desktop.png`,
@@ -289,6 +345,7 @@ async function testAssetModeTooltips(browserInstance) {
     mobilePage,
     mode,
     mobilePage.locator('.campaign-form'),
+    mobilePage.getByRole('button', { name: 'Generate poster' }),
   )
   await mobilePage.screenshot({
     path: `${OUTPUT_DIR}/mode-tooltip-wizard-mobile.png`,
@@ -302,6 +359,7 @@ async function testAssetModeTooltips(browserInstance) {
     mobilePage,
     mode,
     mobilePage.locator('.mobile-panel-content'),
+    mobilePage.getByRole('button', { name: 'Generate version' }),
   )
   await mobilePage.screenshot({
     path: `${OUTPUT_DIR}/mode-tooltip-editor-mobile.png`,
@@ -339,7 +397,7 @@ async function testBothEntryModes(browserInstance) {
   await context.close()
 }
 
-async function assertModeTooltipBehavior(page, mode, container) {
+async function assertModeTooltipBehavior(page, mode, container, action) {
   const editor = mode.getByRole('button', { name: 'Editor' })
   const yolo = mode.getByRole('button', { name: 'Yolo' })
   const editorDescriptionId = await assertModeDescription(editor, EDITOR_MODE_DESCRIPTION)
@@ -348,14 +406,14 @@ async function assertModeTooltipBehavior(page, mode, container) {
 
   await editor.hover()
   await assertTooltipVisible(editor, EDITOR_MODE_DESCRIPTION)
-  await assertTooltipContained(editor, container)
+  await assertTooltipContained(editor, container, action)
 
   await page.mouse.move(0, 0)
   await editor.focus()
   await page.keyboard.press('Tab')
   assert.equal(await yolo.evaluate((element) => element === document.activeElement), true)
   await assertTooltipVisible(yolo, YOLO_MODE_DESCRIPTION)
-  await assertTooltipContained(yolo, container)
+  await assertTooltipContained(yolo, container, action)
 }
 
 async function assertModeDescription(button, expectedDescription) {
@@ -377,6 +435,7 @@ async function assertTooltipVisible(button, expectedDescription) {
   const tooltip = await button.evaluate((element) => {
     const style = getComputedStyle(element, '::after')
     return {
+      bottom: style.bottom,
       content: style.content,
       opacity: style.opacity,
       whiteSpace: style.whiteSpace,
@@ -385,12 +444,13 @@ async function assertTooltipVisible(button, expectedDescription) {
   })
   assert.equal(tooltip.content.replace(/^["']|["']$/g, ''), expectedDescription)
   assert.equal(tooltip.opacity, '1')
+  assert.ok(Number.parseFloat(tooltip.bottom) > 0)
   assert.equal(tooltip.whiteSpace, 'normal')
   assert.ok(tooltip.width <= 240)
 }
 
-async function assertTooltipContained(button, container) {
-  const [tooltip, boundary] = await Promise.all([
+async function assertTooltipContained(button, container, action) {
+  const [tooltip, boundary, actionBox] = await Promise.all([
     button.evaluate((element) => {
       const buttonRect = element.getBoundingClientRect()
       const style = getComputedStyle(element, '::after')
@@ -399,11 +459,12 @@ async function assertTooltipContained(button, container) {
       const left = style.left === 'auto'
         ? buttonRect.right - Number.parseFloat(style.right) - width
         : buttonRect.left + Number.parseFloat(style.left)
-      const top = buttonRect.top + Number.parseFloat(style.top)
+      const top = buttonRect.bottom - Number.parseFloat(style.bottom) - height
       const transform = style.transform === 'none'
         ? new DOMMatrixReadOnly()
         : new DOMMatrixReadOnly(style.transform)
       return {
+        anchorTop: buttonRect.top,
         top: top + transform.m42,
         right: left + transform.m41 + width,
         bottom: top + transform.m42 + height,
@@ -411,13 +472,24 @@ async function assertTooltipContained(button, container) {
       }
     }),
     container.boundingBox(),
+    action.boundingBox(),
   ])
   assert.ok(boundary)
+  assert.ok(actionBox)
   const geometry = JSON.stringify({ tooltip, boundary })
   assert.ok(tooltip.left >= boundary.x - 1, geometry)
   assert.ok(tooltip.right <= boundary.x + boundary.width + 1, geometry)
   assert.ok(tooltip.top >= boundary.y - 1, geometry)
   assert.ok(tooltip.bottom <= boundary.y + boundary.height + 1, geometry)
+  assert.ok(tooltip.bottom <= tooltip.anchorTop - 5, geometry)
+  assert.equal(rectanglesIntersect(tooltip, actionBox), false, geometry)
+}
+
+function rectanglesIntersect(a, b) {
+  return a.left < b.x + b.width
+    && a.right > b.x
+    && a.top < b.y + b.height
+    && a.bottom > b.y
 }
 
 async function installBackendMock(context, state) {
@@ -460,6 +532,15 @@ async function installBackendMock(context, state) {
     }
     if (path === '/api/database/rpc/save_generation_asset_selection') {
       const ids = body.p_asset_ids ?? []
+      state.saveAttempts.push([...ids])
+      if (state.saveFailuresRemaining > 0) {
+        state.saveFailuresRemaining -= 1
+        return json(route, {
+          error: '23505',
+          message: 'duplicate key value violates unique constraint "idx_generation_assets_selected_rank"',
+          statusCode: 409,
+        }, 409)
+      }
       state.savedSelections.push([...ids])
       applySelection(state, ids)
       return json(route, state.assets)
@@ -526,6 +607,7 @@ function createState({
   selectedIds = ['asset-a', 'asset-b'],
   awaitingReviewActivity = false,
   editorReady = false,
+  saveFailuresRemaining = 0,
 } = {}) {
   const now = new Date().toISOString()
   const user = { id: 'user-asset', email: 'editor@example.com' }
@@ -636,6 +718,8 @@ function createState({
     assets,
     awaitingReviewActivity,
     editorReady,
+    saveAttempts: [],
+    saveFailuresRemaining,
     savedSelections: [],
     confirmedSelections: [],
     cancelCalls: 0,

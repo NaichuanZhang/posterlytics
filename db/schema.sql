@@ -3156,6 +3156,13 @@ BEGIN
 
   UPDATE public.generation_assets a
   SET
+    included = FALSE,
+    selection_rank = NULL
+  WHERE a.generation_id = p_generation_id
+    AND a.selection_rank IS NOT NULL;
+
+  UPDATE public.generation_assets a
+  SET
     included = a.id = ANY(v_ids),
     selection_rank = (
       SELECT selected.ordinality::SMALLINT
