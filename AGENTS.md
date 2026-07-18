@@ -25,3 +25,8 @@ Key patterns:
 
 - Complete large planned features end to end, including implementation, verification, and requested delivery. Do not stop after a partial slice when the remaining work is feasible.
 - When context is running low, write a compact checkpoint or handoff, then resume from it until the feature and its verification are complete.
+
+## Notion project tracking
+
+- Keep the [Posterlytics Notion board](https://www.notion.so/alexhomebase/Posterlytics-38412ea3d4678044b95ae6a93cad0159?source=copy_link) up to date whenever creating or revising a plan and whenever making repository modifications.
+- Update the board with the current scope, status, and outcome as part of the same task. If Notion access is unavailable, explicitly report the blocker instead of silently skipping the update.

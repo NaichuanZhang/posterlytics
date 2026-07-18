@@ -48,6 +48,7 @@ try {
   await testGuestHome(browser)
   await testAuthenticatedHome(browser)
   await testSignupMode(browser)
+  await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
   await captureVisualMatrix(browser)
 
@@ -104,8 +105,36 @@ async function testSignupMode(browserInstance) {
   await page.getByRole('heading', { name: 'Create an account' }).waitFor()
   const signupMode = page.getByRole('button', { name: 'Create account', exact: true }).first()
   assert.equal(await signupMode.getAttribute('aria-pressed'), 'true')
+  await page.evaluate(() => document.fonts.ready)
+  await assertSamplePosterGeometry(page, 'signup mobile')
 
   await context.close()
+}
+
+async function testPosterBreakpoints(browserInstance) {
+  for (const width of [820, 768]) {
+    const context = await browserInstance.newContext({
+      viewport: { width, height: 900 },
+      colorScheme: 'dark',
+      reducedMotion: 'reduce',
+      deviceScaleFactor: 1,
+    })
+    await installBackendMock(context, { authenticated: false })
+    const page = await context.newPage()
+
+    await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' })
+    await page.getByRole('heading', { name: 'Posterlytics', exact: true }).waitFor()
+    await page.locator('.placement-fan .sample-poster').first().waitFor()
+    await page.evaluate(() => document.fonts.ready)
+    await assertSamplePosterGeometry(page, `landing ${width}px`)
+
+    await page.goto(`${BASE_URL}/signin`, { waitUntil: 'networkidle' })
+    await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+    await page.evaluate(() => document.fonts.ready)
+    await assertSamplePosterGeometry(page, `sign in ${width}px`)
+
+    await context.close()
+  }
 }
 
 async function testProtectedReturnPath(browserInstance) {
@@ -169,6 +198,10 @@ async function captureVisualMatrix(browserInstance) {
       await page.evaluate(() => document.fonts.ready)
       await revealLazyContent(page)
       await assertLandingGeometry(page)
+      await assertSamplePosterGeometry(
+        page,
+        `${mode.label} ${viewport.label}`,
+      )
       assert.deepEqual(pageErrors, [])
 
       await page.screenshot({
@@ -442,6 +475,55 @@ async function assertLandingGeometry(page) {
     true,
     `next section is not visible: ${JSON.stringify(report)}`,
   )
+}
+
+async function assertSamplePosterGeometry(page, label) {
+  const issues = await page.locator('.sample-poster').evaluateAll((posters) =>
+    posters.flatMap((poster, index) => {
+      const copy = poster.querySelector('.sample-poster-copy')
+      const text = copy?.firstElementChild
+      const title = poster.querySelector('.sample-poster-title')
+      const qr = poster.querySelector('.sample-poster-qr')
+      const qrImage = qr?.querySelector('img')
+      if (!copy || !text || !title || !qr || !qrImage) {
+        return [`poster ${index + 1}: missing footer content`]
+      }
+
+      const style = getComputedStyle(copy)
+      const verticalChrome = [
+        style.paddingTop,
+        style.paddingBottom,
+        style.borderTopWidth,
+        style.borderBottomWidth,
+      ].reduce((total, value) => total + Number.parseFloat(value), 0)
+      const requiredHeight = Math.ceil(
+        Math.max(text.scrollHeight, qr.offsetHeight) + verticalChrome,
+      )
+      const context = poster.closest(
+        '.hero-poster, .version-stack-item, .placement-fan-item, .public-auth-poster',
+      )
+      const name = `${context?.className || 'sample poster'} ${poster.getAttribute('aria-label')}`
+      const posterIssues = []
+
+      if (requiredHeight > copy.offsetHeight) {
+        posterIssues.push(
+          `${name}: footer ${copy.offsetHeight}px is below required ${requiredHeight}px`,
+        )
+      }
+      if (title.scrollHeight > title.clientHeight) {
+        posterIssues.push(
+          `${name}: title clips at ${title.clientHeight}px/${title.scrollHeight}px`,
+        )
+      }
+      if (getComputedStyle(qrImage).display !== 'block') {
+        posterIssues.push(`${name}: QR image retains inline baseline spacing`)
+      }
+
+      return posterIssues
+    })
+  )
+
+  assert.deepEqual(issues, [], `${label} sample poster geometry: ${issues.join('; ')}`)
 }
 
 async function json(route, value) {
