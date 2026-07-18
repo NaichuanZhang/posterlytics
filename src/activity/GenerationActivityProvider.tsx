@@ -11,6 +11,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useToast } from '../components/ui/Toast'
+import { useI18n } from '../i18n/I18nProvider'
 import {
   fetchGenerationActivity,
   markGenerationNotificationsRead,
@@ -40,6 +41,7 @@ const GenerationActivityContext = createContext<GenerationActivityContextValue |
 export function GenerationActivityProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth()
   const { notify } = useToast()
+  const { locale, t } = useI18n()
   const navigate = useNavigate()
   const [items, setItems] = useState<GenerationActivityItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -71,13 +73,13 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
             }
             notify(
               item.status === 'succeeded'
-                ? `${item.campaign_name} poster is ready.`
-                : `${item.campaign_name} generation failed.`,
+                ? t('{name} poster is ready.', { name: item.campaign_name })
+                : t('{name} generation failed.', { name: item.campaign_name }),
               item.status === 'succeeded' ? 'success' : 'error',
               {
                 dedupeKey: `generation-notification:${notificationId}`,
                 action: {
-                  label: item.status === 'succeeded' ? 'Open' : 'Review',
+                  label: item.status === 'succeeded' ? t('Open') : t('Review'),
                   onClick: () => {
                     void markGenerationNotificationsRead([notificationId])
                     navigate(`/campaigns/${item.campaign_id}`)
@@ -98,7 +100,7 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
         setUnreadCount(activity.unread_count)
         setError(null)
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Generation activity could not be loaded.')
+        setError(cause instanceof Error ? cause.message : t('Generation activity could not be loaded.'))
       } finally {
         setLoading(false)
         inFlightRef.current = null
@@ -106,7 +108,7 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
     })()
     inFlightRef.current = request
     return request
-  }, [navigate, notify, user])
+  }, [navigate, notify, t, user])
 
   useEffect(() => {
     if (authLoading) return
@@ -186,14 +188,14 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
       void markGenerationNotificationsRead([item.notification_id])
         .then(refresh)
         .catch((cause) => {
-          setError(cause instanceof Error ? cause.message : 'Notification could not be marked read.')
+          setError(cause instanceof Error ? cause.message : t('Notification could not be marked read.'))
         })
     }
     setSheetOpen(false)
     navigate(item.status === 'awaiting_review'
       ? `/campaigns/${item.campaign_id}/generations/${item.generation_id}/assets`
       : `/campaigns/${item.campaign_id}`)
-  }, [navigate, refresh])
+  }, [navigate, refresh, t])
 
   const markAllRead = useCallback(async () => {
     try {
@@ -206,27 +208,27 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
       setUnreadCount(0)
       await refresh()
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'Notifications could not be marked read.'
+      const message = cause instanceof Error ? cause.message : t('Notifications could not be marked read.')
       setError(message)
-      notify('Notifications could not be marked read.', 'error')
+      notify(t('Notifications could not be marked read.'), 'error')
     }
-  }, [notify, refresh])
+  }, [notify, refresh, t])
 
   const retry = useCallback(async (item: GenerationActivityItem) => {
     try {
-      const result = await retryPosterGeneration(item.job_id)
-      notify('Generation restarted with the same inputs.', 'success')
+      const result = await retryPosterGeneration(item.job_id, locale)
+      notify(t('Generation restarted with the same inputs.'), 'success')
       setSheetOpen(false)
       await refresh()
       navigate(result.generation.asset_selection_mode === 'editor'
         ? `/campaigns/${result.generation.campaign_id}/generations/${result.generation.id}/assets`
         : `/campaigns/${result.generation.campaign_id}`)
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'Generation could not be retried.'
+      const message = cause instanceof Error ? cause.message : t('Generation could not be retried.')
       setError(message)
-      notify('Generation could not be retried.', 'error')
+      notify(t('Generation could not be retried.'), 'error')
     }
-  }, [navigate, notify, refresh])
+  }, [locale, navigate, notify, refresh, t])
 
   const value = useMemo<GenerationActivityContextValue>(() => ({
     items,

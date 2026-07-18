@@ -14,6 +14,7 @@ import {
   SHEET_MARGIN_Y,
 } from '../../lib/posterSize'
 import { QrCode } from '../QrCode'
+import { useI18n } from '../../i18n/I18nProvider'
 
 interface Props {
   campaign: Campaign
@@ -50,6 +51,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   { campaign, code, imageSrcOverride },
   ref,
 ) {
+  const { t } = useI18n()
   const img = imageSrcOverride ?? campaign.hero_image_url
   const isEvent = campaign.scenario === 'event'
   // For events the poster_spec is an EventPosterSpec; its logistics lines were
@@ -108,7 +110,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           <img
             src={img}
             crossOrigin="anonymous"
-            alt={`${campaign.product_name} poster`}
+            alt={t('{name} poster', { name: campaign.product_name })}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
           />
         ) : (
@@ -125,7 +127,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
               boxSizing: 'border-box',
             }}
           >
-            AI poster is still generating…
+            {t('{name} poster is still generating', { name: campaign.product_name })}
           </div>
         )}
       </div>

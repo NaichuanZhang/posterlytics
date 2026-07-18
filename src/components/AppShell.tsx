@@ -9,7 +9,9 @@ import type { ReactNode } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
+import { useI18n } from '../i18n/I18nProvider'
 import type { Campaign } from '../lib/types'
+import { LanguageSelect } from './LanguageSelect'
 
 export type CampaignSection = 'poster' | 'placements' | 'analytics'
 
@@ -40,6 +42,7 @@ export function AppShell({
   const { user, signOut } = useAuth()
   const { unreadCount, openSheet } = useGenerationActivity()
   const navigate = useNavigate()
+  const { t } = useI18n()
 
   async function handleSignOut() {
     await signOut()
@@ -48,34 +51,36 @@ export function AppShell({
 
   return (
     <div className={`app-shell app-shell-${mode}`}>
-      <a className="skip-link" href="#main-content">Skip to content</a>
+      <a className="skip-link" href="#main-content">{t('Skip to content')}</a>
       <aside className="app-rail">
         <Link to="/" className="rail-brand" aria-label="Posterlytics" data-tooltip="Posterlytics">
           P
         </Link>
-        <nav className="rail-nav" aria-label="Primary navigation">
+        <nav className="rail-nav" aria-label={t('Primary navigation')}>
           <NavLink
             to="/"
             end
             className={({ isActive }) => `rail-button${isActive ? ' is-active' : ''}`}
-            aria-label="Campaigns"
-            data-tooltip="Campaigns"
+            aria-label={t('Campaigns')}
+            data-tooltip={t('Campaigns')}
           >
             <LayoutGrid size={19} aria-hidden="true" />
           </NavLink>
           <NavLink
             to="/campaigns/new"
             className={({ isActive }) => `rail-button${isActive ? ' is-active' : ''}`}
-            aria-label="New campaign"
-            data-tooltip="New campaign"
+            aria-label={t('New campaign')}
+            data-tooltip={t('New campaign')}
           >
             <Plus size={20} aria-hidden="true" />
           </NavLink>
           <button
             type="button"
             className="rail-button rail-activity-button"
-            aria-label={`Generation activity${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-            data-tooltip="Generation activity"
+            aria-label={unreadCount > 0
+              ? t('Generation activity, {count} unread', { count: unreadCount })
+              : t('Generation activity')}
+            data-tooltip={t('Generation activity')}
             onClick={openSheet}
           >
             <Activity size={19} aria-hidden="true" />
@@ -87,6 +92,7 @@ export function AppShell({
           </button>
         </nav>
         <div className="rail-account">
+          <LanguageSelect variant="rail" />
           {user?.email && (
             <span className="rail-avatar" aria-label={user.email} data-tooltip={user.email}>
               {user.email.slice(0, 1).toLocaleUpperCase()}
@@ -95,8 +101,8 @@ export function AppShell({
           <button
             type="button"
             className="rail-button"
-            aria-label="Sign out"
-            data-tooltip="Sign out"
+            aria-label={t('Sign out')}
+            data-tooltip={t('Sign out')}
             onClick={() => void handleSignOut()}
           >
             <LogOut size={18} aria-hidden="true" />
@@ -106,7 +112,7 @@ export function AppShell({
 
       <div className="app-frame">
         <header className="app-toolbar">
-          <nav className="toolbar-breadcrumbs" aria-label="Breadcrumb">
+          <nav className="toolbar-breadcrumbs" aria-label={t('Breadcrumb')}>
             {breadcrumbs.map((item, index) => (
               <span key={`${item.label}-${index}`} className="breadcrumb-part">
                 {index > 0 && <ChevronRight size={14} aria-hidden="true" />}
@@ -140,19 +146,29 @@ export function CampaignTabs({
   campaign: Pick<Campaign, 'id' | 'product_name' | 'status'>
   activeSection: CampaignSection
 }) {
+  const { t } = useI18n()
   const tabs: Array<{ section: CampaignSection; label: string; to: string }> = [
-    { section: 'poster', label: 'Poster', to: `/campaigns/${campaign.id}` },
-    { section: 'placements', label: 'Placements', to: `/campaigns/${campaign.id}/placements` },
-    { section: 'analytics', label: 'Analytics', to: `/campaigns/${campaign.id}/analytics` },
+    { section: 'poster', label: t('Poster'), to: `/campaigns/${campaign.id}` },
+    { section: 'placements', label: t('Placements'), to: `/campaigns/${campaign.id}/placements` },
+    { section: 'analytics', label: t('Analytics'), to: `/campaigns/${campaign.id}/analytics` },
   ]
 
   return (
     <div className="campaign-bar">
       <div className="campaign-identity">
         <strong>{campaign.product_name}</strong>
-        <span className={`status-badge status-${campaign.status}`}>{campaign.status}</span>
+        <span className={`status-badge status-${campaign.status}`}>
+          {campaign.status === 'published'
+            ? t('Published')
+            : campaign.status === 'analyzing'
+              ? t('Generating')
+              : t('Draft')}
+        </span>
       </div>
-      <nav className="campaign-tabs" aria-label={`${campaign.product_name} sections`}>
+      <nav
+        className="campaign-tabs"
+        aria-label={t('{name} sections', { name: campaign.product_name })}
+      >
         {tabs.map((tab) => (
           <Link
             key={tab.section}

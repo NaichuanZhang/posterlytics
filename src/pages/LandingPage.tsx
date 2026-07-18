@@ -16,6 +16,7 @@ import {
 } from 'motion/react'
 import { useRef, type ReactNode } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
+import { useI18n } from '../i18n/I18nProvider'
 import { signInPath } from '../lib/authRouting'
 import {
   SamplePoster,
@@ -38,6 +39,7 @@ export default function LandingPage() {
 }
 
 function WorkflowStory() {
+  const { t } = useI18n()
   const sectionRef = useRef<HTMLElement>(null)
   const reducedMotion = useReducedMotion()
   const isMobile = useMediaQuery('(max-width: 767px)')
@@ -63,8 +65,8 @@ function WorkflowStory() {
     <ProductCapture
       key="output"
       src="/marketing/product/editor.webp"
-      alt="Posterlytics poster editor showing a generated poster and version controls"
-      label="Generated poster"
+      alt={t('Posterlytics poster editor showing a generated poster and version controls')}
+      label={t('Generated poster')}
     />,
   ]
 
@@ -79,12 +81,10 @@ function WorkflowStory() {
         <SectionIntro
           index="01"
           icon={<Globe2 size={19} />}
-          heading="From website to wall."
+          heading={t('From website to wall.')}
           id="workflow-heading"
         >
-          Posterlytics reads the product website, carries in your references,
-          turns the findings into a structured layout, and generates a poster
-          ready for a real placement.
+          {t('Posterlytics reads the product website, carries in your references, turns the findings into a structured layout, and generates a poster ready for a real placement.')}
         </SectionIntro>
 
         <div className="public-story-stage">
@@ -137,11 +137,12 @@ function WorkflowStory() {
 }
 
 function StorySource() {
+  const { t } = useI18n()
   return (
     <figure className="story-source">
       <img
         src="/marketing/photos/picsum-35.webp"
-        alt="Sunlit cactus used as source imagery for a poster"
+        alt={t('Sunlit cactus used as source imagery for a poster')}
         width="800"
         height="1067"
         loading="lazy"
@@ -150,18 +151,19 @@ function StorySource() {
       <figcaption>
         <span>01 / SOURCE</span>
         <strong>product.example</strong>
-        <p>Website structure, copy, palette, type, and imagery.</p>
+        <p>{t('Website structure, copy, palette, type, and imagery.')}</p>
       </figcaption>
     </figure>
   )
 }
 
 function StoryStructure() {
+  const { t } = useI18n()
   return (
-    <div className="story-structure" aria-label="Structured poster layout">
+    <div className="story-structure" aria-label={t('Structured poster layout')}>
       <div className="story-structure-head">
         <span>02 / STRUCTURE</span>
-        <strong>Poster brief</strong>
+        <strong>{t('Poster brief')}</strong>
       </div>
       <div className="story-layout-board">
         <div className="story-layout-copy">
@@ -171,7 +173,7 @@ function StoryStructure() {
         <div className="story-layout-image">
           <img
             src="/marketing/photos/picsum-35.webp"
-            alt="Cactus source image placed into a poster layout"
+            alt={t('Cactus source image placed into a poster layout')}
             width="800"
             height="1067"
             loading="lazy"
@@ -189,30 +191,29 @@ function StoryStructure() {
 }
 
 function VersionsSection() {
+  const { t } = useI18n()
   return (
     <section id="versions" className="public-section versions-section" aria-labelledby="versions-heading">
       <Reveal>
         <SectionIntro
           index="02"
           icon={<Layers3 size={19} />}
-          heading="Refine without starting over."
+          heading={t('Refine without starting over.')}
           id="versions-heading"
         >
-          Every pass becomes a version. Ask Posterlytics to re-read the source,
-          add supporting images, or generate a new background while the campaign
-          and its earlier work stay intact.
+          {t('Every pass becomes a version. Ask Posterlytics to re-read the source, add supporting images, or generate a new background while the campaign and its earlier work stay intact.')}
         </SectionIntro>
       </Reveal>
       <VersionStack />
-      <div className="feature-rail" aria-label="Version controls">
-        <FeatureNote icon={<RefreshCw size={17} />} title="Re-read source">
-          Pull current product copy and visual signals into the next pass.
+      <div className="feature-rail" aria-label={t('Version controls')}>
+        <FeatureNote icon={<RefreshCw size={17} />} title={t('Re-read source')}>
+          {t('Pull current product copy and visual signals into the next pass.')}
         </FeatureNote>
-        <FeatureNote icon={<ImagePlus size={17} />} title="Add references">
-          Bring supporting images and direction into one focused iteration.
+        <FeatureNote icon={<ImagePlus size={17} />} title={t('Add references')}>
+          {t('Bring supporting images and direction into one focused iteration.')}
         </FeatureNote>
-        <FeatureNote icon={<Layers3 size={17} />} title="Keep the history">
-          Compare, restore, and publish without replacing prior versions.
+        <FeatureNote icon={<Layers3 size={17} />} title={t('Keep the history')}>
+          {t('Compare, restore, and publish without replacing prior versions.')}
         </FeatureNote>
       </div>
     </section>
@@ -220,11 +221,12 @@ function VersionsSection() {
 }
 
 function VersionStack() {
+  const { t } = useI18n()
   const reducedMotion = useReducedMotion()
   const variants: SamplePosterVariant[] = ['routes', 'signal', 'field']
 
   return (
-    <div className="version-stack" aria-label="Three poster versions">
+    <div className="version-stack" aria-label={t('Three poster versions')}>
       {variants.map((variant, index) => (
         <motion.div
           key={variant}
@@ -243,7 +245,9 @@ function VersionStack() {
             delay: index * 0.12,
           }}
         >
-          <span className="version-stamp">VERSION / 0{index + 1}</span>
+          <span className="version-stamp">
+            {t('VERSION / 0{number}', { number: index + 1 })}
+          </span>
           <SamplePoster variant={variant} compact />
         </motion.div>
       ))}
@@ -252,6 +256,7 @@ function VersionStack() {
 }
 
 function PlacementsSection() {
+  const { t } = useI18n()
   return (
     <section
       id="attribution"
@@ -262,25 +267,24 @@ function PlacementsSection() {
         <SectionIntro
           index="03"
           icon={<MapPin size={19} />}
-          heading="One campaign. Every placement."
+          heading={t('One campaign. Every placement.')}
           id="placements-heading"
         >
-          Mint a distinct QR code for the lobby, launch event, partner mailer,
-          or any other placement. Publish once, then export the right poster for
-          each physical channel.
+          {t('Mint a distinct QR code for the lobby, launch event, partner mailer, or any other placement. Publish once, then export the right poster for each physical channel.')}
         </SectionIntro>
       </Reveal>
       <PlacementFan />
       <ProductCapture
         src="/marketing/product/placements.webp"
-        alt="Posterlytics placements page with distinct tracked links and QR exports"
-        label="Placement-specific exports"
+        alt={t('Posterlytics placements page with distinct tracked links and QR exports')}
+        label={t('Placement-specific exports')}
       />
     </section>
   )
 }
 
 function PlacementFan() {
+  const { t } = useI18n()
   const sectionRef = useRef<HTMLDivElement>(null)
   const reducedMotion = useReducedMotion()
   const isMobile = useMediaQuery('(max-width: 767px)')
@@ -296,13 +300,13 @@ function PlacementFan() {
     label: string
     className: string
   }> = [
-    { variant: 'routes', label: 'Partner mailer', className: 'placement-fan-left' },
-    { variant: 'field', label: 'Launch lobby', className: 'placement-fan-center' },
-    { variant: 'signal', label: 'Conference wall', className: 'placement-fan-right' },
+    { variant: 'routes', label: t('Partner mailer'), className: 'placement-fan-left' },
+    { variant: 'field', label: t('Launch lobby'), className: 'placement-fan-center' },
+    { variant: 'signal', label: t('Conference wall'), className: 'placement-fan-right' },
   ]
 
   return (
-    <div ref={sectionRef} className="placement-fan" aria-label="Placement poster exports">
+    <div ref={sectionRef} className="placement-fan" aria-label={t('Placement poster exports')}>
       {placements.map((placement, index) => (
         <motion.div
           key={placement.label}
@@ -329,33 +333,33 @@ function PlacementFan() {
 }
 
 function AnalyticsSection() {
+  const { t } = useI18n()
   return (
     <section className="public-section analytics-section" aria-labelledby="analytics-heading">
       <Reveal>
         <SectionIntro
           index="04"
           icon={<BarChart3 size={19} />}
-          heading="Know what got scanned."
+          heading={t('Know what got scanned.')}
           id="analytics-heading"
         >
-          Compare visits and unique visitors by placement, then read the device,
-          operating system, and country breakdown behind the response.
+          {t('Compare visits and unique visitors by placement, then read the device, operating system, and country breakdown behind the response.')}
         </SectionIntro>
       </Reveal>
       <div className="analytics-layout">
         <ProductCapture
           src="/marketing/product/analytics.webp"
-          alt="Posterlytics analytics page showing sample placement traffic and audience breakdowns"
-          label="Campaign analytics"
+          alt={t('Posterlytics analytics page showing sample placement traffic and audience breakdowns')}
+          label={t('Campaign analytics')}
           sample
         />
-        <div className="analytics-key" aria-label="Available analytics">
+        <div className="analytics-key" aria-label={t('Available analytics')}>
           {[
-            ['01', 'Visits'],
-            ['02', 'Unique visitors'],
-            ['03', 'Devices'],
-            ['04', 'Operating systems'],
-            ['05', 'Countries'],
+            ['01', t('Visits')],
+            ['02', t('Unique visitors')],
+            ['03', t('Devices')],
+            ['04', t('Operating systems')],
+            ['05', t('Countries')],
           ].map(([index, label]) => (
             <div key={label}>
               <span>{index}</span>
@@ -369,14 +373,15 @@ function AnalyticsSection() {
 }
 
 function FinalCallToAction() {
+  const { t } = useI18n()
   return (
     <section className="public-final-cta" aria-labelledby="final-cta-heading">
       <div>
-        <span className="public-overline">Your next physical channel</span>
-        <h2 id="final-cta-heading">Put the next launch on the wall.</h2>
+        <span className="public-overline">{t('Your next physical channel')}</span>
+        <h2 id="final-cta-heading">{t('Put the next launch on the wall.')}</h2>
       </div>
       <a className="public-button public-button-inverse" href={CREATE_ACCOUNT_PATH}>
-        Create account
+        {t('Create account')}
         <ArrowRight size={18} aria-hidden="true" />
       </a>
     </section>
@@ -384,18 +389,19 @@ function FinalCallToAction() {
 }
 
 function PublicFooter() {
+  const { t } = useI18n()
   return (
     <footer className="public-footer">
-      <a href="/" className="public-brand" aria-label="Posterlytics home">
+      <a href="/" className="public-brand" aria-label={t('Posterlytics home')}>
         <span className="public-brand-mark" aria-hidden="true">P</span>
         <strong>Posterlytics</strong>
       </a>
-      <p>Website to poster. Placement to signal.</p>
+      <p>{t('Website to poster. Placement to signal.')}</p>
       <div>
-        <span>Photography:</span>
-        <a href="https://unsplash.com/photos/znM0ujn2RUA">Shane Colella</a>
-        <a href="https://unsplash.com/photos/muC_6gTMLR4">Barcelona</a>
-        <a href="https://unsplash.com/photos/87TJNWkepvI">Kundan Ramisetti</a>
+        <span>{t('Photography:')}</span>
+        <a href="https://unsplash.com/photos/znM0ujn2RUA">{t('Shane Colella')}</a>
+        <a href="https://unsplash.com/photos/muC_6gTMLR4">{t('Barcelona')}</a>
+        <a href="https://unsplash.com/photos/87TJNWkepvI">{t('Kundan Ramisetti')}</a>
       </div>
     </footer>
   )
@@ -439,11 +445,12 @@ function ProductCapture({
   label: string
   sample?: boolean
 }) {
+  const { t } = useI18n()
   return (
     <figure className="product-capture">
       <figcaption>
         <span>{label}</span>
-        {sample && <strong>Sample data</strong>}
+        {sample && <strong>{t('Sample data')}</strong>}
       </figcaption>
       <img
         src={src}

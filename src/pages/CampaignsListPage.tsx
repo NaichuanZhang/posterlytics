@@ -12,15 +12,10 @@ import {
 import type { Campaign } from '../lib/types'
 import type { GenerationActivityItem } from '../lib/types'
 import { activityForCampaign, generationActivityLabel } from '../lib/generationActivity'
-
-const STATUS_FILTERS: Array<{ value: CampaignStatusFilter; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'generating', label: 'Generating' },
-  { value: 'published', label: 'Published' },
-]
+import { useI18n } from '../i18n/I18nProvider'
 
 export function CampaignsListPage() {
+  const { t } = useI18n()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +38,7 @@ export function CampaignsListPage() {
         setCampaigns((data ?? []) as Campaign[])
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The campaign query failed.')
+      setError(cause instanceof Error ? cause.message : t('The campaign query failed.'))
     } finally {
       setLoading(false)
     }
@@ -69,38 +64,46 @@ export function CampaignsListPage() {
     () => filterCampaigns(campaignRows, query, status),
     [campaignRows, query, status],
   )
+  const statusFilters: Array<{ value: CampaignStatusFilter; label: string }> = [
+    { value: 'all', label: t('All') },
+    { value: 'draft', label: t('Draft') },
+    { value: 'generating', label: t('Generating') },
+    { value: 'published', label: t('Published') },
+  ]
 
   return (
     <AppShell
-      breadcrumbs={[{ label: 'Campaigns' }]}
+      breadcrumbs={[{ label: t('Campaigns') }]}
       actions={(
         <Link to="/campaigns/new" className="toolbar-button toolbar-button-primary">
           <Plus size={15} aria-hidden="true" />
-          New campaign
+          {t('New campaign')}
         </Link>
       )}
     >
       <header className="page-heading">
         <div>
-          <h1>Campaigns</h1>
-          <p>Poster files and placement performance in one workspace.</p>
+          <h1>{t('Campaigns')}</h1>
+          <p>{t('Poster files and placement performance in one workspace.')}</p>
         </div>
-        {!loading && !error && <span className="page-count">{campaigns.length} total</span>}
+        {!loading && !error && (
+          <span className="page-count">{t('{count} total', { count: campaigns.length })}</span>
+        )}
       </header>
 
       <div className="browser-controls">
         <label className="search-field">
           <Search size={16} aria-hidden="true" />
-          <span className="sr-only">Search campaigns</span>
+          <span className="sr-only">{t('Search campaigns')}</span>
           <input
             type="search"
-            placeholder="Search campaigns"
+            placeholder={t('Search campaigns')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <div className="segmented-control" aria-label="Filter by status">
-          {STATUS_FILTERS.map((filter) => (
+        <div className="segmented-control" aria-label={t('Filter by status')}>
+          {statusFilters.map((filter) => (
             <button
               key={filter.value}
               type="button"
@@ -116,10 +119,10 @@ export function CampaignsListPage() {
 
       {error ? (
         <InlineNotice tone="error">
-          <strong>Campaigns could not be loaded.</strong>
+          <strong>{t('Campaigns could not be loaded.')}</strong>
           <span>{error}</span>
           <button type="button" className="text-button" onClick={() => void loadCampaigns()}>
-            Try again
+            {t('Try again')}
           </button>
         </InlineNotice>
       ) : loading ? (
@@ -127,20 +130,20 @@ export function CampaignsListPage() {
       ) : campaigns.length === 0 ? (
         <EmptyState
           icon={<GalleryVerticalEnd size={24} />}
-          title="No campaigns yet"
-          description="Create a campaign to generate its first poster and tracked placement."
+          title={t('No campaigns yet')}
+          description={t('Create a campaign to generate its first poster and tracked placement.')}
           action={(
             <Link to="/campaigns/new" className="button button-primary">
               <Plus size={16} aria-hidden="true" />
-              Create campaign
+              {t('Create campaign')}
             </Link>
           )}
         />
       ) : filteredCampaigns.length === 0 ? (
         <EmptyState
           icon={<Search size={23} />}
-          title="No matching campaigns"
-          description="Change the search or status filter to see more files."
+          title={t('No matching campaigns')}
+          description={t('Change the search or status filter to see more files.')}
           action={(
             <button
               type="button"
@@ -150,12 +153,12 @@ export function CampaignsListPage() {
                 setStatus('all')
               }}
             >
-              Clear filters
+              {t('Clear filters')}
             </button>
           )}
         />
       ) : (
-        <section className="campaign-browser" aria-label="Campaign files">
+        <section className="campaign-browser" aria-label={t('Campaign files')}>
           {filteredCampaigns.map(({ campaign, activity }) => (
             <CampaignFile key={campaign.id} campaign={campaign} activity={activity} />
           ))}
@@ -172,6 +175,7 @@ function CampaignFile({
   campaign: Campaign
   activity: GenerationActivityItem | null
 }) {
+  const { formatDate, locale, t } = useI18n()
   const thumbnail = campaign.hero_image_url
     || campaign.brand_assets?.primary_image_url
     || campaign.brand_assets?.images?.[0]?.url
@@ -181,29 +185,47 @@ function CampaignFile({
     <Link to={`/campaigns/${campaign.id}`} className="campaign-file">
       <div className="campaign-thumbnail">
         {thumbnail ? (
-          <img src={thumbnail} alt={`${campaign.product_name} poster`} />
+          <img
+            src={thumbnail}
+            alt={t('{name} poster', { name: campaign.product_name })}
+          />
         ) : (
           <span className="campaign-placeholder" aria-hidden="true">
             <GalleryVerticalEnd size={26} />
           </span>
         )}
         <span className={`status-badge status-${activity ? 'generating' : campaign.status}`}>
-          {activity ? generationActivityLabel(activity) : campaign.status}
+          {activity
+            ? generationActivityLabel(activity, locale)
+            : campaign.status === 'published'
+              ? t('Published')
+              : t('Draft')}
         </span>
       </div>
       <div className="campaign-file-copy">
         <strong>{campaign.product_name}</strong>
         <span>{safeHostname(campaign.product_url)}</span>
-        {activity && <span className="campaign-generation-state">{generationActivityLabel(activity)}</span>}
-        <time dateTime={campaign.created_at}>{formatDate(campaign.created_at)}</time>
+        {activity && (
+          <span className="campaign-generation-state">
+            {generationActivityLabel(activity, locale)}
+          </span>
+        )}
+        <time dateTime={campaign.created_at}>
+          {formatDate(campaign.created_at, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })}
+        </time>
       </div>
     </Link>
   )
 }
 
 function CampaignSkeletons() {
+  const { t } = useI18n()
   return (
-    <section className="campaign-browser" aria-label="Loading campaigns" aria-busy="true">
+    <section className="campaign-browser" aria-label={t('Loading campaigns')} aria-busy="true">
       {Array.from({ length: 6 }, (_, index) => (
         <div className="campaign-file campaign-file-skeleton" key={index}>
           <Skeleton className="campaign-thumbnail" />
@@ -224,12 +246,4 @@ function safeHostname(value: string) {
   } catch {
     return value
   }
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date(value))
 }

@@ -7,9 +7,11 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import {
-  TRACE_SOURCE_LABELS,
+  TRACE_SOURCE_LABEL_KEYS,
   type GenerationPreflight,
 } from '../lib/generationTraces'
+import { translateEnumLabel } from '../lib/i18n'
+import { useI18n } from '../i18n/I18nProvider'
 
 export function GenerationInputsReview({
   preflight,
@@ -18,6 +20,7 @@ export function GenerationInputsReview({
   preflight: GenerationPreflight
   disabled?: boolean
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
 
   return (
@@ -26,8 +29,10 @@ export function GenerationInputsReview({
         <div className="generation-parent-warning" role="status">
           <AlertTriangle size={14} aria-hidden="true" />
           <span>
-            The canvas selection is not the current version. Regeneration will use{' '}
-            <strong>Version {preflight.parent?.version_number ?? '-'}</strong>.
+            {t(
+              'The canvas selection is not the current version. Regeneration will use Version {number}.',
+              { number: preflight.parent?.version_number ?? '-' },
+            )}
           </span>
         </div>
       )}
@@ -39,7 +44,7 @@ export function GenerationInputsReview({
         onClick={() => setOpen((value) => !value)}
       >
         <ListOrdered size={14} aria-hidden="true" />
-        Review inputs
+        {t('Review inputs')}
         {open
           ? <ChevronUp size={13} aria-hidden="true" />
           : <ChevronDown size={13} aria-hidden="true" />}
@@ -49,25 +54,27 @@ export function GenerationInputsReview({
         <div className="generation-preflight-body">
           <dl className="generation-preflight-summary">
             <div>
-              <dt>Instruction</dt>
+              <dt>{t('Instruction')}</dt>
               <dd>{preflight.instruction}</dd>
             </div>
             <div>
-              <dt>Actual parent</dt>
+              <dt>{t('Actual parent')}</dt>
               <dd>
                 {preflight.parent
-                  ? `Version ${preflight.parent.version_number ?? '-'}`
-                  : 'No parent - first version'}
+                  ? t('Version {number}', {
+                    number: preflight.parent.version_number ?? '-',
+                  })
+                  : t('No parent - first version')}
               </dd>
             </div>
           </dl>
 
           <div className="generation-preflight-heading">
-            <span>Expected image model order</span>
+            <span>{t('Expected image model order')}</span>
             <strong>{preflight.assets.length}</strong>
           </div>
           {preflight.assets.length === 0 ? (
-            <p className="panel-empty">No image inputs are known yet.</p>
+            <p className="panel-empty">{t('No image inputs are known yet.')}</p>
           ) : (
             <ol className="generation-preflight-list">
               {preflight.assets.map((asset) => (
@@ -80,14 +87,16 @@ export function GenerationInputsReview({
                   </span>
                   <span className="generation-input-source">
                     {asset.runtime && <Globe2 size={11} aria-hidden="true" />}
-                    {asset.runtime ? 'Runtime' : TRACE_SOURCE_LABELS[asset.source]}
+                    {asset.runtime
+                      ? t('Runtime')
+                      : translateEnumLabel(t, TRACE_SOURCE_LABEL_KEYS, asset.source)}
                   </span>
                 </li>
               ))}
             </ol>
           )}
           <p className="generation-preflight-footnote">
-            Expected only. Fetch, format, count, and byte limits determine the recorded request.
+            {t('Expected only. Fetch, format, count, and byte limits determine the recorded request.')}
           </p>
         </div>
       )}

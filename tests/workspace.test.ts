@@ -34,12 +34,14 @@ test('parseWorkspacePreferences accepts valid persisted preferences', () => {
       inspectorPanelOpen: true,
       zoom: 67,
       assetSelectionMode: 'yolo',
+      locale: 'zh-CN',
     })),
     {
       versionsPanelOpen: false,
       inspectorPanelOpen: true,
       zoom: 67,
       assetSelectionMode: 'yolo',
+      locale: 'zh-CN',
     },
   )
 })
@@ -58,6 +60,7 @@ test('parseWorkspacePreferences repairs partial, invalid, and malformed data', (
       inspectorPanelOpen: true,
       zoom: 'fit',
       assetSelectionMode: 'editor',
+      locale: 'en-US',
     },
   )
 })
@@ -72,4 +75,46 @@ test('workspace preference migration defaults first asset selection to Editor', 
     })).assetSelectionMode,
     'editor',
   )
+})
+
+test('workspace preference migration uses browser locale only when no valid locale is stored', () => {
+  assert.equal(
+    parseWorkspacePreferences(null, 'zh-CN').locale,
+    'zh-CN',
+  )
+  assert.equal(
+    parseWorkspacePreferences(JSON.stringify({
+      versionsPanelOpen: true,
+      locale: 'en-GB',
+    }), 'zh-CN').locale,
+    'en-US',
+  )
+  assert.equal(
+    parseWorkspacePreferences(JSON.stringify({
+      versionsPanelOpen: true,
+      locale: 'not-a-locale',
+    }), 'zh-CN').locale,
+    'zh-CN',
+  )
+})
+
+test('invalid persisted locale types do not discard other workspace preferences', () => {
+  for (const locale of [42, {}]) {
+    assert.deepEqual(
+      parseWorkspacePreferences(JSON.stringify({
+        versionsPanelOpen: false,
+        inspectorPanelOpen: false,
+        zoom: 67,
+        assetSelectionMode: 'yolo',
+        locale,
+      }), 'zh-CN'),
+      {
+        versionsPanelOpen: false,
+        inspectorPanelOpen: false,
+        zoom: 67,
+        assetSelectionMode: 'yolo',
+        locale: 'zh-CN',
+      },
+    )
+  }
 })

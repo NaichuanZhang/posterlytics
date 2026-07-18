@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, LoaderCircle, RefreshCw } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { InlineNotice } from '../components/ui/Feedback'
+import { useI18n } from '../i18n/I18nProvider'
 import { insforge } from '../lib/insforge'
 import {
   PASSWORD_RESET_CODE_LENGTH,
@@ -18,8 +19,6 @@ import {
 type RecoveryStep = 'email' | 'code' | 'password' | 'success'
 type PendingAction = 'request' | 'verify' | 'resend' | 'reset'
 
-const RESET_SENT_MESSAGE = 'If an account exists, a code was sent. Check your inbox and spam folder.'
-
 interface PasswordRecoveryFlowProps {
   initialEmail: string
   onEmailChange: (email: string) => void
@@ -31,6 +30,7 @@ export function PasswordRecoveryFlow({
   onEmailChange,
   onReturnToSignIn,
 }: PasswordRecoveryFlowProps) {
+  const { locale, t } = useI18n()
   const [step, setStep] = useState<RecoveryStep>('email')
   const [email, setEmail] = useState(initialEmail)
   const [code, setCode] = useState('')
@@ -54,7 +54,7 @@ export function PasswordRecoveryFlow({
   async function requestResetCode(event: FormEvent) {
     event.preventDefault()
     const normalizedEmail = email.trim()
-    const validationError = validateResetEmail(normalizedEmail)
+    const validationError = validateResetEmail(normalizedEmail, locale)
     if (validationError) {
       setError(validationError)
       return
@@ -68,18 +68,18 @@ export function PasswordRecoveryFlow({
         email: normalizedEmail,
       })
       if (requestError && !shouldMaskResetEmailError(requestError)) {
-        setError(resetEmailErrorMessage(requestError))
+        setError(resetEmailErrorMessage(requestError, locale))
         return
       }
 
       setEmail(normalizedEmail)
       onEmailChange(normalizedEmail)
       setCode('')
-      setStatusMessage(RESET_SENT_MESSAGE)
+      setStatusMessage(t('If an account exists, a code was sent. Check your inbox and spam folder.'))
       setResendSeconds(PASSWORD_RESET_RESEND_DELAY_SECONDS)
       setStep('code')
     } catch (cause) {
-      setError(resetEmailErrorMessage(cause))
+      setError(resetEmailErrorMessage(cause, locale))
     } finally {
       setPendingAction(null)
     }
@@ -87,7 +87,7 @@ export function PasswordRecoveryFlow({
 
   async function verifyResetCode(event: FormEvent) {
     event.preventDefault()
-    const validationError = validateResetCode(code)
+    const validationError = validateResetCode(code, locale)
     if (validationError) {
       setError(validationError)
       return
@@ -101,11 +101,11 @@ export function PasswordRecoveryFlow({
         code,
       })
       if (exchangeError) {
-        setError(resetCodeErrorMessage(exchangeError))
+        setError(resetCodeErrorMessage(exchangeError, locale))
         return
       }
       if (!data?.token) {
-        setError(resetCodeErrorMessage(null))
+        setError(resetCodeErrorMessage(null, locale))
         return
       }
 
@@ -113,7 +113,7 @@ export function PasswordRecoveryFlow({
       setStatusMessage(null)
       setStep('password')
     } catch (cause) {
-      setError(resetCodeErrorMessage(cause))
+      setError(resetCodeErrorMessage(cause, locale))
     } finally {
       setPendingAction(null)
     }
@@ -128,14 +128,14 @@ export function PasswordRecoveryFlow({
     try {
       const { error: resendError } = await insforge.auth.sendResetPasswordEmail({ email })
       if (resendError && !shouldMaskResetEmailError(resendError)) {
-        setError(resetEmailErrorMessage(resendError))
+        setError(resetEmailErrorMessage(resendError, locale))
         return
       }
 
-      setStatusMessage(RESET_SENT_MESSAGE)
+      setStatusMessage(t('If an account exists, a code was sent. Check your inbox and spam folder.'))
       setResendSeconds(PASSWORD_RESET_RESEND_DELAY_SECONDS)
     } catch (cause) {
-      setError(resetEmailErrorMessage(cause))
+      setError(resetEmailErrorMessage(cause, locale))
     } finally {
       setPendingAction(null)
     }
@@ -143,13 +143,13 @@ export function PasswordRecoveryFlow({
 
   async function updatePassword(event: FormEvent) {
     event.preventDefault()
-    const validationError = validateResetPassword(newPassword, confirmPassword)
+    const validationError = validateResetPassword(newPassword, confirmPassword, locale)
     if (validationError) {
       setError(validationError)
       return
     }
     if (!resetToken) {
-      setError('Your reset session has expired. Request a new code and try again.')
+      setError(t('Your reset session has expired. Request a new code and try again.'))
       return
     }
 
@@ -161,7 +161,7 @@ export function PasswordRecoveryFlow({
         otp: resetToken,
       })
       if (updateError) {
-        setError(resetPasswordErrorMessage(updateError))
+        setError(resetPasswordErrorMessage(updateError, locale))
         return
       }
 
@@ -170,7 +170,7 @@ export function PasswordRecoveryFlow({
       setConfirmPassword('')
       setStep('success')
     } catch (cause) {
-      setError(resetPasswordErrorMessage(cause))
+      setError(resetPasswordErrorMessage(cause, locale))
     } finally {
       setPendingAction(null)
     }
@@ -190,18 +190,18 @@ export function PasswordRecoveryFlow({
     return (
       <>
         <RecoveryHeading
-          eyebrow="Account recovery / Complete"
-          title="Password updated"
-          description="Sign in with your new password to return to your campaigns."
+          eyebrow={t('Account recovery / Complete')}
+          title={t('Password updated')}
+          description={t('Sign in with your new password to return to your campaigns.')}
         />
         <div className="public-auth-form public-auth-success">
-          <InlineNotice tone="success">Your password has been changed.</InlineNotice>
+          <InlineNotice tone="success">{t('Your password has been changed.')}</InlineNotice>
           <button
             type="button"
             className="public-button public-button-primary public-auth-submit"
             onClick={() => onReturnToSignIn(email)}
           >
-            Sign in with new password
+            {t('Sign in with new password')}
             <ArrowRight size={16} aria-hidden="true" />
           </button>
         </div>
@@ -213,9 +213,11 @@ export function PasswordRecoveryFlow({
     return (
       <>
         <RecoveryHeading
-          eyebrow="Account recovery / 3 of 3"
-          title="Create a new password"
-          description={`Use at least ${PASSWORD_RESET_MIN_LENGTH} characters.`}
+          eyebrow={t('Account recovery / 3 of 3')}
+          title={t('Create a new password')}
+          description={t('Use at least {count} characters.', {
+            count: PASSWORD_RESET_MIN_LENGTH,
+          })}
         />
         <form
           className="public-auth-form public-auth-recovery-form"
@@ -223,7 +225,7 @@ export function PasswordRecoveryFlow({
           noValidate
         >
           <div className="public-auth-field">
-            <label htmlFor="reset-new-password">New password</label>
+            <label htmlFor="reset-new-password">{t('New password')}</label>
             <input
               id="reset-new-password"
               type="password"
@@ -231,14 +233,16 @@ export function PasswordRecoveryFlow({
               minLength={PASSWORD_RESET_MIN_LENGTH}
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
-              placeholder={`At least ${PASSWORD_RESET_MIN_LENGTH} characters`}
+              placeholder={t('At least {count} characters', {
+                count: PASSWORD_RESET_MIN_LENGTH,
+              })}
               autoComplete="new-password"
               disabled={busy}
               autoFocus
             />
           </div>
           <div className="public-auth-field">
-            <label htmlFor="reset-confirm-password">Confirm new password</label>
+            <label htmlFor="reset-confirm-password">{t('Confirm new password')}</label>
             <input
               id="reset-confirm-password"
               type="password"
@@ -246,7 +250,7 @@ export function PasswordRecoveryFlow({
               minLength={PASSWORD_RESET_MIN_LENGTH}
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
-              placeholder="Repeat your new password"
+              placeholder={t('Repeat your new password')}
               autoComplete="new-password"
               disabled={busy}
             />
@@ -261,11 +265,11 @@ export function PasswordRecoveryFlow({
             {pendingAction === 'reset' ? (
               <>
                 <LoaderCircle className="is-spinning" size={16} aria-hidden="true" />
-                Updating password
+                {t('Updating password')}
               </>
             ) : (
               <>
-                Reset password
+                {t('Reset password')}
                 <ArrowRight size={16} aria-hidden="true" />
               </>
             )}
@@ -277,7 +281,7 @@ export function PasswordRecoveryFlow({
             disabled={busy}
           >
             <ArrowLeft size={14} aria-hidden="true" />
-            Start over
+            {t('Start over')}
           </button>
         </form>
       </>
@@ -288,9 +292,11 @@ export function PasswordRecoveryFlow({
     return (
       <>
         <RecoveryHeading
-          eyebrow="Account recovery / 2 of 3"
-          title="Enter the code"
-          description="Enter the 6-digit code from the reset email."
+          eyebrow={t('Account recovery / 2 of 3')}
+          title={t('Enter the code')}
+          description={t('Enter the {count}-digit code from the reset email.', {
+            count: PASSWORD_RESET_CODE_LENGTH,
+          })}
         />
         <form
           className="public-auth-form public-auth-recovery-form"
@@ -298,7 +304,7 @@ export function PasswordRecoveryFlow({
           noValidate
         >
           <div className="public-auth-field">
-            <label htmlFor="reset-code">Reset code</label>
+            <label htmlFor="reset-code">{t('Reset code')}</label>
             <input
               id="reset-code"
               type="text"
@@ -331,7 +337,7 @@ export function PasswordRecoveryFlow({
               onClick={returnToEmailStep}
               disabled={busy}
             >
-              Change email
+              {t('Change email')}
             </button>
             <button
               type="button"
@@ -344,7 +350,9 @@ export function PasswordRecoveryFlow({
                 size={13}
                 aria-hidden="true"
               />
-              {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend code'}
+              {resendSeconds > 0
+                ? t('Resend in {count}s', { count: resendSeconds })
+                : t('Resend code')}
             </button>
           </div>
 
@@ -355,11 +363,11 @@ export function PasswordRecoveryFlow({
             {pendingAction === 'verify' ? (
               <>
                 <LoaderCircle className="is-spinning" size={16} aria-hidden="true" />
-                Verifying code
+                {t('Verifying code')}
               </>
             ) : (
               <>
-                Verify code
+                {t('Verify code')}
                 <ArrowRight size={16} aria-hidden="true" />
               </>
             )}
@@ -372,13 +380,13 @@ export function PasswordRecoveryFlow({
   return (
     <>
       <RecoveryHeading
-        eyebrow="Account recovery / 1 of 3"
-        title="Reset your password"
-        description="Enter the email address you use for Posterlytics."
+        eyebrow={t('Account recovery / 1 of 3')}
+        title={t('Reset your password')}
+        description={t('Enter the email address you use for Posterlytics.')}
       />
       <form className="public-auth-form public-auth-recovery-form" onSubmit={requestResetCode} noValidate>
         <div className="public-auth-field">
-          <label htmlFor="reset-email">Email</label>
+          <label htmlFor="reset-email">{t('Email')}</label>
           <input
             id="reset-email"
             type="email"
@@ -388,7 +396,7 @@ export function PasswordRecoveryFlow({
               setEmail(event.target.value)
               onEmailChange(event.target.value)
             }}
-            placeholder="you@company.com"
+            placeholder={t('you@company.com')}
             autoComplete="email"
             disabled={busy}
             autoFocus
@@ -404,11 +412,11 @@ export function PasswordRecoveryFlow({
           {pendingAction === 'request' ? (
             <>
               <LoaderCircle className="is-spinning" size={16} aria-hidden="true" />
-              Sending code
+              {t('Sending code')}
             </>
           ) : (
             <>
-              Send reset code
+              {t('Send reset code')}
               <ArrowRight size={16} aria-hidden="true" />
             </>
           )}

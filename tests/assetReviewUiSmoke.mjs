@@ -62,6 +62,7 @@ try {
 
 async function testDesktopAutosaveResumeAndCancel(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
@@ -113,6 +114,7 @@ async function testDesktopAutosaveResumeAndCancel(browserInstance) {
 
 async function testAutosaveFailureRetry(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1180, height: 820 },
     reducedMotion: 'reduce',
   })
@@ -166,6 +168,7 @@ async function testAutosaveFailureRetry(browserInstance) {
 
 async function testMobileZeroSelectionConfirmation(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 390, height: 844 },
     reducedMotion: 'reduce',
   })
@@ -189,6 +192,7 @@ async function testMobileZeroSelectionConfirmation(browserInstance) {
 
 async function testActivityRouting(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1280, height: 840 },
     reducedMotion: 'reduce',
   })
@@ -209,6 +213,7 @@ async function testActivityRouting(browserInstance) {
 
 async function testHistoricalAssetAudit(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
@@ -267,6 +272,7 @@ async function testHistoricalAssetAudit(browserInstance) {
 
 async function testCampaignWizardPreference(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1360, height: 900 },
     reducedMotion: 'reduce',
   })
@@ -288,6 +294,7 @@ async function testCampaignWizardPreference(browserInstance) {
 
 async function testAssetModeTooltips(browserInstance) {
   const desktopContext = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1360, height: 900 },
     reducedMotion: 'reduce',
   })
@@ -329,6 +336,7 @@ async function testAssetModeTooltips(browserInstance) {
   await desktopContext.close()
 
   const mobileContext = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 390, height: 844 },
     reducedMotion: 'reduce',
   })
@@ -372,6 +380,7 @@ async function testAssetModeTooltips(browserInstance) {
 
 async function testBothEntryModes(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1360, height: 900 },
     reducedMotion: 'reduce',
   })

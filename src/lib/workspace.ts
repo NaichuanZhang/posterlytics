@@ -1,3 +1,9 @@
+import {
+  DEFAULT_LOCALE,
+  resolveSupportedLocale,
+  type SupportedLocale,
+} from './i18n'
+
 export const WORKSPACE_PREFERENCES_KEY = 'posterlytics.workspace.v1'
 export const CANVAS_ZOOM_LEVELS = [25, 33, 50, 67, 75, 100] as const
 
@@ -9,6 +15,7 @@ export interface WorkspacePreferences {
   inspectorPanelOpen: boolean
   zoom: CanvasZoom
   assetSelectionMode: 'editor' | 'yolo'
+  locale: SupportedLocale
 }
 
 export const DEFAULT_WORKSPACE_PREFERENCES: WorkspacePreferences = {
@@ -16,18 +23,26 @@ export const DEFAULT_WORKSPACE_PREFERENCES: WorkspacePreferences = {
   inspectorPanelOpen: true,
   zoom: 'fit',
   assetSelectionMode: 'editor',
+  locale: DEFAULT_LOCALE,
 }
 
 export function isCanvasZoom(value: unknown): value is CanvasZoom {
   return value === 'fit' || CANVAS_ZOOM_LEVELS.includes(value as CanvasZoomLevel)
 }
 
-export function parseWorkspacePreferences(raw: string | null): WorkspacePreferences {
-  if (!raw) return { ...DEFAULT_WORKSPACE_PREFERENCES }
+export function parseWorkspacePreferences(
+  raw: string | null,
+  fallbackLocale: SupportedLocale = DEFAULT_LOCALE,
+): WorkspacePreferences {
+  const defaults = {
+    ...DEFAULT_WORKSPACE_PREFERENCES,
+    locale: fallbackLocale,
+  }
+  if (!raw) return defaults
 
   try {
     const value = JSON.parse(raw) as Partial<WorkspacePreferences> | null
-    if (!value || typeof value !== 'object') return { ...DEFAULT_WORKSPACE_PREFERENCES }
+    if (!value || typeof value !== 'object') return defaults
 
     return {
       versionsPanelOpen: typeof value.versionsPanelOpen === 'boolean'
@@ -40,9 +55,10 @@ export function parseWorkspacePreferences(raw: string | null): WorkspacePreferen
       assetSelectionMode: value.assetSelectionMode === 'yolo'
         ? 'yolo'
         : DEFAULT_WORKSPACE_PREFERENCES.assetSelectionMode,
+      locale: resolveSupportedLocale(value.locale) ?? fallbackLocale,
     }
   } catch {
-    return { ...DEFAULT_WORKSPACE_PREFERENCES }
+    return defaults
   }
 }
 

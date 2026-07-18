@@ -55,3 +55,22 @@ test('reset code and password errors use actionable messages', () => {
     'Your reset session has expired. Request a new code and try again.',
   )
 })
+
+test('password reset helpers return Chinese validation and operational copy', () => {
+  assert.equal(
+    validateResetEmail('not-an-email', 'zh-CN'),
+    '请输入有效的邮箱地址。',
+  )
+  assert.equal(
+    validateResetCode('123', 'zh-CN'),
+    '输入邮件中的 6 位验证码。',
+  )
+  assert.equal(
+    validateResetPassword('short', 'short', 'zh-CN'),
+    '密码至少需要 6 个字符。',
+  )
+  assert.equal(
+    resetEmailErrorMessage({ statusCode: 429 }, 'zh-CN'),
+    '重置请求过于频繁，请稍后再试。',
+  )
+})

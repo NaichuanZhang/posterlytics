@@ -94,6 +94,28 @@ test('website-refresh preflight labels runtime-discovered assets as expected pla
   assert.match(preflight.instruction, /refined next version/)
 })
 
+test('preflight and legacy reconstruction localize generated helper copy', () => {
+  const preflight = deriveGenerationPreflight({
+    campaign: CAMPAIGN,
+    currentGeneration: CURRENT,
+    selectedGeneration: CURRENT,
+    instruction: '',
+    pendingReferences: [],
+    refreshWebsite: true,
+    locale: 'zh-CN',
+  })
+
+  assert.equal(preflight.instruction, '在避免无谓改动的前提下，生成更完善的下一版本。')
+  assert.deepEqual(
+    preflight.assets.filter((asset) => asset.runtime).map((asset) => asset.label),
+    ['网站标志', '网站产品图片', '网站风格板'],
+  )
+  assert.equal(
+    reconstructLegacyImageAssets(CURRENT, null, 'zh-CN')[0].purpose,
+    '品牌标志快照。',
+  )
+})
+
 test('legacy reconstruction is explicitly partial and follows painter priority', () => {
   const legacy = {
     ...CURRENT,

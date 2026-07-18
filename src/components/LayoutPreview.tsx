@@ -1,4 +1,6 @@
-import type { PosterLayout, PosterLayoutZone } from '../lib/types'
+import { useI18n } from '../i18n/I18nProvider'
+import type { TranslationKey } from '../i18n/messages'
+import type { LayoutBand, PosterLayout, PosterLayoutZone } from '../lib/types'
 import { parseColor } from '../lib/colorUtils'
 import { BAND_GEOMETRY, groupZonesByBand } from '../lib/layoutPreview'
 import {
@@ -26,8 +28,15 @@ interface Props {
 // Poster/AiPoster so the proportions match what compileLayoutPrompt tells the
 // model to paint.
 const DEFAULT_PREVIEW_W = 440
+const BAND_LABEL_KEYS: Record<LayoutBand, TranslationKey> = {
+  top: 'TOP',
+  upper: 'UPPER',
+  mid: 'MIDDLE',
+  lower: 'LOWER',
+}
 
 export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
+  const { t } = useI18n()
   const p = layout.palette_roles
   const scale = width / POSTER_WIDTH
   const groups = groupZonesByBand(layout)
@@ -77,7 +86,7 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
             borderRadius: 999,
           }}
         >
-          PREVIEW · bespoke layout
+          {t('PREVIEW · bespoke layout')}
         </div>
 
         {/* Full 2:3 artwork wireframe — the four content bands own the whole frame. */}
@@ -96,7 +105,7 @@ export function LayoutPreview({ layout, width = DEFAULT_PREVIEW_W }: Props) {
           {BAND_GEOMETRY.map((row) => (
             <ContentBand
               key={row.band}
-              label={row.label}
+              label={t(BAND_LABEL_KEYS[row.band])}
               height={(row.heightPct / 100) * ARTWORK_HEIGHT}
               zones={zonesByBand[row.band] ?? []}
               palette={p}
@@ -213,6 +222,7 @@ function ZoneBlock({ zone, palette, count }: { zone: PosterLayoutZone; palette: 
 }
 
 function FooterPlaceholder({ accent }: { accent: string }) {
+  const { t } = useI18n()
   return (
     <div
       style={{
@@ -245,8 +255,12 @@ function FooterPlaceholder({ accent }: { accent: string }) {
         ▦
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 40, fontWeight: 800, color: '#fff' }}>QR footer</span>
-        <span style={{ fontSize: 26, color: 'rgba(255,255,255,0.72)' }}>added automatically — below the artwork</span>
+        <span style={{ fontSize: 40, fontWeight: 800, color: '#fff' }}>
+          {t('QR footer')}
+        </span>
+        <span style={{ fontSize: 26, color: 'rgba(255,255,255,0.72)' }}>
+          {t('added automatically — below the artwork')}
+        </span>
       </div>
     </div>
   )

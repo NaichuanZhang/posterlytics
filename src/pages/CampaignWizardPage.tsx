@@ -8,6 +8,7 @@ import { AssetSelectionModeControl } from '../components/AssetSelectionModeContr
 import { GenerationReferences } from '../components/GenerationReferences'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
+import { useI18n } from '../i18n/I18nProvider'
 import { insforge } from '../lib/insforge'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import { materializeReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
@@ -23,14 +24,8 @@ import {
 
 type Phase = 'form' | 'uploading' | 'started' | 'error'
 
-const PHASE_LABEL: Record<Phase, string> = {
-  form: '',
-  uploading: 'Uploading inputs...',
-  started: 'Generation started',
-  error: '',
-}
-
 export function CampaignWizardPage() {
+  const { locale, t } = useI18n()
   const { user } = useAuth()
   const navigate = useNavigate()
   const { items: activityItems, refresh: refreshActivity } = useGenerationActivity()
@@ -49,7 +44,7 @@ export function CampaignWizardPage() {
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
 
   async function persistDraft(): Promise<string> {
-    if (!user) throw new Error('Sign in before creating a campaign.')
+    if (!user) throw new Error(t('Sign in before creating a campaign.'))
 
     const values = {
       scenario: 'product',
@@ -68,7 +63,9 @@ export function CampaignWizardPage() {
         .insert([{ ...values, user_id: user.id }])
         .select('id')
         .single()
-      if (createError || !data) throw new Error(createError?.message ?? 'Could not create campaign')
+      if (createError || !data) {
+        throw new Error(createError?.message ?? t('Could not create campaign'))
+      }
       campaignId = (data as { id: string }).id
       setDraftId(campaignId)
     }
@@ -85,7 +82,7 @@ export function CampaignWizardPage() {
     event.preventDefault()
     if (!user) return
     if (!pendingReferencesReady(pendingReferences)) {
-      setError('Remove any image URL that could not load, or wait for its preview to finish.')
+      setError(t('Remove any image URL that could not load, or wait for its preview to finish.'))
       return
     }
     setError(null)
@@ -102,13 +99,19 @@ export function CampaignWizardPage() {
 
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
     try {
-      uploaded = await materializeReferenceImages(user.id, campaignId, pendingReferences)
+      uploaded = await materializeReferenceImages(
+        user.id,
+        campaignId,
+        pendingReferences,
+        locale,
+      )
       const result = await enqueuePosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(referenceContext),
         referenceImages: uploaded,
         refreshWebsite: true,
         assetSelectionMode: preferences.assetSelectionMode,
+        locale,
       })
       setJobId(result.job.id)
       setPhase('started')
@@ -129,7 +132,7 @@ export function CampaignWizardPage() {
     if (!jobId) return
     setError(null)
     try {
-      const result = await retryPosterGeneration(jobId)
+      const result = await retryPosterGeneration(jobId, locale)
       setJobId(result.job.id)
       setPhase('started')
       await refreshActivity()
@@ -154,13 +157,13 @@ export function CampaignWizardPage() {
   return (
     <AppShell
       breadcrumbs={[
-        { label: 'Campaigns', to: '/' },
-        { label: draftId ? 'Campaign draft' : 'New campaign' },
+        { label: t('Campaigns'), to: '/' },
+        { label: draftId ? t('Campaign draft') : t('New campaign') },
       ]}
       actions={(
         <Link to="/" className="toolbar-button">
           <ArrowLeft size={15} aria-hidden="true" />
-          Cancel
+          {t('Cancel')}
         </Link>
       )}
     >
@@ -168,19 +171,19 @@ export function CampaignWizardPage() {
         <div>
           <h1>
             {activity?.status === 'succeeded'
-              ? 'Poster ready'
+              ? t('Poster ready')
               : activity?.status === 'failed'
-                ? 'Generation failed'
+                ? t('Generation failed')
                 : working
-                  ? 'Building your poster'
-                  : 'Create campaign'}
+                  ? t('Building your poster')
+                  : t('Create campaign')}
           </h1>
           <p>
             {phase === 'uploading'
-              ? 'Keep this page open while the source files finish uploading.'
+              ? t('Keep this page open while the source files finish uploading.')
               : working
-                ? 'Generation continues in the background after the inputs are queued.'
-                : 'Set the source, message, and tracked destination.'}
+                ? t('Generation continues in the background after the inputs are queued.')
+                : t('Set the source, message, and tracked destination.')}
           </p>
         </div>
       </header>
@@ -189,8 +192,8 @@ export function CampaignWizardPage() {
         <div className="creation-starting" aria-live="polite">
           <span className="spinner" />
           <div>
-            <strong>{PHASE_LABEL[phase]}</strong>
-            <p>Keep this page open until generation starts.</p>
+            <strong>{t('Uploading inputs...')}</strong>
+            <p>{t('Keep this page open until generation starts.')}</p>
           </div>
         </div>
       ) : activity?.status === 'succeeded' ? (
@@ -198,31 +201,34 @@ export function CampaignWizardPage() {
           <div className="generation-result-copy">
             <CheckCircle2 size={23} aria-hidden="true" />
             <div>
-              <span>Version {activity.version_number ?? 1}</span>
-              <h2>{activity.campaign_name} is ready</h2>
-              <p>The completed poster is now the campaign's current version.</p>
+              <span>{t('Version {number}', { number: activity.version_number ?? 1 })}</span>
+              <h2>{t('{name} is ready', { name: activity.campaign_name })}</h2>
+              <p>{t("The completed poster is now the campaign's current version.")}</p>
             </div>
           </div>
           {activity.hero_image_url && (
-            <img src={activity.hero_image_url} alt={`${activity.campaign_name} poster`} />
+            <img
+              src={activity.hero_image_url}
+              alt={t('{name} poster', { name: activity.campaign_name })}
+            />
           )}
           <Link to={`/campaigns/${activity.campaign_id}`} className="button button-primary">
-            Open editor
+            {t('Open editor')}
           </Link>
         </section>
       ) : activity?.status === 'failed' ? (
         <section className="generation-result generation-result-failed" aria-live="polite">
           <DurableGenerationStatus item={activity} />
           <InlineNotice tone="error">
-            <strong>Poster generation did not complete.</strong>
-            <span>{activity.last_error_message || 'The final automatic attempt failed.'}</span>
+            <strong>{t('Poster generation did not complete.')}</strong>
+            <span>{activity.last_error_message || t('The final automatic attempt failed.')}</span>
           </InlineNotice>
           <div className="form-actions">
             <button type="button" className="button button-primary" onClick={() => void retryGeneration()}>
               <Sparkles size={15} aria-hidden="true" />
-              Retry with same inputs
+              {t('Retry with same inputs')}
             </button>
-            <Link to="/" className="button button-secondary">Back to campaigns</Link>
+            <Link to="/" className="button button-secondary">{t('Back to campaigns')}</Link>
           </div>
           {error && <InlineNotice tone="error">{error}</InlineNotice>}
         </section>
@@ -230,15 +236,15 @@ export function CampaignWizardPage() {
         <section className="generation-result">
           <DurableGenerationStatus item={activity} safeToLeave />
           <Link to="/" className="button button-secondary">
-            Back to campaigns
+            {t('Back to campaigns')}
           </Link>
         </section>
       ) : phase === 'started' ? (
         <div className="creation-starting" aria-live="polite">
           <span className="spinner" />
           <div>
-            <strong>Generation started</strong>
-            <p>Safe to leave Posterlytics. Activity will update shortly.</p>
+            <strong>{t('Generation started')}</strong>
+            <p>{t('Safe to leave Posterlytics. Activity will update shortly.')}</p>
           </div>
         </div>
       ) : (
@@ -248,13 +254,15 @@ export function CampaignWizardPage() {
               <div className="form-section-heading">
                 <span><Globe2 size={17} aria-hidden="true" /></span>
                 <div>
-                  <h2 id="source-heading">Product source</h2>
-                  <p>The website supplies the visual and product context.</p>
+                  <h2 id="source-heading">{t('Product source')}</h2>
+                  <p>{t('The website supplies the visual and product context.')}</p>
                 </div>
               </div>
               <div className="field-grid">
                 <div className="field field-wide">
-                  <label htmlFor="product-url">Website URL <span className="required-label">Required</span></label>
+                  <label htmlFor="product-url">
+                    {t('Website URL')} <span className="required-label">{t('Required')}</span>
+                  </label>
                   <input
                     id="product-url"
                     className="input"
@@ -266,7 +274,9 @@ export function CampaignWizardPage() {
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="product-name">Product name <span className="required-label">Required</span></label>
+                  <label htmlFor="product-name">
+                    {t('Product name')} <span className="required-label">{t('Required')}</span>
+                  </label>
                   <input
                     id="product-name"
                     className="input"
@@ -277,11 +287,13 @@ export function CampaignWizardPage() {
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="tagline">Tagline <span className="optional-label">Optional</span></label>
+                  <label htmlFor="tagline">
+                    {t('Tagline')} <span className="optional-label">{t('Optional')}</span>
+                  </label>
                   <input
                     id="tagline"
                     className="input"
-                    placeholder="Reports your team can act on"
+                    placeholder={t('Reports your team can act on')}
                     value={tagline}
                     onChange={(event) => setTagline(event.target.value)}
                   />
@@ -293,24 +305,28 @@ export function CampaignWizardPage() {
               <div className="form-section-heading">
                 <span><Type size={17} aria-hidden="true" /></span>
                 <div>
-                  <h2 id="message-heading">Campaign action</h2>
-                  <p>Define the poster action and its tracked destination.</p>
+                  <h2 id="message-heading">{t('Campaign action')}</h2>
+                  <p>{t('Define the poster action and its tracked destination.')}</p>
                 </div>
               </div>
               <div className="field-grid">
                 <div className="field">
-                  <label htmlFor="cta-text">Call to action <span className="required-label">Required</span></label>
+                  <label htmlFor="cta-text">
+                    {t('Call to action')} <span className="required-label">{t('Required')}</span>
+                  </label>
                   <input
                     id="cta-text"
                     className="input"
                     required
-                    placeholder="Start free trial"
+                    placeholder={t('Start free trial')}
                     value={ctaText}
                     onChange={(event) => setCtaText(event.target.value)}
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="destination-url">Destination URL <span className="required-label">Required</span></label>
+                  <label htmlFor="destination-url">
+                    {t('Destination URL')} <span className="required-label">{t('Required')}</span>
+                  </label>
                   <input
                     id="destination-url"
                     className="input"
@@ -328,8 +344,8 @@ export function CampaignWizardPage() {
               <div className="form-section-heading">
                 <span><ImagePlus size={17} aria-hidden="true" /></span>
                 <div>
-                  <h2 id="references-heading">Generation references</h2>
-                  <p>Add direction or images that are not present on the website.</p>
+                  <h2 id="references-heading">{t('Generation references')}</h2>
+                  <p>{t('Add direction or images that are not present on the website.')}</p>
                 </div>
               </div>
               <GenerationReferences
@@ -348,8 +364,8 @@ export function CampaignWizardPage() {
 
             {error && (
               <InlineNotice tone="error">
-                <strong>Campaign draft saved.</strong>
-                <span>{error} Correct the issue and retry this draft.</span>
+                <strong>{t('Campaign draft saved.')}</strong>
+                <span>{error} {t('Correct the issue and retry this draft.')}</span>
               </InlineNotice>
             )}
 
@@ -360,36 +376,40 @@ export function CampaignWizardPage() {
                 disabled={!pendingReferencesReady(pendingReferences)}
               >
                 <Sparkles size={16} aria-hidden="true" />
-                {draftId ? 'Retry generation' : 'Generate poster'}
+                {draftId ? t('Retry generation') : t('Generate poster')}
               </button>
               <button type="button" className="button button-secondary" onClick={() => navigate('/')}>
-                Cancel
+                {t('Cancel')}
               </button>
             </div>
           </form>
 
-          <aside className="campaign-summary" aria-label="Campaign summary">
+          <aside className="campaign-summary" aria-label={t('Campaign summary')}>
             <div className="summary-poster">
               <span className="summary-poster-mark">P</span>
-              <strong>{productName.trim() || 'Untitled campaign'}</strong>
-              <span>{tagline.trim() || 'Poster preview pending'}</span>
+              <strong>{productName.trim() || t('Untitled campaign')}</strong>
+              <span>{tagline.trim() || t('Poster preview pending')}</span>
             </div>
             <dl>
               <div>
-                <dt>Source</dt>
-                <dd>{summarizeUrl(productUrl) || 'Not set'}</dd>
+                <dt>{t('Source')}</dt>
+                <dd>{summarizeUrl(productUrl) || t('Not set')}</dd>
               </div>
               <div>
-                <dt>Action</dt>
-                <dd>{ctaText.trim() || 'Not set'}</dd>
+                <dt>{t('Action')}</dt>
+                <dd>{ctaText.trim() || t('Not set')}</dd>
               </div>
               <div>
-                <dt>Destination</dt>
-                <dd>{summarizeUrl(destinationUrl) || 'Not set'}</dd>
+                <dt>{t('Destination')}</dt>
+                <dd>{summarizeUrl(destinationUrl) || t('Not set')}</dd>
               </div>
               <div>
-                <dt>References</dt>
-                <dd>{pendingReferences.length} image{pendingReferences.length === 1 ? '' : 's'}</dd>
+                <dt>{t('References')}</dt>
+                <dd>
+                  {t(pendingReferences.length === 1 ? '{count} image' : '{count} images', {
+                    count: pendingReferences.length,
+                  })}
+                </dd>
               </div>
             </dl>
           </aside>

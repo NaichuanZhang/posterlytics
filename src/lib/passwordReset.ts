@@ -1,3 +1,9 @@
+import {
+  DEFAULT_LOCALE,
+  translate,
+  type SupportedLocale,
+} from './i18n'
+
 export const PASSWORD_RESET_MIN_LENGTH = 6
 export const PASSWORD_RESET_CODE_LENGTH = 6
 export const PASSWORD_RESET_RESEND_DELAY_SECONDS = 30
@@ -27,53 +33,72 @@ export function shouldMaskResetEmailError(error: unknown): boolean {
     && statusCode !== 429
 }
 
-export function resetEmailErrorMessage(error: unknown): string {
+export function resetEmailErrorMessage(
+  error: unknown,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
   const { statusCode } = authErrorDetails(error)
   if (statusCode === 429) {
-    return 'Too many reset requests. Wait a moment before trying again.'
+    return translate(locale, 'Too many reset requests. Wait a moment before trying again.')
   }
-  return 'We could not send a reset code right now. Check your connection and try again.'
+  return translate(locale, 'We could not send a reset code right now. Check your connection and try again.')
 }
 
-export function resetCodeErrorMessage(error: unknown): string {
+export function resetCodeErrorMessage(
+  error: unknown,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
   const { statusCode } = authErrorDetails(error)
   if ([400, 401, 403, 404, 410].includes(statusCode ?? 0)) {
-    return 'That code is invalid or has expired. Check the email or request a new code.'
+    return translate(locale, 'That code is invalid or has expired. Check the email or request a new code.')
   }
   if (statusCode === 429) {
-    return 'Too many verification attempts. Wait a moment before trying again.'
+    return translate(locale, 'Too many verification attempts. Wait a moment before trying again.')
   }
-  return 'We could not verify that code. Try again or request a new one.'
+  return translate(locale, 'We could not verify that code. Try again or request a new one.')
 }
 
-export function resetPasswordErrorMessage(error: unknown): string {
+export function resetPasswordErrorMessage(
+  error: unknown,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
   const { message, statusCode } = authErrorDetails(error)
   if (
     /(at least|minimum|too short|weak.{0,20}password|password.{0,20}(weak|length|characters))/i
       .test(message)
   ) {
-    return `Password must be at least ${PASSWORD_RESET_MIN_LENGTH} characters.`
+    return translate(locale, 'Password must be at least {count} characters.', {
+      count: PASSWORD_RESET_MIN_LENGTH,
+    })
   }
   if ([400, 401, 403, 404, 410].includes(statusCode ?? 0)) {
-    return 'Your reset session has expired. Request a new code and try again.'
+    return translate(locale, 'Your reset session has expired. Request a new code and try again.')
   }
   if (statusCode === 429) {
-    return 'Too many reset attempts. Wait a moment before trying again.'
+    return translate(locale, 'Too many reset attempts. Wait a moment before trying again.')
   }
-  return 'We could not reset your password right now. Try again.'
+  return translate(locale, 'We could not reset your password right now. Try again.')
 }
 
-export function validateResetEmail(email: string): string | null {
+export function validateResetEmail(
+  email: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string | null {
   if (!/^[^\s@]+@[^\s@]+$/.test(email.trim())) {
-    return 'Enter a valid email address.'
+    return translate(locale, 'Enter a valid email address.')
   }
   return null
 }
 
-export function validateResetCode(code: string): string | null {
+export function validateResetCode(
+  code: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string | null {
   const codePattern = new RegExp(`^\\d{${PASSWORD_RESET_CODE_LENGTH}}$`)
   if (!codePattern.test(code)) {
-    return `Enter the ${PASSWORD_RESET_CODE_LENGTH}-digit code from the email.`
+    return translate(locale, 'Enter the {count}-digit code from the email.', {
+      count: PASSWORD_RESET_CODE_LENGTH,
+    })
   }
   return null
 }
@@ -81,12 +106,15 @@ export function validateResetCode(code: string): string | null {
 export function validateResetPassword(
   newPassword: string,
   confirmPassword: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): string | null {
   if (newPassword.length < PASSWORD_RESET_MIN_LENGTH) {
-    return `Password must be at least ${PASSWORD_RESET_MIN_LENGTH} characters.`
+    return translate(locale, 'Password must be at least {count} characters.', {
+      count: PASSWORD_RESET_MIN_LENGTH,
+    })
   }
   if (newPassword !== confirmPassword) {
-    return 'Passwords do not match.'
+    return translate(locale, 'Passwords do not match.')
   }
   return null
 }

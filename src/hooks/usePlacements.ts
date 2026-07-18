@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { insforge } from '../lib/insforge'
 import { mintCode } from '../lib/codes'
 import type { Placement } from '../lib/types'
+import { useI18n } from '../i18n/I18nProvider'
 
 export function usePlacements(campaignId: string | undefined, userId: string | undefined) {
+  const { t } = useI18n()
   const [placements, setPlacements] = useState<Placement[]>([])
 
   const reload = useCallback(async () => {
@@ -23,7 +25,7 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
   // Insert a placement, retrying once on the (astronomically unlikely) code collision.
   const addPlacement = useCallback(
     async (label: string): Promise<string | null> => {
-      if (!campaignId || !userId) return 'Missing campaign or user'
+      if (!campaignId || !userId) return t('Missing campaign or user')
       for (let attempt = 0; attempt < 2; attempt++) {
         const { error } = await insforge.database
           .from('placements')
@@ -34,9 +36,9 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
         }
         if (!/duplicate|unique|23505/i.test(error.message)) return error.message
       }
-      return 'Could not generate a unique code, please retry.'
+      return t('Could not generate a unique code, please retry.')
     },
-    [campaignId, userId, reload],
+    [campaignId, userId, reload, t],
   )
 
   const removePlacement = useCallback(
@@ -63,8 +65,8 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
       .eq('campaign_id', campaignId)
       .limit(1)
     if (data && data.length > 0) return
-    await addPlacement('Primary')
-  }, [campaignId, userId, addPlacement])
+    await addPlacement(t('Primary'))
+  }, [campaignId, userId, addPlacement, t])
 
   return { placements, reload, addPlacement, removePlacement, ensureDefault }
 }

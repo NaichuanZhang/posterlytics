@@ -232,6 +232,39 @@ img {
   margin-top: auto;
 }
 
+.language-select-rail {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.language-select-rail > svg {
+  display: none;
+}
+
+.language-select-rail select {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.language-select-rail select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .rail-avatar {
   position: relative;
   border: 1px solid var(--line);

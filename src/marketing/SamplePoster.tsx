@@ -1,13 +1,16 @@
+import { useI18n } from '../i18n/I18nProvider'
+import type { TranslationKey } from '../i18n/messages'
+
 export type SamplePosterVariant = 'field' | 'routes' | 'signal'
 
 const POSTERS: Record<SamplePosterVariant, {
   image: string
   qr: string
-  alt: string
+  alt: TranslationKey
   index: string
-  kicker: string
-  title: string
-  note: string
+  kicker: TranslationKey
+  title: TranslationKey
+  note: TranslationKey
   placement: string
 }> = {
   field: {
@@ -53,7 +56,10 @@ export function SamplePoster({
   compact?: boolean
   className?: string
 }) {
+  const { t } = useI18n()
   const poster = POSTERS[variant]
+  const kicker = t(poster.kicker)
+  const title = t(poster.title)
 
   return (
     <article
@@ -63,16 +69,16 @@ export function SamplePoster({
         compact ? 'sample-poster-compact' : '',
         className,
       ].filter(Boolean).join(' ')}
-      aria-label={`${poster.kicker}: ${poster.title}`}
+      aria-label={t('{kicker}: {title}', { kicker, title })}
     >
       <div className="sample-poster-index">
-        <span>{poster.kicker}</span>
+        <span>{kicker}</span>
         <strong>{poster.index}</strong>
       </div>
       <div className="sample-poster-image">
         <img
           src={poster.image}
-          alt={poster.alt}
+          alt={t(poster.alt)}
           width="800"
           height="1067"
           loading={priority ? 'eager' : 'lazy'}
@@ -83,15 +89,17 @@ export function SamplePoster({
       </div>
       <div className="sample-poster-copy">
         <div>
-          <strong className="sample-poster-title">{poster.title}</strong>
-          {!compact && <p>{poster.note}</p>}
+          <strong className="sample-poster-title">{title}</strong>
+          {!compact && <p>{t(poster.note)}</p>}
         </div>
         <div className="sample-poster-qr">
           <img
             src={poster.qr}
             width={compact ? 34 : 46}
             height={compact ? 34 : 46}
-            alt={`QR code for the ${poster.placement} sample placement`}
+            alt={t('QR code for the {placement} sample placement', {
+              placement: poster.placement,
+            })}
             loading={priority ? 'eager' : 'lazy'}
             decoding={priority ? 'sync' : 'async'}
           />

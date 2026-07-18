@@ -11,6 +11,7 @@ import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
 import type { Campaign } from '../lib/types'
 import { LayoutPreview } from './LayoutPreview'
 import { Poster } from './Poster'
+import { useI18n } from '../i18n/I18nProvider'
 
 interface PosterCanvasProps {
   campaign: Campaign
@@ -32,6 +33,7 @@ export function PosterCanvas({
   versionLabel,
   onZoomChange,
 }: PosterCanvasProps) {
+  const { t } = useI18n()
   const viewportRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState<ElementSize>({ width: 0, height: 0 })
 
@@ -76,7 +78,9 @@ export function PosterCanvas({
     <div className="canvas-shell">
       <div className="canvas-meta">
         <span>{versionLabel}</span>
-        <span>{zoom === 'fit' ? `${fitZoom}% fitted` : `${zoom}%`}</span>
+        <span>
+          {zoom === 'fit' ? t('{percent}% fitted', { percent: fitZoom }) : `${zoom}%`}
+        </span>
       </div>
       <div ref={viewportRef} className="canvas-viewport">
         <div
@@ -88,7 +92,7 @@ export function PosterCanvas({
               code ? (
                 <Poster campaign={campaign} code={code} width={previewWidth} />
               ) : (
-                <div className="canvas-message">Preparing the tracked placement</div>
+                <div className="canvas-message">{t('Preparing the tracked placement')}</div>
               )
             ) : (
               <LayoutPreview layout={campaign.poster_layout} width={previewWidth} />
@@ -114,13 +118,14 @@ function CanvasZoomControls({
   fitZoom: number
   onZoomChange: (zoom: CanvasZoom) => void
 }) {
+  const { t } = useI18n()
   return (
-    <div className="zoom-controls" aria-label="Canvas zoom controls">
+    <div className="zoom-controls" aria-label={t('Canvas zoom controls')}>
       <button
         type="button"
         className="zoom-icon"
-        aria-label="Zoom out"
-        data-tooltip="Zoom out"
+        aria-label={t('Zoom out')}
+        data-tooltip={t('Zoom out')}
         disabled={zoom === 'fit'}
         onClick={() => onZoomChange(stepCanvasZoom(zoom, -1))}
       >
@@ -128,7 +133,7 @@ function CanvasZoomControls({
       </button>
       <label className="zoom-select">
         <Maximize2 size={13} aria-hidden="true" />
-        <span className="sr-only">Canvas zoom</span>
+        <span className="sr-only">{t('Canvas zoom')}</span>
         <select
           value={zoom}
           onChange={(event) => {
@@ -136,7 +141,9 @@ function CanvasZoomControls({
             onZoomChange(value === 'fit' ? 'fit' : Number(value) as CanvasZoom)
           }}
         >
-          <option value="fit">Fit{fitZoom > 0 ? ` (${fitZoom}%)` : ''}</option>
+          <option value="fit">
+            {fitZoom > 0 ? t('Fit ({percent}%)', { percent: fitZoom }) : t('Fit')}
+          </option>
           {CANVAS_ZOOM_LEVELS.map((level) => (
             <option key={level} value={level}>{level}%</option>
           ))}
@@ -145,8 +152,8 @@ function CanvasZoomControls({
       <button
         type="button"
         className="zoom-icon"
-        aria-label="Zoom in"
-        data-tooltip="Zoom in"
+        aria-label={t('Zoom in')}
+        data-tooltip={t('Zoom in')}
         disabled={zoom === 100}
         onClick={() => onZoomChange(stepCanvasZoom(zoom, 1))}
       >

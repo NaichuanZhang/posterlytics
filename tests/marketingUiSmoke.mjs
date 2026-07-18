@@ -52,6 +52,7 @@ try {
   await testPasswordRecovery(browser)
   await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
+  await testChineseLocale(browser)
   await captureVisualMatrix(browser)
 
   console.log(`Marketing UI smoke passed; screenshots: ${OUTPUT_DIR}`)
@@ -66,6 +67,7 @@ try {
 
 async function testGuestHome(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
@@ -82,6 +84,7 @@ async function testGuestHome(browserInstance) {
 
 async function testAuthenticatedHome(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
@@ -97,6 +100,7 @@ async function testAuthenticatedHome(browserInstance) {
 
 async function testAuthenticatedNotFound(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
@@ -134,6 +138,7 @@ async function testAuthenticatedNotFound(browserInstance) {
 
 async function testSignupMode(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 390, height: 844 },
     reducedMotion: 'reduce',
   })
@@ -152,6 +157,7 @@ async function testSignupMode(browserInstance) {
 
 async function testPasswordRecovery(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 390, height: 844 },
     reducedMotion: 'reduce',
   })
@@ -217,6 +223,7 @@ async function testPasswordRecovery(browserInstance) {
 async function testPosterBreakpoints(browserInstance) {
   for (const width of [820, 768]) {
     const context = await browserInstance.newContext({
+      locale: 'en-US',
       viewport: { width, height: 900 },
       colorScheme: 'dark',
       reducedMotion: 'reduce',
@@ -242,6 +249,7 @@ async function testPosterBreakpoints(browserInstance) {
 
 async function testProtectedReturnPath(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1024, height: 768 },
     reducedMotion: 'reduce',
   })
@@ -275,6 +283,51 @@ async function testProtectedReturnPath(browserInstance) {
   await context.close()
 }
 
+async function testChineseLocale(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'zh-CN',
+    viewport: { width: 1440, height: 960 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, { authenticated: false })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`)
+  await page.getByText(
+    '把任意产品网站变成贴合品牌的海报，再按投放点追踪每一次扫码。',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await page.evaluate(() => document.documentElement.lang),
+    'zh-CN',
+  )
+  assert.equal(await page.getByLabel('语言').inputValue(), 'zh-CN')
+  assert.equal(
+    await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('posterlytics.workspace.v1')).locale
+    ),
+    'zh-CN',
+  )
+
+  await page.getByRole('link', { name: '登录', exact: true }).click()
+  await page.getByRole('heading', { name: '登录', exact: true }).waitFor()
+  await page.getByText('海报归因工作台', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('语言').inputValue(), 'zh-CN')
+  assert.equal(
+    await page.evaluate(() => document.documentElement.lang),
+    'zh-CN',
+  )
+  assert.deepEqual(pageErrors, [])
+
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/zh-CN-sign-in.png`,
+    fullPage: true,
+  })
+  await context.close()
+}
+
 async function captureVisualMatrix(browserInstance) {
   const viewports = [
     { label: '1440x960', width: 1440, height: 960 },
@@ -290,6 +343,7 @@ async function captureVisualMatrix(browserInstance) {
   for (const mode of modes) {
     for (const viewport of viewports) {
       const context = await browserInstance.newContext({
+        locale: 'en-US',
         viewport: { width: viewport.width, height: viewport.height },
         colorScheme: mode.colorScheme,
         reducedMotion: mode.reducedMotion,

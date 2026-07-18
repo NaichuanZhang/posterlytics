@@ -61,6 +61,10 @@ test('activity helpers expose active jobs and real stage labels', () => {
   assert.equal(generationActivityLabel(retrying), 'Retrying')
   assert.equal(generationActivityLabel(activity()), 'Designing layout')
   assert.equal(generationActivityLabel(ready), 'Ready')
+  assert.equal(
+    generationActivityLabel(activity({ stage: 'future' as GenerationActivityItem['stage'] })),
+    'future',
+  )
 })
 
 test('durable stages mark completed, current, pending, and skipped work', () => {
@@ -141,4 +145,17 @@ test('elapsed time uses authoritative timestamps and formats without percentages
 test('activity normalization is defensive for missing RPC fields', () => {
   assert.deepEqual(normalizeGenerationActivity(null).items, [])
   assert.equal(normalizeGenerationActivity({ unread_count: 2 }).unread_count, 2)
+})
+
+test('activity helpers localize labels and elapsed time in Chinese', () => {
+  assert.equal(generationActivityLabel(activity(), 'zh-CN'), '正在设计版式')
+  assert.equal(
+    generationActivityLabel(activity({ status: 'awaiting_review' }), 'zh-CN'),
+    '素材已可审核',
+  )
+  assert.equal(formatElapsed(65, 'zh-CN'), '1分5秒')
+  assert.deepEqual(
+    deriveGenerationStages(activity(), 'zh-CN').map(({ label }) => label),
+    ['读取网站', '选择素材', '设计版式', '绘制海报'],
+  )
 })

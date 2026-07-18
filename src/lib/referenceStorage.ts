@@ -1,6 +1,11 @@
 import { insforge } from './insforge'
 import { materializePendingReferences } from './referenceMaterialization'
 import {
+  DEFAULT_LOCALE,
+  translate,
+  type SupportedLocale,
+} from './i18n'
+import {
   normalizeReferenceImages,
   safeReferenceFilename,
   type PendingReference,
@@ -13,21 +18,37 @@ export async function materializeReferenceImages(
   userId: string,
   campaignId: string,
   references: readonly PendingReference[],
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<ReferenceImage[]> {
   return materializePendingReferences(references, {
-    uploadFile: async ({ file }) => uploadReferenceImage(userId, campaignId, file),
+    uploadFile: async ({ file }) =>
+      uploadReferenceImage(userId, campaignId, file, locale),
     importUrl: async (reference) => {
       if (reference.previewStatus !== 'ready') {
-        throw new Error(`${reference.name} must finish loading before generation starts.`)
+        throw new Error(translate(
+          locale,
+          '{name} must finish loading before generation starts.',
+          { name: reference.name },
+        ))
       }
 
       const { data, error } = await insforge.functions.invoke('reference-import', {
         body: { campaignId, url: reference.url },
       })
-      if (error) throw new Error(error.message ?? `Could not import ${reference.name}`)
+      if (error) {
+        throw new Error(error.message ?? translate(locale, 'Could not import {name}', {
+          name: reference.name,
+        }))
+      }
 
-      const image = normalizeReferenceImages([data])[0]
-      if (!image) throw new Error(`The imported image metadata for ${reference.name} was invalid.`)
+      const image = normalizeReferenceImages([data], locale)[0]
+      if (!image) {
+        throw new Error(translate(
+          locale,
+          'The imported image metadata for {name} was invalid.',
+          { name: reference.name },
+        ))
+      }
       return image
     },
     remove: deleteReferenceImages,
@@ -42,10 +63,15 @@ async function uploadReferenceImage(
   userId: string,
   campaignId: string,
   file: File,
+  locale: SupportedLocale,
 ): Promise<ReferenceImage> {
   const key = `references/${userId}/${campaignId}/${crypto.randomUUID()}-${safeReferenceFilename(file.name)}`
   const { data, error } = await insforge.storage.from(BUCKET).upload(key, file)
-  if (error || !data) throw new Error(error?.message ?? `Could not upload ${file.name}`)
+  if (error || !data) {
+    throw new Error(error?.message ?? translate(locale, 'Could not upload {name}', {
+      name: file.name,
+    }))
+  }
 
   return {
     key: data.key,

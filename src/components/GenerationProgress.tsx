@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useI18n } from '../i18n/I18nProvider'
+import type { Translate } from '../lib/i18n'
 import type { PosterLayout } from '../lib/types'
 import { LayoutPreview } from './LayoutPreview'
 
@@ -36,22 +38,25 @@ interface Props {
 // live step list (analyze → designer → hero), revealing each agent's
 // real prompt as it finishes. Purely presentational — the wizard owns the state.
 export function GenerationProgress({ headline, screenshotUrl, steps, layout }: Props) {
+  const { t } = useI18n()
   return (
     <section className="generation-workspace genprog" aria-live="polite">
       <div className="genprog-head">
         <Spinner />
         <div>
           <p className="genprog-title">{headline}</p>
-          <p className="muted genprog-sub">The style board and poster update as each stage completes.</p>
+          <p className="muted genprog-sub">
+            {t('The style board and poster update as each stage completes.')}
+          </p>
         </div>
       </div>
 
       <div className="genprog-grid">
         <div className="genprog-shot">
           {screenshotUrl ? (
-            <img src={screenshotUrl} alt="Website style board" />
+            <img src={screenshotUrl} alt={t('Website style board')} />
           ) : (
-            <div className="genprog-shot-empty muted">Capturing your site…</div>
+            <div className="genprog-shot-empty muted">{t('Capturing your site…')}</div>
           )}
         </div>
 
@@ -65,7 +70,7 @@ export function GenerationProgress({ headline, screenshotUrl, steps, layout }: P
       {layout && (
         <div className="genprog-layout">
           <p className="muted genprog-sub" style={{ marginBottom: 12 }}>
-            Layout complete. Painting the poster now.
+            {t('Layout complete. Painting the poster now.')}
           </p>
           <LayoutPreview layout={layout} width={300} />
         </div>
@@ -75,9 +80,10 @@ export function GenerationProgress({ headline, screenshotUrl, steps, layout }: P
 }
 
 function StepRow({ step }: { step: AgentStep }) {
+  const { t } = useI18n()
   // Auto-expand the running step; let the user toggle any step that has a prompt.
   const [open, setOpen] = useState(false)
-  const text = step.prompt ? promptText(step.prompt) : ''
+  const text = step.prompt ? promptText(step.prompt, t) : ''
   const showPrompt = !!text && (open || step.status === 'running')
 
   return (
@@ -90,7 +96,7 @@ function StepRow({ step }: { step: AgentStep }) {
         </div>
         {text && (
           <button type="button" className="genprog-toggle" onClick={() => setOpen((v) => !v)}>
-            {showPrompt ? 'Hide prompt ▴' : 'View prompt ▾'}
+            {showPrompt ? t('Hide prompt') : t('View prompt')} {showPrompt ? '▴' : '▾'}
           </button>
         )}
       </div>
@@ -111,11 +117,11 @@ function StatusGlyph({ status }: { status: StepStatus }) {
 }
 
 // Flatten a prompt into displayable text (system + user, or the single image prompt).
-function promptText(p: AgentPrompt): string {
+function promptText(p: AgentPrompt, t: Translate): string {
   if (p.image) return p.image
   const parts: string[] = []
-  if (p.system) parts.push(`SYSTEM\n${p.system}`)
-  if (p.user) parts.push(`USER\n${p.user}`)
+  if (p.system) parts.push(`${t('SYSTEM')}\n${p.system}`)
+  if (p.user) parts.push(`${t('USER')}\n${p.user}`)
   return parts.join('\n\n')
 }
 

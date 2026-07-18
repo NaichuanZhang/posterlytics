@@ -1,4 +1,9 @@
 import type { ReferenceImage } from './types'
+import {
+  DEFAULT_LOCALE,
+  translate,
+  type SupportedLocale,
+} from './i18n'
 
 export const MAX_REFERENCE_IMAGES = 5
 export const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
@@ -166,7 +171,10 @@ export function normalizeReferenceContext(value: string): string | null {
   return trimmed ? trimmed.slice(0, MAX_REFERENCE_CONTEXT_LENGTH) : null
 }
 
-export function normalizeReferenceImages(value: unknown): ReferenceImage[] {
+export function normalizeReferenceImages(
+  value: unknown,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): ReferenceImage[] {
   if (!Array.isArray(value)) return []
 
   return value
@@ -174,7 +182,9 @@ export function normalizeReferenceImages(value: unknown): ReferenceImage[] {
     .map((item) => ({
       key: typeof item.key === 'string' ? item.key : '',
       url: typeof item.url === 'string' ? item.url : '',
-      name: typeof item.name === 'string' ? item.name : 'Reference image',
+      name: typeof item.name === 'string'
+        ? item.name
+        : translate(locale, 'Reference image'),
       mime_type: typeof item.mime_type === 'string' ? item.mime_type : '',
       size_bytes: typeof item.size_bytes === 'number' ? item.size_bytes : 0,
     }))

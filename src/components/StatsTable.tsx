@@ -1,9 +1,11 @@
 import type { PlacementStat } from '../lib/types'
+import { useI18n } from '../i18n/I18nProvider'
 
 // Per-placement visit analytics. The highest-traffic placement is highlighted.
 export function StatsTable({ stats }: { stats: PlacementStat[] }) {
+  const { formatNumber, t } = useI18n()
   if (stats.length === 0) {
-    return <p className="panel-empty">No placement traffic yet.</p>
+    return <p className="panel-empty">{t('No placement traffic yet.')}</p>
   }
 
   const winnerId = [...stats].sort((a, b) => b.visits - a.visits)[0]?.placement_id
@@ -14,9 +16,9 @@ export function StatsTable({ stats }: { stats: PlacementStat[] }) {
       <table className="stats">
         <thead>
           <tr>
-            <th>Placement</th>
-            <th className="num">Visits</th>
-            <th className="num">Unique</th>
+            <th>{t('Placement')}</th>
+            <th className="num">{t('Visits')}</th>
+            <th className="num">{t('Unique')}</th>
           </tr>
         </thead>
         <tbody>
@@ -25,11 +27,11 @@ export function StatsTable({ stats }: { stats: PlacementStat[] }) {
               <td>
                 {stat.label}
                 {anyVisits && stat.placement_id === winnerId && (
-                  <span className="table-leader">Top</span>
+                  <span className="table-leader">{t('Top')}</span>
                 )}
               </td>
-              <td className="num">{stat.visits}</td>
-              <td className="num">{stat.unique_visitors}</td>
+              <td className="num">{formatNumber(stat.visits)}</td>
+              <td className="num">{formatNumber(stat.unique_visitors)}</td>
             </tr>
           ))}
         </tbody>

@@ -3,6 +3,7 @@ import type {
   GenerationStageItem,
   GenerationStageStatus,
 } from '../lib/generationActivity'
+import { useI18n } from '../i18n/I18nProvider'
 
 export type {
   GenerationStageItem,
@@ -14,13 +15,17 @@ export function GenerationStageProgress({
 }: {
   stages: GenerationStageItem[]
 }) {
+  const { t } = useI18n()
   return (
     <div className="generation-stage-progress" aria-live="polite">
       {stages.map((stage) => (
         <div
           key={stage.key}
           className={`generation-stage is-${stage.status}`}
-          aria-label={`${stage.label}: ${stage.status}`}
+          aria-label={t('{label}: {status}', {
+            label: stage.label,
+            status: t(stage.status),
+          })}
         >
           <StageIcon status={stage.status} />
           <span>{stage.label}</span>

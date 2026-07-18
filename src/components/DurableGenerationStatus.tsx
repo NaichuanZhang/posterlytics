@@ -6,6 +6,7 @@ import {
   formatElapsed,
   generationActivityLabel,
 } from '../lib/generationActivity'
+import { useI18n } from '../i18n/I18nProvider'
 import type { GenerationActivityItem } from '../lib/types'
 import { GenerationStageProgress } from './GenerationStageProgress'
 
@@ -16,6 +17,7 @@ export function DurableGenerationStatus({
   item: GenerationActivityItem
   safeToLeave?: boolean
 }) {
+  const { locale, t } = useI18n()
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (item.completed_at) return
@@ -23,7 +25,7 @@ export function DurableGenerationStatus({
     return () => window.clearInterval(timer)
   }, [item.completed_at])
 
-  const stages = useMemo(() => deriveGenerationStages(item), [item])
+  const stages = useMemo(() => deriveGenerationStages(item, locale), [item, locale])
   return (
     <div className="durable-generation-status" aria-live="polite">
       <div className="durable-generation-heading">
@@ -43,20 +45,23 @@ export function DurableGenerationStatus({
           />
         )}
         <div>
-          <strong>{generationActivityLabel(item)}</strong>
+          <strong>{generationActivityLabel(item, locale)}</strong>
           {safeToLeave && item.status !== 'failed' && item.status !== 'succeeded' && item.status !== 'awaiting_review' && (
-            <span>Generation started. Safe to leave Posterlytics.</span>
+            <span>{t('Generation started. Safe to leave Posterlytics.')}</span>
           )}
         </div>
         <span className="generation-elapsed">
           <Clock3 size={13} aria-hidden="true" />
-          {formatElapsed(elapsedSeconds(item, now))}
+          {formatElapsed(elapsedSeconds(item, now), locale)}
         </span>
       </div>
       <GenerationStageProgress stages={stages} />
       {item.status === 'retrying' && item.last_error_message && (
         <p className="generation-retry-note">
-          Attempt {Math.min(item.attempt_count + 1, item.max_attempts)} of {item.max_attempts}
+          {t('Attempt {current} of {total}', {
+            current: Math.min(item.attempt_count + 1, item.max_attempts),
+            total: item.max_attempts,
+          })}
         </p>
       )}
     </div>

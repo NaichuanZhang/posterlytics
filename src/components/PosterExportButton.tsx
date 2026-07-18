@@ -5,6 +5,7 @@ import type { Campaign, Placement } from '../lib/types'
 import { POSTER_HEIGHT, POSTER_WIDTH } from '../lib/posterSize'
 import { AiPoster } from './posters/AiPoster'
 import { useToast } from './ui/Toast'
+import { useI18n } from '../i18n/I18nProvider'
 
 interface Props {
   campaign: Campaign
@@ -25,7 +26,7 @@ interface Props {
 export function PosterExportButton({
   campaign,
   placement,
-  label = 'Export A4 PNG',
+  label,
   versionNumber,
   variant = 'button',
 }: Props) {
@@ -33,6 +34,8 @@ export function PosterExportButton({
   const [busy, setBusy] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
   const { notify } = useToast()
+  const { t } = useI18n()
+  const buttonLabel = label ?? t('Export A4 PNG')
 
   async function handleExport() {
     if (busy) return
@@ -76,10 +79,10 @@ export function PosterExportButton({
       const version = versionNumber ? `-v${versionNumber}` : ''
       a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}-${placement.label.replace(/\W+/g, '-')}-A4.png`
       a.click()
-      notify('Poster export is ready.', 'success')
+      notify(t('Poster export is ready.'), 'success')
     } catch (e) {
       console.error('export failed', e)
-      notify('Poster export failed. Please try again.', 'error')
+      notify(t('Poster export failed. Please try again.'), 'error')
     } finally {
       setBusy(false)
       setImgDataUrl(null) // release the (large) data URL
@@ -93,11 +96,11 @@ export function PosterExportButton({
         className={variant === 'icon' ? 'icon-button' : 'button button-secondary button-small'}
         onClick={handleExport}
         disabled={busy}
-        aria-label={variant === 'icon' ? label : undefined}
-        data-tooltip={variant === 'icon' ? label : undefined}
+        aria-label={variant === 'icon' ? buttonLabel : undefined}
+        data-tooltip={variant === 'icon' ? buttonLabel : undefined}
       >
         <Download size={15} aria-hidden="true" />
-        {variant === 'button' && (busy ? 'Exporting...' : label)}
+        {variant === 'button' && (busy ? t('Exporting...') : buttonLabel)}
       </button>
       {/* Offscreen full-size render target bound to this placement's QR. */}
       <div style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }} aria-hidden>

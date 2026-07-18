@@ -26,6 +26,7 @@ import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { Spinner } from '../components/ui/Spinner'
+import { useI18n } from '../i18n/I18nProvider'
 import {
   cancelGenerationAssetReview,
   confirmGenerationAssetSelection,
@@ -33,12 +34,14 @@ import {
   fetchGenerationForAssetReview,
   saveGenerationAssetSelection,
 } from '../lib/generationApi'
-import { TRACE_SOURCE_LABELS } from '../lib/generationTraces'
+import { TRACE_SOURCE_LABEL_KEYS } from '../lib/generationTraces'
+import { translateEnumLabel } from '../lib/i18n'
 import type { GenerationAsset, PosterGeneration } from '../lib/types'
 
 type SaveState = 'saved' | 'saving' | 'error'
 
 export function GenerationAssetReviewPage() {
+  const { locale, t } = useI18n()
   const { campaignId, generationId } = useParams<{
     campaignId: string
     generationId: string
@@ -68,7 +71,7 @@ export function GenerationAssetReviewPage() {
         fetchGenerationForAssetReview(campaignId, generationId),
         fetchGenerationAssets(generationId),
       ])
-      if (!nextGeneration) throw new Error('Poster generation not found.')
+      if (!nextGeneration) throw new Error(t('Poster generation not found.'))
       setGeneration(nextGeneration)
       setAssets(nextAssets)
       if (
@@ -96,7 +99,7 @@ export function GenerationAssetReviewPage() {
     } finally {
       if (initial) setLoading(false)
     }
-  }, [campaignId, generationId])
+  }, [campaignId, generationId, t])
 
   useEffect(() => {
     void load(true)
@@ -157,7 +160,7 @@ export function GenerationAssetReviewPage() {
       return
     }
     if (selectedIds.length >= 6) {
-      setError('A generation can use at most six images.')
+      setError(t('A generation can use at most six images.'))
       return
     }
     queueAutosave([...selectedIds, asset.id])
@@ -196,7 +199,7 @@ export function GenerationAssetReviewPage() {
       return
     }
     try {
-      await confirmGenerationAssetSelection(generationId, latestSelectionRef.current)
+      await confirmGenerationAssetSelection(generationId, latestSelectionRef.current, locale)
       await refreshActivity()
       navigate(`/campaigns/${campaignId}`, { replace: true })
     } catch (cause) {
@@ -211,7 +214,7 @@ export function GenerationAssetReviewPage() {
     setError(null)
     try {
       await saveChainRef.current.catch(() => {})
-      await cancelGenerationAssetReview(generationId)
+      await cancelGenerationAssetReview(generationId, locale)
       await refreshActivity()
       navigate(`/campaigns/${campaignId}`, { replace: true })
     } catch (cause) {
@@ -222,7 +225,7 @@ export function GenerationAssetReviewPage() {
 
   if (loading) {
     return (
-      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Asset review' }]}>
+      <AppShell breadcrumbs={[{ label: t('Campaigns'), to: '/' }, { label: t('Asset review') }]}>
         <Spinner full />
       </AppShell>
     )
@@ -230,8 +233,8 @@ export function GenerationAssetReviewPage() {
 
   if (!generation || !campaignId || !generationId) {
     return (
-      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Asset review' }]}>
-        <InlineNotice tone="error">{error || 'Poster generation not found.'}</InlineNotice>
+      <AppShell breadcrumbs={[{ label: t('Campaigns'), to: '/' }, { label: t('Asset review') }]}>
+        <InlineNotice tone="error">{error || t('Poster generation not found.')}</InlineNotice>
       </AppShell>
     )
   }
@@ -247,22 +250,22 @@ export function GenerationAssetReviewPage() {
   return (
     <AppShell
       breadcrumbs={[
-        { label: 'Campaigns', to: '/' },
-        { label: 'Editor', to: `/campaigns/${campaignId}` },
-        { label: 'Asset review' },
+        { label: t('Campaigns'), to: '/' },
+        { label: t('Editor'), to: `/campaigns/${campaignId}` },
+        { label: t('Asset review') },
       ]}
       actions={(
         <Link to={`/campaigns/${campaignId}`} className="toolbar-button">
           <ArrowLeft size={15} aria-hidden="true" />
-          Editor
+          {t('Editor')}
         </Link>
       )}
     >
       <main className="asset-review-page">
         <header className="asset-review-header">
           <div>
-            <span>Editor selection</span>
-            <h1>Generation assets</h1>
+            <span>{t('Editor selection')}</span>
+            <h1>{t('Generation assets')}</h1>
           </div>
           {reviewReady && (
             <div className="asset-review-save" aria-live="polite">
@@ -273,7 +276,11 @@ export function GenerationAssetReviewPage() {
               ) : (
                 <Save size={14} aria-hidden="true" />
               )}
-              {saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}
+              {saveState === 'saving'
+                ? t('Saving')
+                : saveState === 'error'
+                  ? t('Save failed')
+                  : t('Saved')}
             </div>
           )}
         </header>
@@ -282,41 +289,46 @@ export function GenerationAssetReviewPage() {
           <section className="asset-preparing" aria-live="polite">
             <LoaderCircle size={22} className="is-spinning" aria-hidden="true" />
             <div>
-              <strong>Preparing assets</strong>
-              <span>{generation.status === 'analyzing' ? 'Reading website' : 'Validating images'}</span>
+              <strong>{t('Preparing assets')}</strong>
+              <span>
+                {generation.status === 'analyzing'
+                  ? t('Reading website')
+                  : t('Validating images')}
+              </span>
             </div>
           </section>
         ) : generation.asset_selection_mode !== 'editor' ? (
           <InlineNotice tone="warning">
-            This generation uses Yolo asset selection and cannot be edited.
+            {t('This generation uses Yolo asset selection and cannot be edited.')}
           </InlineNotice>
         ) : generation.asset_selection_status === 'completed' ? (
           <InlineNotice tone="success">
-            <strong>Asset selection confirmed.</strong>
-            <span>Poster generation is continuing.</span>
+            <strong>{t('Asset selection confirmed.')}</strong>
+            <span>{t('Poster generation is continuing.')}</span>
           </InlineNotice>
         ) : generation.status === 'canceled' ? (
-          <InlineNotice tone="warning">This asset review was canceled.</InlineNotice>
+          <InlineNotice tone="warning">{t('This asset review was canceled.')}</InlineNotice>
         ) : generation.status === 'failed' ? (
           <InlineNotice tone="error">
-            {generation.failure_message || 'Asset preparation failed.'}
+            {generation.failure_message || t('Asset preparation failed.')}
           </InlineNotice>
         ) : (
           <>
-            <section className="asset-selection-toolbar" aria-label="Asset selection summary">
+            <section className="asset-selection-toolbar" aria-label={t('Asset selection summary')}>
               <div className="asset-selection-count">
                 <strong>{selectedIds.length}/6</strong>
-                <span>Included</span>
+                <span>{t('Included')}</span>
               </div>
               {selectedIds.length === 0 && (
                 <InlineNotice tone="warning">
-                  No images selected. Generation will use text context only.
+                  {t('No images selected. Generation will use text context only.')}
                 </InlineNotice>
               )}
             </section>
 
             <AssetSection
-              title="Included"
+              title={t('Included')}
+              included
               assets={selectedAssets}
               selectedIds={selectedIds}
               reviewReady={reviewReady}
@@ -328,7 +340,7 @@ export function GenerationAssetReviewPage() {
               onMove={moveAsset}
             />
             <AssetSection
-              title="Excluded"
+              title={t('Excluded')}
               assets={excludedAssets}
               selectedIds={selectedIds}
               reviewReady={reviewReady}
@@ -341,14 +353,14 @@ export function GenerationAssetReviewPage() {
 
             {saveState === 'error' && (
               <InlineNotice tone="error">
-                <span>We couldn't save your image selection. Try again.</span>
+                <span>{t("We couldn't save your image selection. Try again.")}</span>
                 <button
                   type="button"
                   className="button button-secondary button-small asset-save-retry"
                   onClick={() => queueAutosave([...latestSelectionRef.current])}
                 >
                   <RefreshCw size={14} aria-hidden="true" />
-                  Retry save
+                  {t('Retry save')}
                 </button>
               </InlineNotice>
             )}
@@ -356,8 +368,12 @@ export function GenerationAssetReviewPage() {
 
             <footer className="asset-review-actions">
               {cancelPrompt ? (
-                <div className="asset-cancel-confirm" role="group" aria-label="Confirm cancellation">
-                  <span>Cancel this generation?</span>
+                <div
+                  className="asset-cancel-confirm"
+                  role="group"
+                  aria-label={t('Confirm cancellation')}
+                >
+                  <span>{t('Cancel this generation?')}</span>
                   <button
                     type="button"
                     className="button button-danger"
@@ -365,7 +381,7 @@ export function GenerationAssetReviewPage() {
                     onClick={() => void cancelReview()}
                   >
                     <X size={15} aria-hidden="true" />
-                    {canceling ? 'Canceling' : 'Cancel generation'}
+                    {canceling ? t('Canceling') : t('Cancel generation')}
                   </button>
                   <button
                     type="button"
@@ -373,7 +389,7 @@ export function GenerationAssetReviewPage() {
                     disabled={canceling}
                     onClick={() => setCancelPrompt(false)}
                   >
-                    Keep review
+                    {t('Keep review')}
                   </button>
                 </div>
               ) : (
@@ -383,7 +399,7 @@ export function GenerationAssetReviewPage() {
                   onClick={() => setCancelPrompt(true)}
                 >
                   <X size={15} aria-hidden="true" />
-                  Cancel review
+                  {t('Cancel review')}
                 </button>
               )}
               <button
@@ -395,14 +411,14 @@ export function GenerationAssetReviewPage() {
                 {confirming
                   ? <LoaderCircle size={15} className="is-spinning" aria-hidden="true" />
                   : <Sparkles size={15} aria-hidden="true" />}
-                {confirming ? 'Confirming' : 'Confirm and generate'}
+                {confirming ? t('Confirming') : t('Confirm and generate')}
               </button>
             </footer>
           </>
         )}
         {!preparing && !reviewReady && (
           <Link to={`/campaigns/${campaignId}`} className="button button-primary">
-            Open editor
+            {t('Open editor')}
           </Link>
         )}
       </main>
@@ -412,6 +428,7 @@ export function GenerationAssetReviewPage() {
 
 function AssetSection({
   title,
+  included = false,
   assets,
   selectedIds,
   reviewReady,
@@ -423,6 +440,7 @@ function AssetSection({
   onMove,
 }: {
   title: string
+  included?: boolean
   assets: GenerationAsset[]
   selectedIds: string[]
   reviewReady: boolean
@@ -433,15 +451,17 @@ function AssetSection({
   onToggle: (asset: GenerationAsset) => void
   onMove: (id: string, direction: -1 | 1) => void
 }) {
+  const { t } = useI18n()
+  const headingId = included ? 'assets-included' : 'assets-excluded'
   return (
-    <section className="asset-review-section" aria-labelledby={`assets-${title.toLowerCase()}`}>
+    <section className="asset-review-section" aria-labelledby={headingId}>
       <div className="asset-review-section-heading">
-        <h2 id={`assets-${title.toLowerCase()}`}>{title}</h2>
+        <h2 id={headingId}>{title}</h2>
         <span>{assets.length}</span>
       </div>
       {assets.length === 0 ? (
         <p className="asset-review-empty">
-          {title === 'Included' ? 'No images included.' : 'No excluded candidates.'}
+          {included ? t('No images included.') : t('No excluded candidates.')}
         </p>
       ) : (
         <div className="asset-review-grid">
@@ -492,6 +512,7 @@ function AssetCard({
   onToggle: (asset: GenerationAsset) => void
   onMove: (id: string, direction: -1 | 1) => void
 }) {
+  const { t } = useI18n()
   const [previewFailed, setPreviewFailed] = useState(false)
   const included = selectedIndex >= 0
 
@@ -525,14 +546,14 @@ function AssetCard({
         {asset.url && !previewFailed ? (
           <img
             src={asset.url}
-            alt={asset.filename || TRACE_SOURCE_LABELS[asset.source]}
+            alt={asset.filename || translateEnumLabel(t, TRACE_SOURCE_LABEL_KEYS, asset.source)}
             loading="lazy"
             onError={() => setPreviewFailed(true)}
           />
         ) : (
           <span>
             <ImageOff size={22} aria-hidden="true" />
-            Preview unavailable
+            {t('Preview unavailable')}
           </span>
         )}
         {included && <b>{selectedIndex + 1}</b>}
@@ -540,13 +561,17 @@ function AssetCard({
       <div className="asset-card-body">
         <div className="asset-card-title">
           <span className={`trace-source-badge is-${asset.source}`}>
-            {TRACE_SOURCE_LABELS[asset.source]}
+            {translateEnumLabel(t, TRACE_SOURCE_LABEL_KEYS, asset.source)}
           </span>
-          <strong>{asset.filename || `Candidate ${asset.candidate_position}`}</strong>
+          <strong>
+            {asset.filename || t('Candidate {number}', {
+              number: asset.candidate_position,
+            })}
+          </strong>
         </div>
         <p>{asset.purpose}</p>
         {asset.availability === 'unavailable' && (
-          <small>{asset.availability_reason || 'Image is unavailable.'}</small>
+          <small>{asset.availability_reason || t('Image is unavailable.')}</small>
         )}
       </div>
       <div className="asset-card-controls">
@@ -555,7 +580,9 @@ function AssetCard({
             <button
               type="button"
               className="icon-button asset-reorder-handle"
-              aria-label={`Reorder ${asset.filename || 'asset'}`}
+              aria-label={t('Reorder {name}', {
+                name: asset.filename || t('asset'),
+              })}
               disabled={!reviewReady}
               onKeyDown={handleReorderKey}
             >
@@ -564,7 +591,7 @@ function AssetCard({
             <button
               type="button"
               className="icon-button"
-              aria-label="Move asset up"
+              aria-label={t('Move asset up')}
               disabled={!reviewReady || selectedIndex === 0}
               onClick={() => onMove(asset.id, -1)}
             >
@@ -573,7 +600,7 @@ function AssetCard({
             <button
               type="button"
               className="icon-button"
-              aria-label="Move asset down"
+              aria-label={t('Move asset down')}
               disabled={!reviewReady || selectedIndex === selectedCount - 1}
               onClick={() => onMove(asset.id, 1)}
             >
@@ -589,7 +616,7 @@ function AssetCard({
           onClick={() => onToggle(asset)}
         >
           {included ? <Check size={14} aria-hidden="true" /> : null}
-          {included ? 'Included' : 'Include'}
+          {included ? t('Included') : t('Include')}
         </button>
       </div>
     </article>

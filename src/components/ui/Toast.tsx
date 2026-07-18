@@ -13,6 +13,7 @@ import {
   type ToastOptions,
   type ToastTone,
 } from '../../lib/toast'
+import { useI18n } from '../../i18n/I18nProvider'
 
 export type {
   ToastItem,
@@ -27,6 +28,7 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null)
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
   const dismiss = useCallback((id: number) => {
@@ -74,7 +76,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <button
               type="button"
               className="toast-dismiss"
-              aria-label="Dismiss notification"
+              aria-label={t('Dismiss notification')}
               onClick={() => dismiss(toast.id)}
             >
               <X size={14} aria-hidden="true" />

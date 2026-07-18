@@ -1,4 +1,5 @@
 import type { PendingReference } from './references'
+import type { TranslationKey } from '../i18n/messages'
 import type {
   Campaign,
   GenerationStageTrace,
@@ -7,17 +8,22 @@ import type {
   TraceImageAsset,
   TraceImageSource,
 } from './types'
+import {
+  DEFAULT_LOCALE,
+  translate,
+  type SupportedLocale,
+} from './i18n'
 
 export const TRACE_STAGE_ORDER: GenerationTraceStage[] = ['hero', 'designer', 'assets', 'analyze']
 
-export const TRACE_STAGE_LABELS: Record<GenerationTraceStage, string> = {
+export const TRACE_STAGE_LABEL_KEYS: Record<GenerationTraceStage, TranslationKey> = {
   hero: 'Image model',
   designer: 'Designer',
   assets: 'Assets',
   analyze: 'Analyze',
 }
 
-export const TRACE_SOURCE_LABELS: Record<TraceImageSource, string> = {
+export const TRACE_SOURCE_LABEL_KEYS: Record<TraceImageSource, TranslationKey> = {
   'previous-poster': 'Previous poster',
   'user-reference': 'Supporting',
   logo: 'Logo',
@@ -76,6 +82,7 @@ export function deriveGenerationPreflight(args: {
   instruction: string
   pendingReferences: readonly PendingReference[]
   refreshWebsite: boolean
+  locale?: SupportedLocale
 }): GenerationPreflight {
   const {
     campaign,
@@ -84,6 +91,7 @@ export function deriveGenerationPreflight(args: {
     instruction,
     pendingReferences,
     refreshWebsite,
+    locale = DEFAULT_LOCALE,
   } = args
   const snapshot = currentGeneration ?? campaign
   const assets: Array<Omit<GenerationPreflightAsset, 'expected_position'>> = []
@@ -92,9 +100,11 @@ export function deriveGenerationPreflight(args: {
     assets.push({
       id: 'previous-poster',
       source: 'previous-poster',
-      label: 'Current poster version',
-      purpose: 'Primary edit source; unspecified choices remain unchanged.',
-      filename: `Version ${currentGeneration.version_number ?? '-'}`,
+      label: translate(locale, 'Current poster version'),
+      purpose: translate(locale, 'Primary edit source; unspecified choices remain unchanged.'),
+      filename: translate(locale, 'Version {number}', {
+        number: currentGeneration.version_number ?? '-',
+      }),
       url: currentGeneration.hero_image_url,
       runtime: false,
     })
@@ -104,8 +114,8 @@ export function deriveGenerationPreflight(args: {
     assets.push({
       id: reference.id,
       source: 'user-reference',
-      label: `Supporting image ${index + 1}`,
-      purpose: 'Used only for the requested change.',
+      label: translate(locale, 'Supporting image {number}', { number: index + 1 }),
+      purpose: translate(locale, 'Used only for the requested change.'),
       filename: reference.kind === 'file' ? reference.file.name : reference.name,
       url: reference.kind === 'url' ? reference.url : null,
       runtime: false,
@@ -114,18 +124,18 @@ export function deriveGenerationPreflight(args: {
 
   if (refreshWebsite) {
     assets.push(
-      runtimeAsset('logo', 'Website logo'),
-      runtimeAsset('product', 'Website product imagery'),
-      runtimeAsset('style-board', 'Website style board'),
+      runtimeAsset('logo', translate(locale, 'Website logo'), locale),
+      runtimeAsset('product', translate(locale, 'Website product imagery'), locale),
+      runtimeAsset('style-board', translate(locale, 'Website style board'), locale),
     )
   } else {
     if (snapshot.brand_assets?.logo_url) {
       assets.push({
         id: 'logo',
         source: 'logo',
-        label: 'Brand logo',
-        purpose: 'Authentic brand mark, subject to fetch and model limits.',
-        filename: filenameFromUrl(snapshot.brand_assets.logo_url),
+        label: translate(locale, 'Brand logo'),
+        purpose: translate(locale, 'Authentic brand mark, subject to fetch and model limits.'),
+        filename: filenameFromUrl(snapshot.brand_assets.logo_url, locale),
         url: snapshot.brand_assets.logo_url,
         runtime: false,
       })
@@ -134,9 +144,9 @@ export function deriveGenerationPreflight(args: {
       assets.push({
         id: `product-${index}`,
         source: 'product',
-        label: `Product image ${index + 1}`,
-        purpose: 'Authentic product or brand imagery.',
-        filename: filenameFromUrl(image.url),
+        label: translate(locale, 'Product image {number}', { number: index + 1 }),
+        purpose: translate(locale, 'Authentic product or brand imagery.'),
+        filename: filenameFromUrl(image.url, locale),
         url: image.url,
         runtime: false,
       })
@@ -145,9 +155,9 @@ export function deriveGenerationPreflight(args: {
       assets.push({
         id: 'style-board',
         source: 'style-board',
-        label: 'Website style board',
-        purpose: 'Source evidence for the visual system.',
-        filename: filenameFromUrl(snapshot.screenshot_url),
+        label: translate(locale, 'Website style board'),
+        purpose: translate(locale, 'Source evidence for the visual system.'),
+        filename: filenameFromUrl(snapshot.screenshot_url, locale),
         url: snapshot.screenshot_url,
         runtime: false,
       })
@@ -163,7 +173,8 @@ export function deriveGenerationPreflight(args: {
     .map(({ asset }, index) => ({ ...asset, expected_position: index + 1 }))
 
   return {
-    instruction: instruction.trim() || 'Create a refined next version without gratuitous changes.',
+    instruction: instruction.trim()
+      || translate(locale, 'Create a refined next version without gratuitous changes.'),
     parent: currentGeneration,
     selectedDiffersFromParent: !!(
       selectedGeneration
@@ -177,15 +188,18 @@ export function deriveGenerationPreflight(args: {
 export function reconstructLegacyImageAssets(
   generation: PosterGeneration,
   parent: PosterGeneration | null,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): TraceImageAsset[] {
   const candidates: Array<Omit<TraceImageAsset, 'candidate_position' | 'model_position'>> = []
   if (parent?.hero_image_url) {
     candidates.push({
       source: 'previous-poster',
-      purpose: 'Likely parent poster snapshot.',
+      purpose: translate(locale, 'Likely parent poster snapshot.'),
       url: parent.hero_image_url,
       key: parent.hero_image_key,
-      filename: `Version ${parent.version_number ?? '-'}`,
+      filename: translate(locale, 'Version {number}', {
+        number: parent.version_number ?? '-',
+      }),
       mime_type: null,
       size_bytes: null,
       storage_source: 'poster-version',
@@ -194,7 +208,7 @@ export function reconstructLegacyImageAssets(
   for (const image of generation.reference_images) {
     candidates.push({
       source: 'user-reference',
-      purpose: 'User-supplied supporting image snapshot.',
+      purpose: translate(locale, 'User-supplied supporting image snapshot.'),
       url: image.url,
       key: image.key,
       filename: image.name,
@@ -206,10 +220,10 @@ export function reconstructLegacyImageAssets(
   if (generation.brand_assets?.logo_url) {
     candidates.push({
       source: 'logo',
-      purpose: 'Brand logo snapshot.',
+      purpose: translate(locale, 'Brand logo snapshot.'),
       url: generation.brand_assets.logo_url,
       key: generation.brand_assets.logo_key ?? null,
-      filename: filenameFromUrl(generation.brand_assets.logo_url),
+      filename: filenameFromUrl(generation.brand_assets.logo_url, locale),
       mime_type: null,
       size_bytes: null,
       storage_source: 'website-asset',
@@ -218,10 +232,10 @@ export function reconstructLegacyImageAssets(
   for (const image of generation.brand_assets?.images ?? []) {
     candidates.push({
       source: 'product',
-      purpose: 'Product image snapshot.',
+      purpose: translate(locale, 'Product image snapshot.'),
       url: image.url,
       key: image.key,
-      filename: filenameFromUrl(image.url),
+      filename: filenameFromUrl(image.url, locale),
       mime_type: null,
       size_bytes: null,
       storage_source: 'website-asset',
@@ -230,10 +244,10 @@ export function reconstructLegacyImageAssets(
   if (generation.screenshot_url) {
     candidates.push({
       source: 'style-board',
-      purpose: 'Website style board snapshot.',
+      purpose: translate(locale, 'Website style board snapshot.'),
       url: generation.screenshot_url,
       key: generation.screenshot_key,
-      filename: filenameFromUrl(generation.screenshot_url),
+      filename: filenameFromUrl(generation.screenshot_url, locale),
       mime_type: null,
       size_bytes: null,
       storage_source: 'website-capture',
@@ -263,23 +277,27 @@ export function reconstructLegacyImageAssets(
 function runtimeAsset(
   source: Extract<TraceImageSource, 'logo' | 'product' | 'style-board'>,
   label: string,
+  locale: SupportedLocale,
 ): Omit<GenerationPreflightAsset, 'expected_position'> {
   return {
     id: `runtime-${source}`,
     source,
     label,
-    purpose: 'Discovered, validated, and stored while the website is analyzed.',
+    purpose: translate(locale, 'Discovered, validated, and stored while the website is analyzed.'),
     filename: null,
     url: null,
     runtime: true,
   }
 }
 
-function filenameFromUrl(value: string): string {
+function filenameFromUrl(
+  value: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
   try {
     return decodeURIComponent(new URL(value).pathname.split('/').filter(Boolean).pop() ?? '')
-      || 'Stored image'
+      || translate(locale, 'Stored image')
   } catch {
-    return 'Stored image'
+    return translate(locale, 'Stored image')
   }
 }

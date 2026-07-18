@@ -7,6 +7,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { ArrowDownRight, ArrowRight } from 'lucide-react'
+import { LanguageSelect } from '../components/LanguageSelect'
+import { useI18n } from '../i18n/I18nProvider'
 import { signInPath } from '../lib/authRouting'
 import { SamplePoster } from './SamplePoster'
 import './public.css'
@@ -16,6 +18,7 @@ const CREATE_ACCOUNT_PATH = signInPath('/campaigns/new', 'signup')
 const SIGN_IN_PATH = signInPath('/')
 
 export function PublicLandingShell() {
+  const { t } = useI18n()
   const [showLandingSections, setShowLandingSections] = useState(false)
 
   useEffect(() => {
@@ -25,7 +28,7 @@ export function PublicLandingShell() {
 
   return (
     <div className="public-surface">
-      <a className="public-skip-link" href="#public-main">Skip to content</a>
+      <a className="public-skip-link" href="#public-main">{t('Skip to content')}</a>
       <PublicNavigation />
       <main id="public-main">
         <StaticHero />
@@ -52,24 +55,27 @@ function LandingSectionPreview() {
 }
 
 function PublicNavigation() {
+  const { t } = useI18n()
   return (
     <header className="public-nav-shell">
-      <a href="/" className="public-brand" aria-label="Posterlytics home">
+      <a href="/" className="public-brand" aria-label={t('Posterlytics home')}>
         <span className="public-brand-mark" aria-hidden="true">P</span>
         <strong>Posterlytics</strong>
       </a>
-      <nav className="public-nav" aria-label="Landing page">
-        <a href="#workflow">Workflow</a>
-        <a href="#versions">Versions</a>
-        <a href="#attribution">Attribution</a>
-        <a href={SIGN_IN_PATH}>Sign in</a>
-        <a className="public-nav-cta" href={CREATE_ACCOUNT_PATH}>Create account</a>
+      <nav className="public-nav" aria-label={t('Landing page')}>
+        <a href="#workflow">{t('Workflow')}</a>
+        <a href="#versions">{t('Versions')}</a>
+        <a href="#attribution">{t('Attribution')}</a>
+        <LanguageSelect variant="public" />
+        <a href={SIGN_IN_PATH}>{t('Sign in')}</a>
+        <a className="public-nav-cta" href={CREATE_ACCOUNT_PATH}>{t('Create account')}</a>
       </nav>
     </header>
   )
 }
 
 function StaticHero() {
+  const { t } = useI18n()
   const heroRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -137,25 +143,22 @@ function StaticHero() {
     >
       <div className="public-hero-grid">
         <div className="public-hero-copy">
-          <span className="public-overline">Website in / poster out / signal back</span>
+          <span className="public-overline">{t('Website in / poster out / signal back')}</span>
           <h1 id="hero-heading">Posterlytics</h1>
-          <p>
-            Turn any product website into an on-brand poster, then track every
-            scan by placement.
-          </p>
+          <p>{t('Turn any product website into an on-brand poster, then track every scan by placement.')}</p>
           <div className="public-hero-actions">
             <a className="public-button public-button-primary" href={CREATE_ACCOUNT_PATH}>
-              Create account
+              {t('Create account')}
               <ArrowRight size={17} aria-hidden="true" />
             </a>
             <a className="public-text-link" href="#workflow">
-              See the workflow
+              {t('See the workflow')}
               <ArrowDownRight size={17} aria-hidden="true" />
             </a>
           </div>
         </div>
 
-        <div className="hero-poster-stage" aria-label="Three sample product posters">
+        <div className="hero-poster-stage" aria-label={t('Three sample product posters')}>
           <div className="hero-poster hero-poster-left">
             <div className="hero-poster-parallax">
               <SamplePoster variant="routes" />

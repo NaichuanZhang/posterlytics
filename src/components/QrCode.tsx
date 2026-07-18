@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
+import { useI18n } from '../i18n/I18nProvider'
 
 interface Props {
   value: string
@@ -10,6 +11,7 @@ interface Props {
 
 // Renders a QR code (for a placement's view URL) as a crisp <img> data URL.
 export function QrCode({ value, size = 132, dark = '#000000', light = '#ffffff' }: Props) {
+  const { t } = useI18n()
   const [src, setSrc] = useState<string>('')
 
   useEffect(() => {
@@ -37,7 +39,7 @@ export function QrCode({ value, size = 132, dark = '#000000', light = '#ffffff' 
       src={src}
       width={size}
       height={size}
-      alt="QR code"
+      alt={t('QR code')}
       style={{ display: 'block', borderRadius: 8 }}
     />
   )

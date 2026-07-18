@@ -15,16 +15,15 @@ export const LAYOUT_BAND_ORDER: LayoutBand[] = ['top', 'upper', 'mid', 'lower']
 
 export interface BandRow {
   band: LayoutBand
-  label: string
   heightPct: number // share of the artwork height
 }
 
 // The four content bands own the complete artwork frame. Sums to 100.
 export const BAND_GEOMETRY: BandRow[] = [
-  { band: 'top', label: 'TOP', heightPct: 12 },
-  { band: 'upper', label: 'UPPER', heightPct: 30 },
-  { band: 'mid', label: 'MIDDLE', heightPct: 30 },
-  { band: 'lower', label: 'LOWER', heightPct: 28 },
+  { band: 'top', heightPct: 12 },
+  { band: 'upper', heightPct: 30 },
+  { band: 'mid', heightPct: 30 },
+  { band: 'lower', heightPct: 28 },
 ]
 
 export interface BandGroup {

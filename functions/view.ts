@@ -10,6 +10,119 @@ import {
   type RedirectAttribution,
 } from './_shared.ts';
 
+export type ViewLocale = 'en-US' | 'zh-CN';
+export type LinkKind = 'missing' | 'unpublished';
+
+interface StatusPageCopy {
+  title: string;
+  heading: string;
+  message: string;
+}
+
+interface ViewMessages {
+  byline: string;
+  missing: StatusPageCopy;
+  unpublished: StatusPageCopy;
+}
+
+const DEFAULT_VIEW_LOCALE: ViewLocale = 'en-US';
+const VIEW_MESSAGES: Record<ViewLocale, ViewMessages> = {
+  'en-US': {
+    byline: 'via Posterlytics',
+    missing: {
+      title: 'Link not found',
+      heading: '404',
+      message: "This link isn't active.",
+    },
+    unpublished: {
+      title: "Poster isn't live yet",
+      heading: 'Not live yet',
+      message:
+        "This poster's campaign hasn't been published. Once the owner publishes it, this link will work.",
+    },
+  },
+  'zh-CN': {
+    byline: '由 Posterlytics 提供',
+    missing: {
+      title: '链接不存在',
+      heading: '404',
+      message: '此链接当前不可用。',
+    },
+    unpublished: {
+      title: '海报尚未发布',
+      heading: '尚未发布',
+      message: '此海报所属的推广活动尚未发布。发布后，该链接即可访问。',
+    },
+  },
+};
+
+interface LanguagePreference {
+  range: string;
+  quality: number;
+  index: number;
+}
+
+export function resolveViewLocale(acceptLanguage: string | null): ViewLocale {
+  if (!acceptLanguage) return DEFAULT_VIEW_LOCALE;
+
+  const preferences = acceptLanguage
+    .split(',')
+    .flatMap((part, index): LanguagePreference[] => {
+      const [rawRange, ...parameters] = part.split(';');
+      const range = rawRange.trim().toLowerCase();
+      if (
+        !range
+        || !/^(?:\*|[a-z]{1,8}(?:-[a-z0-9]{1,8})*)$/.test(range)
+      ) {
+        return [];
+      }
+
+      let quality = 1;
+      let qualitySeen = false;
+      for (const rawParameter of parameters) {
+        const parameter = rawParameter.trim();
+        const qualityMatch = /^q\s*=\s*(.+)$/i.exec(parameter);
+        if (!qualityMatch) {
+          if (/^q\b/i.test(parameter)) return [];
+          continue;
+        }
+        if (qualitySeen) return [];
+        qualitySeen = true;
+        const parsedQuality = parseLanguageQuality(qualityMatch[1]);
+        if (parsedQuality === null) return [];
+        quality = parsedQuality;
+      }
+
+      return quality > 0 ? [{ range, quality, index }] : [];
+    })
+    .sort((a, b) => b.quality - a.quality || a.index - b.index);
+
+  for (const preference of preferences) {
+    if (
+      preference.range === 'zh'
+      || preference.range.startsWith('zh-')
+    ) {
+      return 'zh-CN';
+    }
+    if (
+      preference.range === '*'
+      || preference.range === 'en'
+      || preference.range.startsWith('en-')
+    ) {
+      return 'en-US';
+    }
+  }
+  return DEFAULT_VIEW_LOCALE;
+}
+
+function parseLanguageQuality(value: string): number | null {
+  const normalized = value.trim();
+  if (!/^(?:0(?:\.\d{1,3})?|1(?:\.0{1,3})?)$/.test(normalized)) {
+    return null;
+  }
+  return Number(normalized);
+}
+
 // `view` is the QR target — a pure tracked redirect. It:
 //   1. resolves the placement by ?code=
 //   2. ensures a first-party visitor cookie (plv)
@@ -21,8 +134,9 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
   const url = new URL(req.url);
+  const locale = resolveViewLocale(req.headers.get('accept-language'));
   const code = url.searchParams.get('code');
-  if (!code) return html(statusHtml('missing'), 400);
+  if (!code) return statusPageResponse('missing', locale, 400);
 
   const client = createAnonClient();
 
@@ -73,7 +187,7 @@ export default async function (req: Request): Promise<Response> {
     destination = null;
   }
 
-  if (!destination) return await statusResponse(client, code, setCookie);
+  if (!destination) return await statusResponse(client, code, locale, setCookie);
 
   const location = attribution
     ? decorateDestinationUrl(destination, attribution)
@@ -105,17 +219,22 @@ function redirect(location: string, setCookie?: string | null): Response {
   return new Response(null, { status: 302, headers });
 }
 
-function html(body: string, status = 200, setCookie?: string | null): Response {
+function statusPageResponse(
+  kind: LinkKind,
+  locale: ViewLocale,
+  status = 200,
+  setCookie?: string | null,
+): Response {
   const headers = new Headers({
     ...CORS,
     'Content-Type': 'text/html; charset=utf-8',
+    'Content-Language': locale,
     'Cache-Control': 'no-store',
+    Vary: 'Accept-Language',
   });
   if (setCookie) headers.append('Set-Cookie', setCookie);
-  return new Response(body, { status, headers });
+  return new Response(statusHtml(kind, locale), { status, headers });
 }
-
-type LinkKind = 'missing' | 'unpublished';
 
 // Resolve whether a code is unknown ('missing') or just not published yet
 // ('unpublished') and return the matching page. 'unpublished' is a real,
@@ -123,6 +242,7 @@ type LinkKind = 'missing' | 'unpublished';
 async function statusResponse(
   client: ReturnType<typeof createAnonClient>,
   code: string,
+  locale: ViewLocale,
   setCookie?: string | null,
 ): Promise<Response> {
   let kind: LinkKind = 'missing';
@@ -134,15 +254,16 @@ async function statusResponse(
   }
   // 'published' shouldn't reach here (log_visit would have succeeded), but if it
   // does, it's a transient hiccup — treat as not-live rather than not-found.
-  return html(statusHtml(kind), kind === 'missing' ? 404 : 200, setCookie);
+  return statusPageResponse(
+    kind,
+    locale,
+    kind === 'missing' ? 404 : 200,
+    setCookie,
+  );
 }
 
-function statusHtml(kind: LinkKind): string {
-  const title = kind === 'unpublished' ? "Poster isn't live yet" : 'Link not found';
-  const heading = kind === 'unpublished' ? 'Not live yet' : '404';
-  const message =
-    kind === 'unpublished'
-      ? "This poster's campaign hasn't been published. Once the owner publishes it, this link will work."
-      : "This link isn't active.";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#444;background:#faf7f1"><div style="text-align:center;max-width:340px;padding:24px"><h1 style="font-size:2.4rem;margin:0 0 8px">${heading}</h1><p style="line-height:1.5">${message}</p><p style="font-size:.78rem;opacity:.4;margin-top:18px">via Posterlytics</p></div></body></html>`;
+export function statusHtml(kind: LinkKind, locale: ViewLocale): string {
+  const messages = VIEW_MESSAGES[locale];
+  const copy = messages[kind];
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${copy.title}</title></head><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#444;background:#faf7f1"><div style="text-align:center;max-width:340px;padding:24px"><h1 style="font-size:2.4rem;margin:0 0 8px">${copy.heading}</h1><p style="line-height:1.5">${copy.message}</p><p style="font-size:.78rem;opacity:.4;margin-top:18px">${messages.byline}</p></div></body></html>`;
 }

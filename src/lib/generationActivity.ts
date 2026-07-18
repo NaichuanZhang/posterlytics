@@ -4,6 +4,12 @@ import type {
   GenerationJobStage,
   GenerationJobStatus,
 } from './types'
+import type { TranslationKey } from '../i18n/messages'
+import {
+  DEFAULT_LOCALE,
+  translate,
+  type SupportedLocale,
+} from './i18n'
 
 export type GenerationStageStatus =
   | 'pending'
@@ -29,7 +35,7 @@ const ACTIVE_JOB_STATUSES = new Set<GenerationJobStatus>([
 
 const GENERATION_STAGES: Array<{
   key: GenerationJobStage
-  label: string
+  label: TranslationKey
 }> = [
   { key: 'analyze', label: 'Read website' },
   { key: 'assets', label: 'Select assets' },
@@ -37,7 +43,7 @@ const GENERATION_STAGES: Array<{
   { key: 'hero', label: 'Paint poster' },
 ]
 
-const STAGE_LABELS: Record<GenerationJobStage, string> = {
+const STAGE_LABELS: Record<GenerationJobStage, TranslationKey> = {
   analyze: 'Reading website',
   assets: 'Selecting assets',
   designer: 'Designing layout',
@@ -52,22 +58,29 @@ export function isActiveGenerationJob(
 
 export function generationActivityLabel(
   item: Pick<GenerationActivityItem, 'status' | 'stage'>,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): string {
-  if (item.status === 'queued') return 'Queued'
-  if (item.status === 'retrying') return 'Retrying'
-  if (item.status === 'awaiting_review') return 'Assets ready for review'
-  if (item.status === 'succeeded') return 'Ready'
-  if (item.status === 'failed') return 'Failed'
-  if (item.status === 'canceled') return 'Canceled'
-  return STAGE_LABELS[item.stage]
+  if (item.status === 'queued') return translate(locale, 'Queued')
+  if (item.status === 'retrying') return translate(locale, 'Retrying')
+  if (item.status === 'awaiting_review') return translate(locale, 'Assets ready for review')
+  if (item.status === 'succeeded') return translate(locale, 'Ready')
+  if (item.status === 'failed') return translate(locale, 'Failed')
+  if (item.status === 'canceled') return translate(locale, 'Canceled')
+  const stageLabel = STAGE_LABELS[item.stage]
+  return stageLabel ? translate(locale, stageLabel) : String(item.stage)
 }
 
-export function generationStageLabel(stage: GenerationJobStage): string {
-  return STAGE_LABELS[stage]
+export function generationStageLabel(
+  stage: GenerationJobStage,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
+  const stageLabel = STAGE_LABELS[stage]
+  return stageLabel ? translate(locale, stageLabel) : String(stage)
 }
 
 export function deriveGenerationStages(
   item: GenerationActivityItem,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): GenerationStageItem[] {
   const applicable = GENERATION_STAGES.filter((stage) => {
     if (stage.key === 'analyze') {
@@ -83,15 +96,16 @@ export function deriveGenerationStages(
 
   return GENERATION_STAGES.map((stage) => {
     const index = applicable.findIndex((candidate) => candidate.key === stage.key)
-    if (index === -1) return { ...stage, status: 'skipped' as const }
-    if (item.status === 'succeeded') return { ...stage, status: 'done' as const }
-    if (index < currentIndex) return { ...stage, status: 'done' as const }
-    if (index > currentIndex) return { ...stage, status: 'pending' as const }
-    if (item.status === 'failed') return { ...stage, status: 'error' as const }
-    if (item.status === 'canceled') return { ...stage, status: 'canceled' as const }
-    if (item.status === 'awaiting_review') return { ...stage, status: 'review' as const }
-    if (item.status === 'queued') return { ...stage, status: 'pending' as const }
-    return { ...stage, status: 'running' as const }
+    const label = translate(locale, stage.label)
+    if (index === -1) return { key: stage.key, label, status: 'skipped' as const }
+    if (item.status === 'succeeded') return { key: stage.key, label, status: 'done' as const }
+    if (index < currentIndex) return { key: stage.key, label, status: 'done' as const }
+    if (index > currentIndex) return { key: stage.key, label, status: 'pending' as const }
+    if (item.status === 'failed') return { key: stage.key, label, status: 'error' as const }
+    if (item.status === 'canceled') return { key: stage.key, label, status: 'canceled' as const }
+    if (item.status === 'awaiting_review') return { key: stage.key, label, status: 'review' as const }
+    if (item.status === 'queued') return { key: stage.key, label, status: 'pending' as const }
+    return { key: stage.key, label, status: 'running' as const }
   })
 }
 
@@ -154,11 +168,22 @@ export function elapsedSeconds(
   return Math.max(0, Math.floor((end - start) / 1000))
 }
 
-export function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
+export function formatElapsed(
+  seconds: number,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
+  if (seconds < 60) return translate(locale, '{seconds}s', { seconds })
   const minutes = Math.floor(seconds / 60)
   const remainder = seconds % 60
-  if (minutes < 60) return `${minutes}m ${remainder}s`
+  if (minutes < 60) {
+    return translate(locale, '{minutes}m {seconds}s', {
+      minutes,
+      seconds: remainder,
+    })
+  }
   const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
+  return translate(locale, '{hours}h {minutes}m', {
+    hours,
+    minutes: minutes % 60,
+  })
 }

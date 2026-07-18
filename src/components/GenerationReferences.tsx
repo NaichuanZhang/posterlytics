@@ -10,6 +10,8 @@ import {
   type KeyboardEvent,
   type SetStateAction,
 } from 'react'
+import { useI18n } from '../i18n/I18nProvider'
+import type { Translate } from '../lib/i18n'
 import {
   MAX_REFERENCE_CONTEXT_LENGTH,
   MAX_REFERENCE_IMAGES,
@@ -50,10 +52,11 @@ export function GenerationReferences({
   pendingReferences,
   onPendingReferencesChange,
   disabled = false,
-  contextLabel = 'Creative context',
-  contextPlaceholder = 'Audience, campaign goals, visual direction, required details, or anything the generator should preserve.',
+  contextLabel,
+  contextPlaceholder,
   contextHint,
 }: Props) {
+  const { formatNumber, t } = useI18n()
   const [rejections, setRejections] = useState<ReferenceRejection[]>([])
   const [urlInput, setUrlInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -72,6 +75,9 @@ export function GenerationReferences({
   const remainingSlots = Math.max(0, MAX_REFERENCE_IMAGES - totalImages)
   const isFull = remainingSlots === 0
   const isUnavailable = disabled || isFull
+  const resolvedContextLabel = contextLabel ?? t('Creative context')
+  const resolvedContextPlaceholder = contextPlaceholder
+    ?? t('Audience, campaign goals, visual direction, required details, or anything the generator should preserve.')
 
   useEffect(() => {
     if (!isUnavailable) return
@@ -188,25 +194,30 @@ export function GenerationReferences({
   return (
     <div className="generation-references">
       <div className="field">
-        <label htmlFor={contextId}>{contextLabel} <span className="hint">(optional)</span></label>
+        <label htmlFor={contextId}>
+          {resolvedContextLabel} <span className="hint">{t('(optional)')}</span>
+        </label>
         <textarea
           id={contextId}
           className="textarea"
           value={context}
           maxLength={MAX_REFERENCE_CONTEXT_LENGTH}
           disabled={disabled}
-          placeholder={contextPlaceholder}
+          placeholder={resolvedContextPlaceholder}
           onChange={(event) => onContextChange(event.target.value)}
         />
         <div className="hint">
           {contextHint ? `${contextHint} ` : ''}
-          {context.length.toLocaleString()} / {MAX_REFERENCE_CONTEXT_LENGTH.toLocaleString()} characters
+          {t('{current} / {maximum} characters', {
+            current: formatNumber(context.length),
+            maximum: formatNumber(MAX_REFERENCE_CONTEXT_LENGTH),
+          })}
         </div>
       </div>
 
       <div className="field" style={{ marginBottom: 0 }}>
         <div className="field-label" id={imageLabelId}>
-          Supporting images <span className="hint">(optional)</span>
+          {t('Supporting images')} <span className="hint">{t('(optional)')}</span>
         </div>
         <input
           ref={inputRef}
@@ -254,25 +265,30 @@ export function GenerationReferences({
             <span className="reference-dropzone-copy">
               <strong id={imageActionId}>
                 {disabled
-                  ? 'Image selection unavailable'
+                  ? t('Image selection unavailable')
                   : isFull
-                    ? `${MAX_REFERENCE_IMAGES} images added`
+                    ? t('{count} images added', { count: MAX_REFERENCE_IMAGES })
                     : isDragging
-                      ? 'Drop image to add'
-                      : 'Drop image or browse'}
+                      ? t('Drop image to add')
+                      : t('Drop image or browse')}
               </strong>
               <span id={imageStatusId}>
                 {disabled
-                  ? 'Wait for the current action to finish.'
+                  ? t('Wait for the current action to finish.')
                   : isFull
-                    ? 'Remove an image to add another.'
-                    : `${remainingSlots} ${remainingSlots === 1 ? 'slot' : 'slots'} available`}
+                    ? t('Remove an image to add another.')
+                    : t(
+                      remainingSlots === 1
+                        ? '{count} slot available'
+                        : '{count} slots available',
+                      { count: remainingSlots },
+                    )}
               </span>
             </span>
           </button>
 
           <div className={`reference-url-panel${isUnavailable ? ' is-disabled' : ''}`}>
-            <label htmlFor={urlInputId}>Image URL</label>
+            <label htmlFor={urlInputId}>{t('Image URL')}</label>
             <div className="reference-url-content">
               <span className="reference-dropzone-icon" aria-hidden="true">
                 <Link2 size={20} strokeWidth={2} />
@@ -296,8 +312,8 @@ export function GenerationReferences({
                 <button
                   type="button"
                   disabled={isUnavailable || !urlInput.trim()}
-                  aria-label="Add image URL"
-                  title="Add image URL"
+                  aria-label={t('Add image URL')}
+                  title={t('Add image URL')}
                   onClick={submitUrl}
                 >
                   <Plus size={16} strokeWidth={2} aria-hidden="true" />
@@ -307,14 +323,16 @@ export function GenerationReferences({
           </div>
         </div>
         <div className="hint" id={imageHintId}>
-          Up to {MAX_REFERENCE_IMAGES} public HTTPS JPEG, PNG, or WebP images, 10 MB each.
+          {t('Up to {count} public HTTPS JPEG, PNG, or WebP images, 10 MB each.', {
+            count: MAX_REFERENCE_IMAGES,
+          })}
         </div>
         {rejections.length > 0 && (
           <div className="reference-errors" id={imageErrorId} role="alert">
             <ul>
               {rejections.map((rejection, index) => (
                 <li key={`${rejection.kind}-${rejectionKey(rejection)}-${index}`}>
-                  {referenceRejectionMessage(rejection)}
+                  {referenceRejectionMessage(rejection, t)}
                 </li>
               ))}
             </ul>
@@ -393,13 +411,14 @@ function ReferenceTile({
   onError?: () => void
   onRemove: () => void
 }) {
+  const { t } = useI18n()
   return (
     <div className={`reference-tile is-${status}`}>
       <div className="reference-preview">
         {status === 'error' ? (
           <span className="reference-preview-status">
             <ImageOff size={18} aria-hidden="true" />
-            Preview unavailable
+            {t('Preview unavailable')}
           </span>
         ) : (
           <img
@@ -411,7 +430,10 @@ function ReferenceTile({
           />
         )}
         {status === 'loading' && (
-          <span className="reference-preview-loading" aria-label="Loading image preview">
+          <span
+            className="reference-preview-loading"
+            aria-label={t('Loading image preview')}
+          >
             <LoaderCircle size={17} aria-hidden="true" />
           </span>
         )}
@@ -422,8 +444,8 @@ function ReferenceTile({
         className="reference-remove"
         onClick={onRemove}
         disabled={disabled}
-        aria-label={`Remove ${name}`}
-        title={`Remove ${name}`}
+        aria-label={t('Remove {name}', { name })}
+        title={t('Remove {name}', { name })}
       >
         <X size={15} strokeWidth={2.5} aria-hidden="true" />
       </button>
@@ -455,29 +477,42 @@ function rejectionKey(rejection: ReferenceRejection): string {
   return rejection.kind === 'file' ? rejection.rejection.filename : rejection.rejection.value
 }
 
-function referenceRejectionMessage(rejection: ReferenceRejection): string {
+function referenceRejectionMessage(
+  rejection: ReferenceRejection,
+  t: Translate,
+): string {
   if (rejection.kind === 'file') {
     switch (rejection.rejection.reason) {
       case 'type':
-        return `${rejection.rejection.filename} must be a JPEG, PNG, or WebP image.`
+        return t('{name} must be a JPEG, PNG, or WebP image.', {
+          name: rejection.rejection.filename,
+        })
       case 'size':
-        return `${rejection.rejection.filename} must be larger than 0 bytes and no more than 10 MB.`
+        return t('{name} must be larger than 0 bytes and no more than 10 MB.', {
+          name: rejection.rejection.filename,
+        })
       case 'capacity':
-        return `${rejection.rejection.filename} was not added because the ${MAX_REFERENCE_IMAGES}-image limit was reached.`
+        return t('{name} was not added because the {count}-image limit was reached.', {
+          name: rejection.rejection.filename,
+          count: MAX_REFERENCE_IMAGES,
+        })
     }
   }
 
-  const value = rejection.rejection.value.trim() || 'The URL'
+  const value = rejection.rejection.value.trim() || t('The URL')
   switch (rejection.rejection.reason) {
     case 'invalid':
-      return `${value} is not a valid image URL.`
+      return t('{value} is not a valid image URL.', { value })
     case 'protocol':
-      return `${value} must use HTTPS.`
+      return t('{value} must use HTTPS.', { value })
     case 'credentials':
-      return `${value} cannot include a username or password.`
+      return t('{value} cannot include a username or password.', { value })
     case 'duplicate':
-      return `${value} has already been added.`
+      return t('{value} has already been added.', { value })
     case 'capacity':
-      return `${value} was not added because the ${MAX_REFERENCE_IMAGES}-image limit was reached.`
+      return t('{value} was not added because the {count}-image limit was reached.', {
+        value,
+        count: MAX_REFERENCE_IMAGES,
+      })
   }
 }

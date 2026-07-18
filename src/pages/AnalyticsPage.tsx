@@ -10,8 +10,10 @@ import { useToast } from '../components/ui/Toast'
 import { useCampaign } from '../hooks/useCampaign'
 import { useCampaignBreakdowns } from '../hooks/useCampaignBreakdowns'
 import { usePlacementStats } from '../hooks/usePlacementStats'
+import { useI18n } from '../i18n/I18nProvider'
 
 export function AnalyticsPage() {
+  const { formatNumber, t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
@@ -33,20 +35,26 @@ export function AnalyticsPage() {
     setRefreshing(true)
     await Promise.all([reload(), reloadBreakdowns()])
     setRefreshing(false)
-    notify('Analytics refreshed.', 'success')
+    notify(t('Analytics refreshed.'), 'success')
   }
 
   if (loading) {
     return (
-      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Analytics' }]}>
+      <AppShell breadcrumbs={[
+        { label: t('Campaigns'), to: '/' },
+        { label: t('Analytics') },
+      ]}>
         <Spinner full />
       </AppShell>
     )
   }
   if (!campaign) {
     return (
-      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Not found' }]}>
-        <InlineNotice tone="error">Campaign not found.</InlineNotice>
+      <AppShell breadcrumbs={[
+        { label: t('Campaigns'), to: '/' },
+        { label: t('Not found') },
+      ]}>
+        <InlineNotice tone="error">{t('Campaign not found.')}</InlineNotice>
       </AppShell>
     )
   }
@@ -65,9 +73,9 @@ export function AnalyticsPage() {
   return (
     <AppShell
       breadcrumbs={[
-        { label: 'Campaigns', to: '/' },
+        { label: t('Campaigns'), to: '/' },
         { label: campaign.product_name, to: `/campaigns/${campaign.id}` },
-        { label: 'Analytics' },
+        { label: t('Analytics') },
       ]}
       campaign={campaign}
       activeSection="analytics"
@@ -79,26 +87,26 @@ export function AnalyticsPage() {
           onClick={() => void refreshAll()}
         >
           <RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} aria-hidden="true" />
-          Refresh
+          {t('Refresh')}
         </button>
       )}
     >
       <header className="page-heading page-heading-compact">
         <div>
-          <h1>Analytics</h1>
-          <p>Placement traffic and audience composition.</p>
+          <h1>{t('Analytics')}</h1>
+          <p>{t('Placement traffic and audience composition.')}</p>
         </div>
       </header>
 
       {(statsError || breakdownsError) && (
         <InlineNotice tone="error">
-          <strong>Some analytics could not be loaded.</strong>
+          <strong>{t('Some analytics could not be loaded.')}</strong>
           <span>{statsError || breakdownsError}</span>
         </InlineNotice>
       )}
 
       {statsLoading ? (
-        <div className="metric-strip" aria-label="Loading metrics" aria-busy="true">
+        <div className="metric-strip" aria-label={t('Loading metrics')} aria-busy="true">
           {Array.from({ length: 3 }, (_, index) => (
             <div className="metric" key={index}>
               <Skeleton className="skeleton-line skeleton-line-short" />
@@ -107,23 +115,25 @@ export function AnalyticsPage() {
           ))}
         </div>
       ) : (
-        <section className="metric-strip" aria-label="Campaign summary">
-          <Metric label="Total visits" value={totals.visits} />
-          <Metric label="Unique visitors" value={totals.unique} />
-          <Metric label="Repeat visit share" value={`${returnRate}%`} />
+        <section className="metric-strip" aria-label={t('Campaign summary')}>
+          <Metric label={t('Total visits')} value={formatNumber(totals.visits)} />
+          <Metric label={t('Unique visitors')} value={formatNumber(totals.unique)} />
+          <Metric label={t('Repeat visit share')} value={`${formatNumber(returnRate)}%`} />
         </section>
       )}
       {!breakdownsLoading && !breakdownsError && (
         <p className="analytics-filter-note">
-          Bots filtered: <strong>{breakdowns.bots_filtered}</strong>
+          {t('Bots filtered: {count}', {
+            count: formatNumber(breakdowns.bots_filtered),
+          })}
         </p>
       )}
 
       <section className="analytics-table-section" aria-labelledby="placement-comparison-heading">
         <div className="section-heading">
           <div>
-            <h2 id="placement-comparison-heading">Placement comparison</h2>
-            <p>Traffic attributed to each minted link.</p>
+            <h2 id="placement-comparison-heading">{t('Placement comparison')}</h2>
+            <p>{t('Traffic attributed to each minted link.')}</p>
           </div>
         </div>
         {statsLoading ? <TableSkeleton /> : <StatsTable stats={stats} />}
@@ -132,12 +142,16 @@ export function AnalyticsPage() {
       <section className="audience-section" aria-labelledby="audience-heading">
         <div className="section-heading">
           <div>
-            <h2 id="audience-heading">Audience breakdown</h2>
-            <p>Visits grouped by device, operating system, and country.</p>
+            <h2 id="audience-heading">{t('Audience breakdown')}</h2>
+            <p>{t('Visits grouped by device, operating system, and country.')}</p>
           </div>
         </div>
         {breakdownsLoading ? (
-          <div className="breakdown-grid" aria-label="Loading audience breakdowns" aria-busy="true">
+          <div
+            className="breakdown-grid"
+            aria-label={t('Loading audience breakdowns')}
+            aria-busy="true"
+          >
             {Array.from({ length: 3 }, (_, index) => (
               <div className="breakdown-section" key={index}>
                 <Skeleton className="skeleton-line skeleton-line-title" />
@@ -149,9 +163,9 @@ export function AnalyticsPage() {
           </div>
         ) : (
           <div className="breakdown-grid">
-            <BreakdownCard title="Device" buckets={breakdowns.devices} />
-            <BreakdownCard title="Operating system" buckets={breakdowns.os} />
-            <BreakdownCard title="Country" buckets={breakdowns.countries} />
+            <BreakdownCard title={t('Device')} buckets={breakdowns.devices} />
+            <BreakdownCard title={t('Operating system')} buckets={breakdowns.os} />
+            <BreakdownCard title={t('Country')} buckets={breakdowns.countries} />
           </div>
         )}
       </section>
@@ -169,8 +183,13 @@ function Metric({ label, value }: { label: string; value: number | string }) {
 }
 
 function TableSkeleton() {
+  const { t } = useI18n()
   return (
-    <div className="table-skeleton" aria-label="Loading placement comparison" aria-busy="true">
+    <div
+      className="table-skeleton"
+      aria-label={t('Loading placement comparison')}
+      aria-busy="true"
+    >
       {Array.from({ length: 4 }, (_, index) => (
         <div key={index}>
           <Skeleton className="skeleton-line skeleton-line-title" />

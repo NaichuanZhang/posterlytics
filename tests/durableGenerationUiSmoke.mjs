@@ -58,6 +58,7 @@ try {
 
 async function testDesktop(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 1440, height: 960 },
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
@@ -144,6 +145,7 @@ async function testDesktop(browserInstance) {
 
 async function testMobile(browserInstance) {
   const context = await browserInstance.newContext({
+    locale: 'en-US',
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',

@@ -19,6 +19,7 @@ import {
 } from '../lib/generationActivity'
 import type { GenerationActivityItem } from '../lib/types'
 import { EmptyState, InlineNotice } from '../components/ui/Feedback'
+import { useI18n } from '../i18n/I18nProvider'
 
 interface Props {
   items: GenerationActivityItem[]
@@ -41,6 +42,7 @@ export function GenerationActivitySheet({
   onMarkAllRead,
   onRetry,
 }: Props) {
+  const { t } = useI18n()
   const sheetRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const [now, setNow] = useState(Date.now())
@@ -95,7 +97,7 @@ export function GenerationActivitySheet({
       <button
         type="button"
         className="activity-backdrop"
-        aria-label="Close generation activity"
+        aria-label={t('Close generation activity')}
         onClick={onClose}
       />
       <aside
@@ -107,21 +109,21 @@ export function GenerationActivitySheet({
       >
         <header className="activity-sheet-header">
           <div>
-            <span>Poster jobs</span>
-            <h2 id="activity-title">Generation activity</h2>
+            <span>{t('Poster jobs')}</span>
+            <h2 id="activity-title">{t('Generation activity')}</h2>
           </div>
           <div>
             {unreadCount > 0 && (
               <button type="button" className="button button-secondary button-small" onClick={onMarkAllRead}>
                 <CheckCheck size={14} aria-hidden="true" />
-                Mark all read
+                {t('Mark all read')}
               </button>
             )}
             <button
               ref={closeRef}
               type="button"
               className="icon-button"
-              aria-label="Close generation activity"
+              aria-label={t('Close generation activity')}
               onClick={onClose}
             >
               <X size={16} aria-hidden="true" />
@@ -132,39 +134,42 @@ export function GenerationActivitySheet({
         <div className="activity-sheet-body">
           {error && (
             <InlineNotice tone="error">
-              <strong>Activity could not refresh.</strong>
+              <strong>{t('Activity could not refresh.')}</strong>
               <span>{error}</span>
             </InlineNotice>
           )}
           {loading && items.length === 0 ? (
             <div className="activity-loading" aria-busy="true">
               <LoaderCircle size={18} className="generation-stage-spinner" aria-hidden="true" />
-              Loading generation activity
+              {t('Loading generation activity')}
             </div>
           ) : items.length === 0 ? (
             <EmptyState
               icon={<Clock3 size={22} />}
-              title="No generation activity"
-              description="Queued and completed poster jobs will appear here."
+              title={t('No generation activity')}
+              description={t('Queued and completed poster jobs will appear here.')}
             />
           ) : (
             <>
               <ActivityGroup
-                title="Active"
+                id="active"
+                title={t('Active')}
                 items={groups.active}
                 now={now}
                 onOpen={onOpen}
                 onRetry={onRetry}
               />
               <ActivityGroup
-                title="Unread"
+                id="unread"
+                title={t('Unread')}
                 items={groups.unread}
                 now={now}
                 onOpen={onOpen}
                 onRetry={onRetry}
               />
               <ActivityGroup
-                title="Recent"
+                id="recent"
+                title={t('Recent')}
                 items={groups.history}
                 now={now}
                 onOpen={onOpen}
@@ -179,23 +184,26 @@ export function GenerationActivitySheet({
 }
 
 function ActivityGroup({
+  id,
   title,
   items,
   now,
   onOpen,
   onRetry,
 }: {
+  id: string
   title: string
   items: GenerationActivityItem[]
   now: number
   onOpen: (item: GenerationActivityItem) => void
   onRetry: (item: GenerationActivityItem) => void
 }) {
+  const { locale, t } = useI18n()
   if (items.length === 0) return null
   return (
-    <section className="activity-group" aria-labelledby={`activity-${title.toLowerCase()}`}>
+    <section className="activity-group" aria-labelledby={`activity-${id}`}>
       <div className="activity-group-heading">
-        <h3 id={`activity-${title.toLowerCase()}`}>{title}</h3>
+        <h3 id={`activity-${id}`}>{title}</h3>
         <span>{items.length}</span>
       </div>
       <div className="activity-list">
@@ -208,16 +216,18 @@ function ActivityGroup({
               <ActivityIcon item={item} />
               <span className="activity-row-copy">
                 <strong>{item.campaign_name}</strong>
-                <span>{generationActivityLabel(item)}</span>
+                <span>{generationActivityLabel(item, locale)}</span>
                 <small>
-                  {formatElapsed(elapsedSeconds(item, now))}
+                  {formatElapsed(elapsedSeconds(item, now), locale)}
                   {item.status === 'retrying' || item.retry_count > 0
-                    ? ` · ${item.retry_count} ${item.retry_count === 1 ? 'retry' : 'retries'}`
+                    ? ` · ${t(item.retry_count === 1 ? '{count} retry' : '{count} retries', {
+                        count: item.retry_count,
+                      })}`
                     : ''}
                 </small>
               </span>
               {item.notification_id && !item.read_at && (
-                <span className="activity-unread-dot" aria-label="Unread" />
+                <span className="activity-unread-dot" aria-label={t('Unread')} />
               )}
             </button>
             {item.status === 'awaiting_review' && (
@@ -227,7 +237,7 @@ function ActivityGroup({
                 onClick={() => onOpen(item)}
               >
                 <BadgeCheck size={14} aria-hidden="true" />
-                Review assets
+                {t('Review assets')}
               </button>
             )}
             {canRetryGeneration(item) && (
@@ -237,7 +247,7 @@ function ActivityGroup({
                 onClick={() => onRetry(item)}
               >
                 <RotateCcw size={14} aria-hidden="true" />
-                Retry with same inputs
+                {t('Retry with same inputs')}
               </button>
             )}
           </article>

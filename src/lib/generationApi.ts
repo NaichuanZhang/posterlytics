@@ -1,5 +1,6 @@
 import { insforge } from './insforge'
 import { getDeviceColorScheme } from './colorScheme'
+import type { TranslationKey } from '../i18n/messages'
 import type {
   AssetSelectionMode,
   GenerationAsset,
@@ -10,8 +11,19 @@ import type {
   ReferenceImage,
 } from './types'
 import { normalizeGenerationActivity } from './generationActivity'
+import {
+  DEFAULT_LOCALE,
+  translate,
+  type SupportedLocale,
+} from './i18n'
 
 export type GenerationFunction = 'analyze' | 'designer' | 'hero'
+
+const GENERATION_FUNCTION_ERROR_KEYS: Record<GenerationFunction, TranslationKey> = {
+  analyze: 'Analyze failed',
+  designer: 'Designer failed',
+  hero: 'Image model failed',
+}
 
 export interface EnqueuedPosterGeneration {
   generation: PosterGeneration
@@ -24,6 +36,7 @@ export async function enqueuePosterGeneration(args: {
   referenceImages: ReferenceImage[]
   refreshWebsite: boolean
   assetSelectionMode: AssetSelectionMode
+  locale?: SupportedLocale
 }): Promise<EnqueuedPosterGeneration> {
   const { data, error } = await insforge.database.rpc('enqueue_poster_generation', {
     p_campaign_id: args.campaignId,
@@ -37,7 +50,7 @@ export async function enqueuePosterGeneration(args: {
 
   const result = rpcRow<EnqueuedPosterGeneration>(data)
   if (!result?.generation?.id || !result.job?.id) {
-    throw new Error('Generation could not be queued.')
+    throw new Error(translate(args.locale ?? DEFAULT_LOCALE, 'Generation could not be queued.'))
   }
   return result
 }
@@ -58,6 +71,7 @@ export async function createPosterGeneration(args: {
 
 export async function retryPosterGeneration(
   jobId: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<EnqueuedPosterGeneration> {
   const { data, error } = await insforge.database.rpc('retry_poster_generation', {
     p_job_id: jobId,
@@ -66,7 +80,7 @@ export async function retryPosterGeneration(
 
   const result = rpcRow<EnqueuedPosterGeneration>(data)
   if (!result?.generation?.id || !result.job?.id) {
-    throw new Error('Generation retry could not be queued.')
+    throw new Error(translate(locale, 'Generation retry could not be queued.'))
   }
   return result
 }
@@ -88,14 +102,17 @@ export async function markGenerationNotificationsRead(
   if (error) throw new Error(error.message)
 }
 
-export async function activatePosterGeneration(generationId: string): Promise<PosterGeneration> {
+export async function activatePosterGeneration(
+  generationId: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): Promise<PosterGeneration> {
   const { data, error } = await insforge.database.rpc('activate_poster_generation', {
     p_generation_id: generationId,
   })
   if (error) throw new Error(error.message)
 
   const generation = rpcRow<PosterGeneration>(data)
-  if (!generation?.id) throw new Error('Version could not be activated.')
+  if (!generation?.id) throw new Error(translate(locale, 'Version could not be activated.'))
   return generation
 }
 
@@ -143,6 +160,7 @@ export async function saveGenerationAssetSelection(
 export async function confirmGenerationAssetSelection(
   generationId: string,
   assetIds: string[],
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<EnqueuedPosterGeneration & { assets: GenerationAsset[] }> {
   const { data, error } = await insforge.database.rpc(
     'confirm_generation_asset_selection',
@@ -154,13 +172,14 @@ export async function confirmGenerationAssetSelection(
   if (error) throw new Error(error.message)
   const result = rpcRow<EnqueuedPosterGeneration & { assets: GenerationAsset[] }>(data)
   if (!result?.generation?.id || !result.job?.id) {
-    throw new Error('Asset selection could not be confirmed.')
+    throw new Error(translate(locale, 'Asset selection could not be confirmed.'))
   }
   return result
 }
 
 export async function cancelGenerationAssetReview(
   generationId: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<EnqueuedPosterGeneration> {
   const { data, error } = await insforge.database.rpc(
     'cancel_generation_asset_review',
@@ -169,7 +188,7 @@ export async function cancelGenerationAssetReview(
   if (error) throw new Error(error.message)
   const result = rpcRow<EnqueuedPosterGeneration>(data)
   if (!result?.generation?.id || !result.job?.id) {
-    throw new Error('Asset review could not be canceled.')
+    throw new Error(translate(locale, 'Asset review could not be canceled.'))
   }
   return result
 }
@@ -178,6 +197,7 @@ export async function invokeGenerationFunction(
   slug: GenerationFunction,
   campaignId: string,
   generationId: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ) {
   const body = {
     campaignId,
@@ -185,7 +205,11 @@ export async function invokeGenerationFunction(
     ...(slug === 'analyze' ? { colorScheme: getDeviceColorScheme() } : {}),
   }
   const { data, error } = await insforge.functions.invoke(slug, { body })
-  if (error) throw new Error(error.message ?? `${slug} failed`)
+  if (error) {
+    throw new Error(
+      error.message ?? translate(locale, GENERATION_FUNCTION_ERROR_KEYS[slug]),
+    )
+  }
   return data
 }
 

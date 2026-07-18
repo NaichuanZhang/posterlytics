@@ -32,6 +32,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlacements } from '../hooks/usePlacements'
 import { usePosterGenerations } from '../hooks/usePosterGenerations'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
+import { useI18n } from '../i18n/I18nProvider'
 import {
   activatePosterGeneration,
   enqueuePosterGeneration,
@@ -57,6 +58,7 @@ type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete'
 type MobileSection = 'versions' | 'create' | 'export'
 
 export function PosterEditorPage() {
+  const { locale, t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -178,15 +180,21 @@ export function PosterEditorPage() {
 
   if (loading) {
     return (
-      <AppShell mode="workspace" breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Loading' }]}>
+      <AppShell mode="workspace" breadcrumbs={[
+        { label: t('Campaigns'), to: '/' },
+        { label: t('Loading') },
+      ]}>
         <Spinner full />
       </AppShell>
     )
   }
   if (!campaign || !previewCampaign) {
     return (
-      <AppShell breadcrumbs={[{ label: 'Campaigns', to: '/' }, { label: 'Not found' }]}>
-        <InlineNotice tone="error">Campaign not found.</InlineNotice>
+      <AppShell breadcrumbs={[
+        { label: t('Campaigns'), to: '/' },
+        { label: t('Not found') },
+      ]}>
+        <InlineNotice tone="error">{t('Campaign not found.')}</InlineNotice>
       </AppShell>
     )
   }
@@ -208,6 +216,7 @@ export function PosterEditorPage() {
     instruction,
     pendingReferences,
     refreshWebsite: effectiveRefreshWebsite,
+    locale,
   })
   const showDesktopVersions = !isMobileWorkspace && (
     isVersionsDrawer ? versionsDrawerOpen : preferences.versionsPanelOpen
@@ -216,7 +225,7 @@ export function PosterEditorPage() {
   async function generateVersion() {
     if (!user || generating || uploadingInputs) return
     if (!pendingReferencesReady(pendingReferences)) {
-      setGenerationError('Remove any image URL that could not load, or wait for its preview to finish.')
+      setGenerationError(t('Remove any image URL that could not load, or wait for its preview to finish.'))
       return
     }
 
@@ -226,13 +235,19 @@ export function PosterEditorPage() {
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
 
     try {
-      uploaded = await materializeReferenceImages(user.id, campaignId, pendingReferences)
+      uploaded = await materializeReferenceImages(
+        user.id,
+        campaignId,
+        pendingReferences,
+        locale,
+      )
       const result = await enqueuePosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(instruction),
         referenceImages: uploaded,
         refreshWebsite: effectiveRefreshWebsite,
         assetSelectionMode: preferences.assetSelectionMode,
+        locale,
       })
       deliberateSelectionRef.current = false
       trackedJobRef.current = result.job.id
@@ -245,13 +260,13 @@ export function PosterEditorPage() {
           `/campaigns/${campaignId}/generations/${result.generation.id}/assets`,
         )
       } else {
-        notify('Generation started. Safe to leave Posterlytics.', 'success')
+        notify(t('Generation started. Safe to leave Posterlytics.'), 'success')
       }
     } catch (cause) {
       if (uploaded.length > 0) await deleteReferenceImages(uploaded)
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
-      notify('Generation could not be queued.', 'error')
+      notify(t('Generation could not be queued.'), 'error')
     } finally {
       setBusy(null)
     }
@@ -262,14 +277,14 @@ export function PosterEditorPage() {
     setBusy('activate')
     setGenerationError(null)
     try {
-      await activatePosterGeneration(generationId)
+      await activatePosterGeneration(generationId, locale)
       setSelectedGenerationId(generationId)
       await Promise.all([reload(), reloadGenerations()])
-      notify('Current poster version updated.', 'success')
+      notify(t('Current poster version updated.'), 'success')
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
-      notify('The selected version could not be restored.', 'error')
+      notify(t('The selected version could not be restored.'), 'error')
     } finally {
       setBusy(null)
     }
@@ -284,11 +299,14 @@ export function PosterEditorPage() {
         .eq('id', campaignId)
       if (error) throw new Error(error.message)
       await reload()
-      notify(status === 'published' ? 'Campaign published.' : 'Campaign moved to draft.', 'success')
+      notify(
+        status === 'published' ? t('Campaign published.') : t('Campaign moved to draft.'),
+        'success',
+      )
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
-      notify('Campaign status could not be updated.', 'error')
+      notify(t('Campaign status could not be updated.'), 'error')
     } finally {
       setBusy(null)
     }
@@ -297,21 +315,21 @@ export function PosterEditorPage() {
   function copyLink() {
     if (!selectedPlacement) return
     void navigator.clipboard?.writeText(buildViewUrl(selectedPlacement.code))
-    notify('Tracked link copied.', 'success')
+    notify(t('Tracked link copied.'), 'success')
   }
 
   async function deleteCampaign() {
     setBusy('delete')
     try {
       await remove()
-      notify('Campaign deleted.', 'success')
+      notify(t('Campaign deleted.'), 'success')
       navigate('/')
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
       setConfirmingDelete(false)
       setBusy(null)
-      notify('Campaign could not be deleted.', 'error')
+      notify(t('Campaign could not be deleted.'), 'error')
     }
   }
 
@@ -364,7 +382,7 @@ export function PosterEditorPage() {
       <div className="panel-heading">
         <div>
           <Sparkles size={16} aria-hidden="true" />
-          <h2 id="create-version-heading">Create next version</h2>
+          <h2 id="create-version-heading">{t('Create next version')}</h2>
         </div>
       </div>
       <GenerationReferences
@@ -375,9 +393,9 @@ export function PosterEditorPage() {
         pendingReferences={pendingReferences}
         onPendingReferencesChange={setPendingReferences}
         disabled={generationInputsDisabled}
-        contextLabel="What should change?"
-        contextPlaceholder="Make the headline larger, replace the product image, or adjust the mood."
-        contextHint="Everything else stays consistent."
+        contextLabel={t('What should change?')}
+        contextPlaceholder={t('Make the headline larger, replace the product image, or adjust the mood.')}
+        contextHint={t('Everything else stays consistent.')}
       />
       <AssetSelectionModeControl
         value={preferences.assetSelectionMode}
@@ -392,7 +410,7 @@ export function PosterEditorPage() {
           disabled={generationInputsDisabled || firstVersion}
           onChange={(event) => setRefreshWebsite(event.target.checked)}
         />
-        <span>Re-read website before generating</span>
+        <span>{t('Re-read website before generating')}</span>
       </label>
       <GenerationInputsReview
         preflight={generationPreflight}
@@ -406,10 +424,10 @@ export function PosterEditorPage() {
       >
         <Sparkles size={15} aria-hidden="true" />
         {uploadingInputs
-          ? 'Uploading inputs'
+          ? t('Uploading inputs')
           : generating
-            ? 'Generation started'
-            : 'Generate version'}
+            ? t('Generation started')
+            : t('Generate version')}
       </button>
       {generationError && <InlineNotice tone="error">{generationError}</InlineNotice>}
     </section>
@@ -420,15 +438,15 @@ export function PosterEditorPage() {
       <div className="panel-heading">
         <div>
           <MapPin size={16} aria-hidden="true" />
-          <h2 id="export-heading">Placement & export</h2>
+          <h2 id="export-heading">{t('Placement & export')}</h2>
         </div>
       </div>
       {placements.length === 0 ? (
-        <p className="panel-empty">Preparing the primary placement.</p>
+        <p className="panel-empty">{t('Preparing the primary placement.')}</p>
       ) : (
         <>
           <div className="field">
-            <label htmlFor="placement-select">Placement</label>
+            <label htmlFor="placement-select">{t('Placement')}</label>
             <select
               id="placement-select"
               className="input"
@@ -441,28 +459,32 @@ export function PosterEditorPage() {
             </select>
           </div>
           {selectedGeneration && (
-            <p className="selection-note">Exporting version {selectedGeneration.version_number ?? '-'}</p>
+            <p className="selection-note">
+              {t('Exporting version {number}', {
+                number: selectedGeneration.version_number ?? '-',
+              })}
+            </p>
           )}
           <div className="inspector-actions">
             {selectedPlacement && (
               <PosterExportButton
                 campaign={previewCampaign}
                 placement={selectedPlacement}
-                label="Download poster"
+                label={t('Download poster')}
                 versionNumber={selectedGeneration?.version_number ?? undefined}
               />
             )}
             <button type="button" className="button button-secondary button-small" onClick={copyLink}>
               <Copy size={15} aria-hidden="true" />
-              Copy tracked link
+              {t('Copy tracked link')}
             </button>
             <Link to={`/campaigns/${campaign.id}/placements`} className="button button-secondary button-small">
               <MapPin size={15} aria-hidden="true" />
-              Manage placements
+              {t('Manage placements')}
             </Link>
             <Link to={`/campaigns/${campaign.id}/analytics`} className="button button-secondary button-small">
               <BarChart3 size={15} aria-hidden="true" />
-              View analytics
+              {t('View analytics')}
             </Link>
           </div>
         </>
@@ -480,7 +502,7 @@ export function PosterEditorPage() {
     <AppShell
       mode="workspace"
       breadcrumbs={[
-        { label: 'Campaigns', to: '/' },
+        { label: t('Campaigns'), to: '/' },
         { label: campaign.product_name },
       ]}
       campaign={campaign}
@@ -490,9 +512,9 @@ export function PosterEditorPage() {
           <button
             type="button"
             className={`toolbar-icon${versionsActive ? ' is-active' : ''}`}
-            aria-label="Toggle versions panel"
+            aria-label={t('Toggle versions panel')}
             aria-pressed={versionsActive}
-            data-tooltip="Versions"
+            data-tooltip={t('Versions')}
             onClick={toggleVersions}
           >
             <PanelLeft size={17} aria-hidden="true" />
@@ -500,9 +522,9 @@ export function PosterEditorPage() {
           <button
             type="button"
             className={`toolbar-icon inspector-toggle${preferences.inspectorPanelOpen ? ' is-active' : ''}`}
-            aria-label="Toggle inspector"
+            aria-label={t('Toggle inspector')}
             aria-pressed={preferences.inspectorPanelOpen}
-            data-tooltip="Inspector"
+            data-tooltip={t('Inspector')}
             onClick={() => updatePreferences({ inspectorPanelOpen: !preferences.inspectorPanelOpen })}
           >
             <PanelRight size={17} aria-hidden="true" />
@@ -515,22 +537,26 @@ export function PosterEditorPage() {
             onClick={() => void setStatus(published ? 'draft' : 'published')}
           >
             {published ? <EyeOff size={15} aria-hidden="true" /> : <Send size={15} aria-hidden="true" />}
-            <span>{published ? 'Unpublish' : 'Publish'}</span>
+            <span>{published ? t('Unpublish') : t('Publish')}</span>
           </button>
           <div className="toolbar-confirm-wrap">
             <button
               type="button"
               className="toolbar-icon toolbar-icon-danger"
-              aria-label="Delete campaign"
-              data-tooltip="Delete campaign"
+              aria-label={t('Delete campaign')}
+              data-tooltip={t('Delete campaign')}
               onClick={() => setConfirmingDelete(true)}
             >
               <Trash2 size={16} aria-hidden="true" />
             </button>
             {confirmingDelete && (
-              <div className="toolbar-confirmation" role="alertdialog" aria-label="Confirm campaign deletion">
-                <strong>Delete this campaign?</strong>
-                <span>All versions and placements will be removed.</span>
+              <div
+                className="toolbar-confirmation"
+                role="alertdialog"
+                aria-label={t('Confirm campaign deletion')}
+              >
+                <strong>{t('Delete this campaign?')}</strong>
+                <span>{t('All versions and placements will be removed.')}</span>
                 <div>
                   <button
                     type="button"
@@ -539,12 +565,12 @@ export function PosterEditorPage() {
                     onClick={() => void deleteCampaign()}
                   >
                     <Trash2 size={14} aria-hidden="true" />
-                    {busy === 'delete' ? 'Deleting' : 'Delete'}
+                    {busy === 'delete' ? t('Deleting') : t('Delete')}
                   </button>
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label="Cancel deletion"
+                    aria-label={t('Cancel deletion')}
                     onClick={() => setConfirmingDelete(false)}
                   >
                     <X size={15} aria-hidden="true" />
@@ -569,7 +595,7 @@ export function PosterEditorPage() {
               <button
                 type="button"
                 className="drawer-backdrop"
-                aria-label="Close versions panel"
+                aria-label={t('Close versions panel')}
                 onClick={() => setVersionsDrawerOpen(false)}
               />
             )}
@@ -578,7 +604,7 @@ export function PosterEditorPage() {
                 <button
                   type="button"
                   className="panel-close"
-                  aria-label="Close versions panel"
+                  aria-label={t('Close versions panel')}
                   onClick={() => setVersionsDrawerOpen(false)}
                 >
                   <X size={15} aria-hidden="true" />
@@ -592,8 +618,8 @@ export function PosterEditorPage() {
         <section className="editor-canvas-column">
           {!published && (
             <div className="draft-banner">
-              <span>Draft</span>
-              Scans open an unpublished page until this campaign is published.
+              <span>{t('Draft')}</span>
+              {t('Scans open an unpublished page until this campaign is published.')}
             </div>
           )}
           {campaignActivity && (
@@ -605,7 +631,7 @@ export function PosterEditorPage() {
                   to={`/campaigns/${campaignId}/generations/${campaignActivity.generation_id}/assets`}
                 >
                   <BadgeCheck size={14} aria-hidden="true" />
-                  Review assets
+                  {t('Review assets')}
                 </Link>
               ) : activeGenerations[0] && (
                 <button
@@ -613,7 +639,7 @@ export function PosterEditorPage() {
                   className="button button-secondary button-small"
                   onClick={() => setDetailsGeneration(activeGenerations[0])}
                 >
-                  Generation details
+                  {t('Generation details')}
                 </button>
               )}
             </div>
@@ -623,18 +649,21 @@ export function PosterEditorPage() {
             code={previewCode}
             zoom={preferences.zoom}
             versionLabel={selectedGeneration
-              ? `Version ${selectedGeneration.version_number ?? '-'}`
-              : 'Current poster'}
+              ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
+              : t('Current poster')}
             onZoomChange={(zoom) => updatePreferences({ zoom })}
           />
 
           {isMobileWorkspace && (
             <div className="mobile-workspace-panels">
-              <div className="segmented-control mobile-workspace-tabs" aria-label="Editor sections">
+              <div
+                className="segmented-control mobile-workspace-tabs"
+                aria-label={t('Editor sections')}
+              >
                 {([
-                  ['versions', 'Versions'],
-                  ['create', 'Create'],
-                  ['export', 'Export'],
+                  ['versions', t('Versions')],
+                  ['create', t('Create')],
+                  ['export', t('Export')],
                 ] as Array<[MobileSection, string]>).map(([section, label]) => (
                   <button
                     key={section}

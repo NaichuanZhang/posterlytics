@@ -1,5 +1,7 @@
 import { AlertTriangle, Check, History, ListTree, RotateCcw } from 'lucide-react'
 import type { GenerationActivityItem, PosterGeneration } from '../lib/types'
+import { useI18n } from '../i18n/I18nProvider'
+import type { Translate } from '../lib/i18n'
 import { DurableGenerationStatus } from './DurableGenerationStatus'
 import { Skeleton } from './ui/Feedback'
 
@@ -34,6 +36,7 @@ export function PosterVersionHistory({
   onReview,
   onRetry,
 }: Props) {
+  const { formatDate, t } = useI18n()
   const activeGeneration = activeGenerations[0] ?? null
   const activeActivity = activeGeneration
     ? activities.find((item) => item.generation_id === activeGeneration.id) ?? null
@@ -44,7 +47,7 @@ export function PosterVersionHistory({
       <div className="panel-heading">
         <div>
           <History size={16} aria-hidden="true" />
-          <h2 id="versions-heading">Versions</h2>
+          <h2 id="versions-heading">{t('Versions')}</h2>
         </div>
         <span>{generations.length}</span>
       </div>
@@ -58,13 +61,13 @@ export function PosterVersionHistory({
             onClick={() => onReview(activeGeneration)}
           >
             <ListTree size={14} aria-hidden="true" />
-            Generation details
+            {t('Generation details')}
           </button>
         </div>
       )}
 
       {loading ? (
-        <div className="version-loading" aria-label="Loading versions" aria-busy="true">
+        <div className="version-loading" aria-label={t('Loading versions')} aria-busy="true">
           {Array.from({ length: 3 }, (_, index) => (
             <div key={index}>
               <Skeleton className="version-skeleton-image" />
@@ -78,9 +81,9 @@ export function PosterVersionHistory({
       ) : error ? (
         <p className="panel-error" role="alert">{error}</p>
       ) : generations.length === 0 ? (
-        <p className="panel-empty">The first completed poster will appear here.</p>
+        <p className="panel-empty">{t('The first completed poster will appear here.')}</p>
       ) : (
-        <div className="version-list" aria-label="Poster versions">
+        <div className="version-list" aria-label={t('Poster versions')}>
           {generations.map((generation) => {
             const selected = selectedGeneration?.id === generation.id
             const current = currentGenerationId === generation.id
@@ -95,20 +98,33 @@ export function PosterVersionHistory({
                 {generation.hero_image_url ? (
                   <img
                     src={generation.hero_image_url}
-                    alt={`Version ${generation.version_number ?? ''} poster thumbnail`}
+                    alt={t('Version {number} poster thumbnail', {
+                      number: generation.version_number ?? '',
+                    })}
                   />
                 ) : (
                   <span className="version-image-placeholder" aria-hidden="true" />
                 )}
                 <span className="version-row-copy">
-                  <strong>Version {generation.version_number ?? '-'}</strong>
+                  <strong>{t('Version {number}', {
+                    number: generation.version_number ?? '-',
+                  })}</strong>
                   <time dateTime={generation.completed_at ?? generation.created_at}>
-                    {formatVersionDate(generation.completed_at ?? generation.created_at)}
+                    {formatDate(generation.completed_at ?? generation.created_at, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
                   </time>
-                  <span>{generation.generation_mode === 'website_refresh' ? 'Site refreshed' : 'Iteration'}</span>
+                  <span>
+                    {generation.generation_mode === 'website_refresh'
+                      ? t('Site refreshed')
+                      : t('Iteration')}
+                  </span>
                 </span>
                 {current && (
-                  <span className="version-current" aria-label="Current version">
+                  <span className="version-current" aria-label={t('Current version')}>
                     <Check size={12} aria-hidden="true" />
                   </span>
                 )}
@@ -120,9 +136,11 @@ export function PosterVersionHistory({
 
       {selectedGeneration && (
         <div className="selected-version">
-          <span>Selected</span>
-          <strong>Version {selectedGeneration.version_number ?? '-'}</strong>
-          <p>{selectedGeneration.instruction || 'Initial website-based poster'}</p>
+          <span>{t('Selected')}</span>
+          <strong>{t('Version {number}', {
+            number: selectedGeneration.version_number ?? '-',
+          })}</strong>
+          <p>{selectedGeneration.instruction || t('Initial website-based poster')}</p>
           <button
             type="button"
             className="button button-secondary button-small"
@@ -132,12 +150,12 @@ export function PosterVersionHistory({
             {currentGenerationId === selectedGeneration.id ? (
               <>
                 <Check size={14} aria-hidden="true" />
-                Current version
+                {t('Current version')}
               </>
             ) : (
               <>
                 <RotateCcw size={14} aria-hidden="true" />
-                {activating ? 'Restoring' : 'Use this version'}
+                {activating ? t('Restoring') : t('Use this version')}
               </>
             )}
           </button>
@@ -147,7 +165,7 @@ export function PosterVersionHistory({
             onClick={() => onReview(selectedGeneration)}
           >
             <ListTree size={14} aria-hidden="true" />
-            Generation details
+            {t('Generation details')}
           </button>
         </div>
       )}
@@ -157,7 +175,7 @@ export function PosterVersionHistory({
           <summary>
             <span>
               <AlertTriangle size={14} aria-hidden="true" />
-              Incomplete attempts
+              {t('Incomplete attempts')}
             </span>
             <strong>{failedGenerations.length}</strong>
           </summary>
@@ -172,18 +190,23 @@ export function PosterVersionHistory({
                   <span>
                     <strong>
                       {generation.status === 'canceled'
-                        ? 'Asset review canceled'
-                        : failureStageLabel(generation.failure_stage)}
+                        ? t('Asset review canceled')
+                        : failureStageLabel(generation.failure_stage, t)}
                     </strong>
                     <time dateTime={generation.failed_at ?? generation.updated_at}>
-                      {formatVersionDate(generation.failed_at ?? generation.updated_at)}
+                      {formatDate(generation.failed_at ?? generation.updated_at, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
                     </time>
                   </span>
                   <small>
                     {generation.failure_message || (
                       generation.status === 'canceled'
-                        ? 'Canceled before poster generation.'
-                        : 'Generation did not complete.'
+                        ? t('Canceled before poster generation.')
+                        : t('Generation did not complete.')
                     )}
                   </small>
                   <ListTree size={14} aria-hidden="true" />
@@ -200,7 +223,7 @@ export function PosterVersionHistory({
                     }}
                   >
                     <RotateCcw size={13} aria-hidden="true" />
-                    Retry with same inputs
+                    {t('Retry with same inputs')}
                   </button>
                 )}
               </div>
@@ -212,20 +235,14 @@ export function PosterVersionHistory({
   )
 }
 
-function failureStageLabel(stage: PosterGeneration['failure_stage']) {
-  if (stage === 'analyze') return 'Analyze failed'
-  if (stage === 'assets') return 'Asset selection failed'
-  if (stage === 'designer') return 'Designer failed'
-  if (stage === 'hero') return 'Image model failed'
-  if (stage === 'complete') return 'Completion failed'
-  return 'Generation failed'
-}
-
-function formatVersionDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(new Date(value))
+function failureStageLabel(
+  stage: PosterGeneration['failure_stage'],
+  t: Translate,
+) {
+  if (stage === 'analyze') return t('Analyze failed')
+  if (stage === 'assets') return t('Asset selection failed')
+  if (stage === 'designer') return t('Designer failed')
+  if (stage === 'hero') return t('Image model failed')
+  if (stage === 'complete') return t('Completion failed')
+  return t('Generation failed')
 }
