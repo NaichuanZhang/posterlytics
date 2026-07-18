@@ -8,11 +8,12 @@ import type {
   TraceImageSource,
 } from './types'
 
-export const TRACE_STAGE_ORDER: GenerationTraceStage[] = ['hero', 'designer', 'analyze']
+export const TRACE_STAGE_ORDER: GenerationTraceStage[] = ['hero', 'designer', 'assets', 'analyze']
 
 export const TRACE_STAGE_LABELS: Record<GenerationTraceStage, string> = {
   hero: 'Image model',
   designer: 'Designer',
+  assets: 'Assets',
   analyze: 'Analyze',
 }
 
@@ -39,7 +40,8 @@ export function generationTraceAvailability(
   traces: readonly GenerationStageTrace[],
 ): GenerationTraceAvailability {
   if (generation.trace_schema_version === null) return 'legacy'
-  if (generation.trace_incomplete || traces.length !== 3) return 'incomplete'
+  const expectedTraceCount = generation.trace_schema_version >= 2 ? 4 : 3
+  if (generation.trace_incomplete || traces.length !== expectedTraceCount) return 'incomplete'
   if (
     (generation.status === 'ready' || generation.status === 'failed')
     && traces.some((trace) => trace.status === 'pending' || trace.status === 'running')

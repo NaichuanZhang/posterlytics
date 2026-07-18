@@ -6,6 +6,7 @@ import {
   type BackendClient,
 } from './_shared.ts';
 import { runAnalyzeStage } from './analyze.ts';
+import { runAssetSelectionStage } from './_assetSelection.ts';
 import { runDesignerStage } from './designer.ts';
 import { runHeroStage } from './hero.ts';
 import {
@@ -32,12 +33,19 @@ interface GenerationState {
   id: string;
   status: string;
   scenario: string;
+  trace_schema_version: number | null;
 }
 
 interface WorkerResult {
   job_id: string;
   stage: WorkerStage;
-  result: 'advanced' | 'completed' | 'retrying' | 'failed' | 'lease_recovery';
+  result:
+    | 'advanced'
+    | 'awaiting_review'
+    | 'completed'
+    | 'retrying'
+    | 'failed'
+    | 'lease_recovery';
   detail?: string;
 }
 
@@ -104,7 +112,11 @@ async function processClaimedJob(
       client,
       workerId,
       job,
-      nextWorkerStage(job.stage, generation.scenario),
+      nextWorkerStage(
+        job.stage,
+        generation.scenario,
+        generation.trace_schema_version ?? 1,
+      ),
     );
   }
   if (traceStatus === 'failed') {
@@ -129,6 +141,12 @@ async function processClaimedJob(
       response = await runAnalyzeStage({
         ...context,
         colorScheme: job.color_scheme,
+      });
+    } else if (job.stage === 'assets') {
+      response = await runAssetSelectionStage({
+        ...context,
+        jobId: job.id,
+        workerId,
       });
     } else if (job.stage === 'designer') {
       response = await runDesignerStage(context);
@@ -157,12 +175,23 @@ async function processClaimedJob(
       retryable: false,
     });
   }
+  if (job.stage === 'assets' && refreshed.status === 'reviewing') {
+    return {
+      job_id: job.id,
+      stage: job.stage,
+      result: 'awaiting_review',
+    };
+  }
 
   return advance(
     client,
     workerId,
     job,
-    nextWorkerStage(job.stage, refreshed.scenario),
+    nextWorkerStage(
+      job.stage,
+      refreshed.scenario,
+      refreshed.trace_schema_version ?? 1,
+    ),
   );
 }
 
@@ -219,7 +248,7 @@ async function loadGeneration(
 ): Promise<GenerationState | null> {
   const { data, error } = await client.database
     .from('poster_generations')
-    .select('id, status, scenario')
+    .select('id, status, scenario, trace_schema_version')
     .eq('id', job.generation_id)
     .eq('campaign_id', job.campaign_id)
     .eq('user_id', job.user_id)

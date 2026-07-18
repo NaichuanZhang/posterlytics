@@ -50,6 +50,7 @@ async function testDeployedWorkerReconciliation() {
     status: 'ready',
     generation_mode: 'iteration',
     scenario: 'event',
+    trace_schema_version: 1,
     hero_image_url: 'https://example.com/already-ready.png',
     hero_image_key: 'poster/branch-smoke/already-ready.png',
     completed_at: new Date().toISOString(),
@@ -168,7 +169,7 @@ async function testRetryAndCompletionLifecycle() {
   assert.equal(product.job.color_scheme, 'dark')
   assert.equal(
     await count('generation_stage_traces', 'generation_id', product.generation.id),
-    3,
+    4,
   )
 
   const blockedWrite = await owner.database
@@ -271,7 +272,7 @@ async function testRetryAndCompletionLifecycle() {
     (await traces(product.generation.id))
       .filter((row) => row.stage !== 'analyze')
       .map((row) => row.status),
-    ['skipped', 'skipped'],
+    ['skipped', 'skipped', 'skipped'],
   )
 
   const failureNotifications = await ok(admin.database
@@ -354,11 +355,42 @@ async function testRetryAndCompletionLifecycle() {
   const advanced = rpcRow(await ok(admin.database.rpc('advance_generation_job', {
     p_job_id: event.job.id,
     p_worker_id: 'branch-event-analyze',
-    p_next_stage: 'hero',
+    p_next_stage: 'assets',
   })))
   assert.equal(advanced.status, 'queued')
-  assert.equal(advanced.stage, 'hero')
+  assert.equal(advanced.stage, 'assets')
   assert.equal(advanced.attempt_count, 0)
+
+  const eventAssets = only(await claim('branch-event-assets', 1))
+  assert.equal(eventAssets.id, event.job.id)
+  assert.equal(eventAssets.stage, 'assets')
+  await updateTrace(event.generation.id, 'assets', {
+    status: 'running',
+    started_at: new Date().toISOString(),
+  })
+  await ok(admin.database.rpc('replace_generation_assets_for_worker', {
+    p_generation_id: event.generation.id,
+    p_user_id: ownerRow.id,
+    p_assets: [],
+  }))
+  await ok(admin.database.rpc('complete_generation_asset_selection_for_worker', {
+    p_generation_id: event.generation.id,
+    p_user_id: ownerRow.id,
+    p_asset_ids: [],
+    p_reasons: {},
+    p_method: 'rules_fallback',
+  }))
+  await updateTrace(event.generation.id, 'assets', {
+    status: 'succeeded',
+    completed_at: new Date().toISOString(),
+  })
+  const assetsAdvanced = rpcRow(await ok(admin.database.rpc('advance_generation_job', {
+    p_job_id: event.job.id,
+    p_worker_id: 'branch-event-assets',
+    p_next_stage: 'hero',
+  })))
+  assert.equal(assetsAdvanced.status, 'queued')
+  assert.equal(assetsAdvanced.stage, 'hero')
 
   const eventHero = only(await claim('branch-event-hero', 1))
   assert.equal(eventHero.id, event.job.id)

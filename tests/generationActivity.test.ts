@@ -38,6 +38,10 @@ function activity(
     scenario: 'product',
     instruction: null,
     hero_image_url: null,
+    asset_selection_mode: null,
+    asset_selection_status: null,
+    asset_selection_method: null,
+    asset_selection_completed_at: null,
     generation_created_at: '2026-07-17T20:00:00.000Z',
     notification_id: null,
     notification_outcome: null,
@@ -64,6 +68,7 @@ test('durable stages mark completed, current, pending, and skipped work', () => 
     deriveGenerationStages(activity()).map(({ key, status }) => [key, status]),
     [
       ['analyze', 'done'],
+      ['assets', 'skipped'],
       ['designer', 'running'],
       ['hero', 'pending'],
     ],
@@ -77,13 +82,35 @@ test('durable stages mark completed, current, pending, and skipped work', () => 
     })).map(({ key, status }) => [key, status]),
     [
       ['analyze', 'skipped'],
+      ['assets', 'skipped'],
       ['designer', 'skipped'],
       ['hero', 'pending'],
     ],
   )
   assert.equal(
-    deriveGenerationStages(activity({ status: 'failed', stage: 'hero' }))[2].status,
+    deriveGenerationStages(activity({ status: 'failed', stage: 'hero' }))[3].status,
     'error',
+  )
+})
+
+test('asset review is active, directly labeled, and never represented as a running stage', () => {
+  const review = activity({
+    status: 'awaiting_review',
+    stage: 'assets',
+    generation_status: 'reviewing',
+    asset_selection_mode: 'editor',
+    asset_selection_status: 'pending',
+  })
+  assert.equal(activityForCampaign([review], 'campaign-1'), review)
+  assert.equal(generationActivityLabel(review), 'Assets ready for review')
+  assert.deepEqual(
+    deriveGenerationStages(review).map(({ key, status }) => [key, status]),
+    [
+      ['analyze', 'done'],
+      ['assets', 'review'],
+      ['designer', 'pending'],
+      ['hero', 'pending'],
+    ],
   )
 })
 

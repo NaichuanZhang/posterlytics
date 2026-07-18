@@ -1,4 +1,4 @@
-export type WorkerStage = 'analyze' | 'designer' | 'hero';
+export type WorkerStage = 'analyze' | 'assets' | 'designer' | 'hero';
 
 export interface WorkerFailure {
   code: string;
@@ -9,8 +9,13 @@ export interface WorkerFailure {
 export function nextWorkerStage(
   stage: WorkerStage,
   scenario: unknown,
+  traceSchemaVersion = 1,
 ): WorkerStage | null {
-  if (stage === 'analyze') return scenario === 'event' ? 'hero' : 'designer';
+  if (stage === 'analyze') {
+    if (traceSchemaVersion >= 2) return 'assets';
+    return scenario === 'event' ? 'hero' : 'designer';
+  }
+  if (stage === 'assets') return scenario === 'event' ? 'hero' : 'designer';
   if (stage === 'designer') return 'hero';
   return null;
 }

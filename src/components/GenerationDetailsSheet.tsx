@@ -8,6 +8,7 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchGenerationAssets } from '../lib/generationApi'
 import { fetchGenerationStageTraces } from '../lib/generationTraceApi'
 import {
   generationTraceAvailability,
@@ -17,6 +18,7 @@ import {
   TRACE_STAGE_ORDER,
 } from '../lib/generationTraces'
 import type {
+  GenerationAsset,
   GenerationStageTrace,
   GenerationTraceStage,
   ModelCallTrace,
@@ -36,6 +38,7 @@ export function GenerationDetailsSheet({
   onClose,
 }: Props) {
   const [traces, setTraces] = useState<GenerationStageTrace[]>([])
+  const [generationAssets, setGenerationAssets] = useState<GenerationAsset[]>([])
   const [loading, setLoading] = useState(generation.trace_schema_version !== null)
   const [error, setError] = useState<string | null>(null)
   const [stage, setStage] = useState<GenerationTraceStage>('hero')
@@ -53,10 +56,16 @@ export function GenerationDetailsSheet({
     [generation, parent],
   )
   const activeTrace = traces.find((trace) => trace.stage === stage) ?? null
+  const stageOrder = generation.trace_schema_version !== null
+    && generation.trace_schema_version >= 2
+    ? TRACE_STAGE_ORDER
+    : TRACE_STAGE_ORDER.filter((key) => key !== 'assets')
   const availability = error
     ? 'incomplete'
     : generationTraceAvailability(generation, traces)
-  const assets = activeTrace?.attached_images
+  const assets = (stage === 'assets'
+    ? activeTrace?.candidate_images
+    : activeTrace?.attached_images)
     ?? (availability === 'legacy' && stage === 'hero' ? legacyAssets : [])
 
   useEffect(() => {
@@ -69,9 +78,15 @@ export function GenerationDetailsSheet({
 
     async function refreshTraces() {
       try {
-        const rows = await fetchGenerationStageTraces(generation.id)
+        const [rows, assetRows] = await Promise.all([
+          fetchGenerationStageTraces(generation.id),
+          generation.trace_schema_version !== null && generation.trace_schema_version >= 2
+            ? fetchGenerationAssets(generation.id)
+            : Promise.resolve([]),
+        ])
         if (!cancelled) {
           setTraces(rows)
+          setGenerationAssets(assetRows)
           setError(null)
         }
       } catch (cause) {
@@ -171,6 +186,8 @@ export function GenerationDetailsSheet({
             <span>
               {generation.status === 'failed'
                 ? 'Failed attempt'
+                : generation.status === 'canceled'
+                  ? 'Canceled attempt'
                 : generationRunning
                   ? 'Generation in progress'
                   : `Version ${generation.version_number ?? '-'}`}
@@ -203,6 +220,17 @@ export function GenerationDetailsSheet({
                 <dt>Mode</dt>
                 <dd>{generation.generation_mode === 'website_refresh' ? 'Website refresh' : 'Iteration'}</dd>
               </div>
+              {generation.asset_selection_mode && (
+                <div>
+                  <dt>Assets</dt>
+                  <dd>
+                    {generation.asset_selection_mode === 'editor' ? 'Editor' : 'Yolo'}
+                    {generation.asset_selection_method
+                      ? ` · ${formatSelectionMethod(generation.asset_selection_method)}`
+                      : ''}
+                  </dd>
+                </div>
+              )}
             </dl>
             {generation.status === 'failed' && (
               <div className="generation-failure-summary">
@@ -236,7 +264,7 @@ export function GenerationDetailsSheet({
           )}
 
           <div className="generation-detail-tabs" role="tablist" aria-label="Generation stages">
-            {TRACE_STAGE_ORDER.map((key) => {
+            {stageOrder.map((key) => {
               const trace = traces.find((item) => item.stage === key)
               return (
                 <button
@@ -267,6 +295,8 @@ export function GenerationDetailsSheet({
               onSelectAsset={setSelectedAsset}
               legacy={availability === 'legacy'}
               copied={copied}
+              generation={generation}
+              generationAssets={generationAssets}
               onCopyManifest={(call) => void copyManifest(call)}
             />
           )}
@@ -280,7 +310,7 @@ export function GenerationDetailsSheet({
 }
 
 function isRunningGeneration(generation: PosterGeneration): boolean {
-  return ['created', 'analyzing', 'designing', 'painting'].includes(generation.status)
+  return ['created', 'analyzing', 'reviewing', 'designing', 'painting'].includes(generation.status)
 }
 
 function StageTraceView({
@@ -290,6 +320,8 @@ function StageTraceView({
   onSelectAsset,
   legacy,
   copied,
+  generation,
+  generationAssets,
   onCopyManifest,
 }: {
   trace: GenerationStageTrace | null
@@ -298,6 +330,8 @@ function StageTraceView({
   onSelectAsset: (asset: TraceImageAsset) => void
   legacy: boolean
   copied: string | null
+  generation: PosterGeneration
+  generationAssets: GenerationAsset[]
   onCopyManifest: (call: ModelCallTrace) => void
 }) {
   if (!trace && !legacy) {
@@ -313,9 +347,23 @@ function StageTraceView({
         </div>
       )}
 
+      {trace?.stage === 'assets' && (
+        <AssetSelectionAudit
+          generation={generation}
+          assets={generationAssets}
+          trace={trace}
+        />
+      )}
+
       <section className="trace-section" aria-labelledby="trace-images-heading">
         <div className="trace-section-heading">
-          <h3 id="trace-images-heading">{legacy ? 'Available snapshots' : 'Attached images'}</h3>
+          <h3 id="trace-images-heading">
+            {legacy
+              ? 'Available snapshots'
+              : trace?.stage === 'assets'
+                ? 'Candidate images'
+                : 'Attached images'}
+          </h3>
           <span>{assets.length}</span>
         </div>
         {assets.length === 0 ? (
@@ -457,6 +505,78 @@ function StageTraceView({
   )
 }
 
+function AssetSelectionAudit({
+  generation,
+  assets,
+  trace,
+}: {
+  generation: PosterGeneration
+  assets: GenerationAsset[]
+  trace: GenerationStageTrace
+}) {
+  const selected = assets.filter((asset) => asset.included)
+  const aiAttempts = typeof trace.failure_metadata.ai_attempts === 'number'
+    ? trace.failure_metadata.ai_attempts
+    : trace.model_calls.length
+  const fallback = trace.failure_metadata.fallback === true
+    || generation.asset_selection_method === 'rules_fallback'
+
+  return (
+    <section className="asset-audit" aria-labelledby="asset-audit-heading">
+      <div className="trace-section-heading">
+        <h3 id="asset-audit-heading">Selection audit</h3>
+        <span>{selected.length}/6</span>
+      </div>
+      <dl className="asset-audit-summary">
+        <div>
+          <dt>Mode</dt>
+          <dd>{generation.asset_selection_mode === 'editor' ? 'Editor' : 'Yolo'}</dd>
+        </div>
+        <div>
+          <dt>Method</dt>
+          <dd>{formatSelectionMethod(generation.asset_selection_method)}</dd>
+        </div>
+        <div>
+          <dt>AI attempts</dt>
+          <dd>{aiAttempts}</dd>
+        </div>
+        <div>
+          <dt>Fallback</dt>
+          <dd>{fallback ? 'Rules fallback' : 'No'}</dd>
+        </div>
+      </dl>
+      {assets.length > 0 && (
+        <div className="asset-audit-list">
+          {assets.map((asset) => (
+            <article key={asset.id} className={asset.included ? 'is-included' : ''}>
+              <div>
+                <span className={`trace-source-badge is-${asset.source}`}>
+                  {TRACE_SOURCE_LABELS[asset.source]}
+                </span>
+                <strong>{asset.filename || `Candidate ${asset.candidate_position}`}</strong>
+              </div>
+              <span className="asset-audit-decision">
+                {asset.included ? `Included · ${asset.selection_rank}` : 'Excluded'}
+              </span>
+              <p>{asset.selection_reason || asset.availability_reason || 'No reason recorded.'}</p>
+              {asset.provider_skips.length > 0 && (
+                <ul>
+                  {asset.provider_skips.map((skip, index) => (
+                    <li key={`${skip.stage}-${skip.reason}-${index}`}>
+                      <strong>{skip.stage}</strong>
+                      <span>{skip.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function TraceAssetInspector({ asset }: { asset: TraceImageAsset }) {
   return (
     <div className="trace-asset-inspector">
@@ -518,4 +638,14 @@ function formatDate(value: string) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function formatSelectionMethod(
+  value: PosterGeneration['asset_selection_method'],
+): string {
+  if (!value) return 'Pending'
+  if (value === 'rules_fallback') return 'Rules fallback'
+  if (value === 'retry_reuse') return 'Retry reuse'
+  if (value === 'ai') return 'AI'
+  return 'User'
 }

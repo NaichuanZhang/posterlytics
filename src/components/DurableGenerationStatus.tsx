@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Clock3, LoaderCircle } from 'lucide-react'
+import { AlertCircle, BadgeCheck, CheckCircle2, Clock3, LoaderCircle, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import {
   deriveGenerationStages,
@@ -31,6 +31,10 @@ export function DurableGenerationStatus({
           <CheckCircle2 className="is-ready" size={18} aria-hidden="true" />
         ) : item.status === 'failed' ? (
           <AlertCircle className="is-failed" size={18} aria-hidden="true" />
+        ) : item.status === 'canceled' ? (
+          <XCircle className="is-failed" size={18} aria-hidden="true" />
+        ) : item.status === 'awaiting_review' ? (
+          <BadgeCheck className="is-ready" size={18} aria-hidden="true" />
         ) : (
           <LoaderCircle
             size={18}
@@ -40,7 +44,7 @@ export function DurableGenerationStatus({
         )}
         <div>
           <strong>{generationActivityLabel(item)}</strong>
-          {safeToLeave && item.status !== 'failed' && item.status !== 'succeeded' && (
+          {safeToLeave && item.status !== 'failed' && item.status !== 'succeeded' && item.status !== 'awaiting_review' && (
             <span>Generation started. Safe to leave Posterlytics.</span>
           )}
         </div>

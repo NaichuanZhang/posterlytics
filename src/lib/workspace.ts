@@ -8,12 +8,14 @@ export interface WorkspacePreferences {
   versionsPanelOpen: boolean
   inspectorPanelOpen: boolean
   zoom: CanvasZoom
+  assetSelectionMode: 'editor' | 'yolo'
 }
 
 export const DEFAULT_WORKSPACE_PREFERENCES: WorkspacePreferences = {
   versionsPanelOpen: true,
   inspectorPanelOpen: true,
   zoom: 'fit',
+  assetSelectionMode: 'editor',
 }
 
 export function isCanvasZoom(value: unknown): value is CanvasZoom {
@@ -35,6 +37,9 @@ export function parseWorkspacePreferences(raw: string | null): WorkspacePreferen
         ? value.inspectorPanelOpen
         : DEFAULT_WORKSPACE_PREFERENCES.inspectorPanelOpen,
       zoom: isCanvasZoom(value.zoom) ? value.zoom : DEFAULT_WORKSPACE_PREFERENCES.zoom,
+      assetSelectionMode: value.assetSelectionMode === 'yolo'
+        ? 'yolo'
+        : DEFAULT_WORKSPACE_PREFERENCES.assetSelectionMode,
     }
   } catch {
     return { ...DEFAULT_WORKSPACE_PREFERENCES }

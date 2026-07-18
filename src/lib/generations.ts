@@ -10,17 +10,20 @@ import type {
 const ACTIVE_GENERATION_STATUSES = new Set<PosterGenerationStatus>([
   'created',
   'analyzing',
+  'reviewing',
   'designing',
   'painting',
 ])
 
 const NEXT_GENERATION_STATUSES: Record<PosterGenerationStatus, PosterGenerationStatus[]> = {
-  created: ['analyzing', 'designing', 'painting', 'failed'],
-  analyzing: ['designing', 'painting', 'failed'],
+  created: ['analyzing', 'reviewing', 'designing', 'painting', 'failed'],
+  analyzing: ['reviewing', 'designing', 'painting', 'failed'],
+  reviewing: ['designing', 'painting', 'failed', 'canceled'],
   designing: ['painting', 'failed'],
   painting: ['ready', 'failed'],
   ready: [],
   failed: [],
+  canceled: [],
 }
 
 export function canTransitionGenerationStatus(

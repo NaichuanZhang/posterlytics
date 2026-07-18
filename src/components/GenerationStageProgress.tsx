@@ -1,4 +1,4 @@
-import { Check, LoaderCircle, Minus, X } from 'lucide-react'
+import { BadgeCheck, Check, LoaderCircle, Minus, X } from 'lucide-react'
 import type {
   GenerationStageItem,
   GenerationStageStatus,
@@ -34,7 +34,8 @@ function StageIcon({ status }: { status: GenerationStageStatus }) {
   if (status === 'running') {
     return <LoaderCircle size={15} className="generation-stage-spinner" aria-hidden="true" />
   }
+  if (status === 'review') return <BadgeCheck size={15} aria-hidden="true" />
   if (status === 'done') return <Check size={15} aria-hidden="true" />
-  if (status === 'error') return <X size={15} aria-hidden="true" />
+  if (status === 'error' || status === 'canceled') return <X size={15} aria-hidden="true" />
   return <Minus size={15} aria-hidden="true" />
 }

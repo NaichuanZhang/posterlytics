@@ -69,16 +69,22 @@ export interface ReferenceImage {
 export type PosterGenerationStatus =
   | 'created'
   | 'analyzing'
+  | 'reviewing'
   | 'designing'
   | 'painting'
   | 'ready'
   | 'failed'
+  | 'canceled'
 
 export type PosterGenerationMode = 'iteration' | 'website_refresh'
 
-export type PosterGenerationStage = 'analyze' | 'designer' | 'hero' | 'complete'
+export type AssetSelectionMode = 'editor' | 'yolo'
+export type AssetSelectionStatus = 'pending' | 'completed'
+export type AssetSelectionMethod = 'user' | 'ai' | 'rules_fallback' | 'retry_reuse'
 
-export type GenerationTraceStage = 'analyze' | 'designer' | 'hero'
+export type PosterGenerationStage = 'analyze' | 'assets' | 'designer' | 'hero' | 'complete'
+
+export type GenerationTraceStage = 'analyze' | 'assets' | 'designer' | 'hero'
 
 export type GenerationJobStage = GenerationTraceStage
 
@@ -86,8 +92,10 @@ export type GenerationJobStatus =
   | 'queued'
   | 'running'
   | 'retrying'
+  | 'awaiting_review'
   | 'succeeded'
   | 'failed'
+  | 'canceled'
 
 export type GenerationNotificationOutcome = 'ready' | 'failed'
 
@@ -149,6 +157,10 @@ export interface GenerationActivityItem {
   scenario: CampaignScenario
   instruction: string | null
   hero_image_url: string | null
+  asset_selection_mode: AssetSelectionMode | null
+  asset_selection_status: AssetSelectionStatus | null
+  asset_selection_method: AssetSelectionMethod | null
+  asset_selection_completed_at: string | null
   generation_created_at: string
   notification_id: string | null
   notification_outcome: GenerationNotificationOutcome | null
@@ -165,9 +177,11 @@ export interface GenerationActivity {
 export type GenerationStageTraceStatus =
   | 'pending'
   | 'running'
+  | 'awaiting_review'
   | 'succeeded'
   | 'failed'
   | 'skipped'
+  | 'canceled'
 
 export type TraceImageSource =
   | 'previous-poster'
@@ -188,6 +202,7 @@ export type TraceImageSkipReason =
   | 'image_limit'
 
 export interface TraceImageAsset {
+  asset_id?: string
   source: TraceImageSource
   purpose: string
   url: string | null
@@ -264,6 +279,39 @@ export interface GenerationStageTrace {
   failure_code: string | null
   failure_message: string | null
   failure_metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface GenerationAssetProviderSkip {
+  stage: Extract<GenerationTraceStage, 'designer' | 'hero'>
+  reason: TraceImageSkipReason
+  detail: string
+  recorded_at: string
+}
+
+export interface GenerationAsset {
+  id: string
+  generation_id: string
+  campaign_id: string
+  user_id: string
+  candidate_key: string
+  source: TraceImageSource
+  url: string | null
+  object_key: string | null
+  filename: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  storage_source: string
+  purpose: string
+  metadata: Record<string, unknown>
+  availability: 'available' | 'unavailable'
+  availability_reason: string | null
+  included: boolean
+  selection_rank: number | null
+  selection_reason: string | null
+  candidate_position: number
+  provider_skips: GenerationAssetProviderSkip[]
   created_at: string
   updated_at: string
 }
@@ -469,6 +517,10 @@ export interface PosterGeneration {
   failure_message: string | null
   trace_schema_version: number | null
   trace_incomplete: boolean
+  asset_selection_mode: AssetSelectionMode | null
+  asset_selection_status: AssetSelectionStatus | null
+  asset_selection_method: AssetSelectionMethod | null
+  asset_selection_completed_at: string | null
 }
 
 export interface Placement {

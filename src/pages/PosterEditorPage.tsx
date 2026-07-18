@@ -2,6 +2,7 @@ import {
   BarChart3,
   Copy,
   EyeOff,
+  BadgeCheck,
   MapPin,
   PanelLeft,
   PanelRight,
@@ -15,6 +16,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { useAuth } from '../auth/AuthProvider'
 import { AppShell } from '../components/AppShell'
+import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { GenerationDetailsSheet } from '../components/GenerationDetailsSheet'
 import { GenerationInputsReview } from '../components/GenerationInputsReview'
@@ -230,6 +232,7 @@ export function PosterEditorPage() {
         instruction: normalizeReferenceContext(instruction),
         referenceImages: uploaded,
         refreshWebsite: effectiveRefreshWebsite,
+        assetSelectionMode: preferences.assetSelectionMode,
       })
       deliberateSelectionRef.current = false
       trackedJobRef.current = result.job.id
@@ -237,7 +240,13 @@ export function PosterEditorPage() {
       setInstruction('')
       setPendingReferences([])
       setRefreshWebsite(false)
-      notify('Generation started. Safe to leave Posterlytics.', 'success')
+      if (result.generation.asset_selection_mode === 'editor') {
+        navigate(
+          `/campaigns/${campaignId}/generations/${result.generation.id}/assets`,
+        )
+      } else {
+        notify('Generation started. Safe to leave Posterlytics.', 'success')
+      }
     } catch (cause) {
       if (uploaded.length > 0) await deleteReferenceImages(uploaded)
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -369,6 +378,12 @@ export function PosterEditorPage() {
         contextLabel="What should change?"
         contextPlaceholder="Make the headline larger, replace the product image, or adjust the mood."
         contextHint="Everything else stays consistent."
+      />
+      <AssetSelectionModeControl
+        value={preferences.assetSelectionMode}
+        disabled={generationInputsDisabled}
+        compact
+        onChange={(assetSelectionMode) => updatePreferences({ assetSelectionMode })}
       />
       <label className="check-control">
         <input
@@ -584,7 +599,15 @@ export function PosterEditorPage() {
           {campaignActivity && (
             <div className="editor-generation-status">
               <DurableGenerationStatus item={campaignActivity} safeToLeave />
-              {activeGenerations[0] && (
+              {campaignActivity.status === 'awaiting_review' ? (
+                <Link
+                  className="button button-primary button-small"
+                  to={`/campaigns/${campaignId}/generations/${campaignActivity.generation_id}/assets`}
+                >
+                  <BadgeCheck size={14} aria-hidden="true" />
+                  Review assets
+                </Link>
+              ) : activeGenerations[0] && (
                 <button
                   type="button"
                   className="button button-secondary button-small"

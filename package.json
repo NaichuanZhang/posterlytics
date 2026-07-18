@@ -10,7 +10,7 @@
     "assets:marketing:qrs": "node scripts/generate-marketing-qrs.mjs",
     "lint": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "node --test --import ./tests/register.mjs tests/*.test.ts",
-    "test:ui": "node tests/durableGenerationUiSmoke.mjs",
+    "test:ui": "node tests/durableGenerationUiSmoke.mjs && node tests/assetReviewUiSmoke.mjs",
     "test:marketing": "node tests/marketingUiSmoke.mjs"
   },
   "dependencies": {

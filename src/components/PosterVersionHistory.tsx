@@ -157,7 +157,7 @@ export function PosterVersionHistory({
           <summary>
             <span>
               <AlertTriangle size={14} aria-hidden="true" />
-              Failed attempts
+              Incomplete attempts
             </span>
             <strong>{failedGenerations.length}</strong>
           </summary>
@@ -170,12 +170,22 @@ export function PosterVersionHistory({
                   onClick={() => onReview(generation)}
                 >
                   <span>
-                    <strong>{failureStageLabel(generation.failure_stage)}</strong>
-                    <time dateTime={generation.failed_at ?? generation.created_at}>
-                      {formatVersionDate(generation.failed_at ?? generation.created_at)}
+                    <strong>
+                      {generation.status === 'canceled'
+                        ? 'Asset review canceled'
+                        : failureStageLabel(generation.failure_stage)}
+                    </strong>
+                    <time dateTime={generation.failed_at ?? generation.updated_at}>
+                      {formatVersionDate(generation.failed_at ?? generation.updated_at)}
                     </time>
                   </span>
-                  <small>{generation.failure_message || 'Generation did not complete.'}</small>
+                  <small>
+                    {generation.failure_message || (
+                      generation.status === 'canceled'
+                        ? 'Canceled before poster generation.'
+                        : 'Generation did not complete.'
+                    )}
+                  </small>
                   <ListTree size={14} aria-hidden="true" />
                 </button>
                 {activities.find((item) => item.generation_id === generation.id)?.status === 'failed' && (
@@ -204,6 +214,7 @@ export function PosterVersionHistory({
 
 function failureStageLabel(stage: PosterGeneration['failure_stage']) {
   if (stage === 'analyze') return 'Analyze failed'
+  if (stage === 'assets') return 'Asset selection failed'
   if (stage === 'designer') return 'Designer failed'
   if (stage === 'hero') return 'Image model failed'
   if (stage === 'complete') return 'Completion failed'

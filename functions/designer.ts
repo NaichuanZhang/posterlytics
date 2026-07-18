@@ -8,11 +8,13 @@ import {
   extractJson,
   jsonResponse,
   createUserClient,
+  loadFrozenGenerationImageReferences,
   markGenerationFailed,
   normalizePosterLayout,
   normalizeStyleProfile,
   logPipelineEvent,
   prepareImageReferences,
+  recordGenerationAssetProviderSkips,
   resolvedChatModelId,
   stageAlreadySucceeded,
   StageTraceRecorder,
@@ -97,7 +99,7 @@ export async function runDesignerStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout, trace_schema_version, asset_selection_status')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -172,15 +174,13 @@ export async function runDesignerStage(
     primary_image_url?: string;
     images?: Array<{ url: string; key?: string }>;
   };
-  const heroImg = assets.primary_image_url || assets.images?.[0]?.url || '';
-  const hasLogo = !!assets.logo_url;
   const instruction = String(c.instruction ?? '').trim().slice(0, 4000);
   const userReferenceImages = Array.isArray(c.reference_images)
     ? (c.reference_images as Array<Record<string, unknown>>)
         .filter((image) => typeof image.url === 'string' && image.url)
         .slice(0, 5)
     : [];
-  const visualCandidates: TypedImageReference[] = [
+  const legacyVisualCandidates: TypedImageReference[] = [
     ...(typeof (parent as Record<string, unknown> | null)?.hero_image_url === 'string'
       ? [{
           kind: 'previous-poster' as const,
@@ -214,12 +214,31 @@ export async function runDesignerStage(
       purpose: `User-supplied creative reference ${index + 1}; secondary to the source style board.`,
     })),
   ];
+  const usesFrozenAssets = c.trace_schema_version === 2;
+  if (usesFrozenAssets && c.asset_selection_status !== 'completed') {
+    return jsonResponse({ error: 'generation assets have not been confirmed' }, 409);
+  }
+  const visualCandidates = usesFrozenAssets
+    ? await loadFrozenGenerationImageReferences(context)
+    : legacyVisualCandidates;
   const preparedImages = await prepareImageReferences(visualCandidates, {
     maxImages: 6,
-    maxCandidates: 7,
+    maxCandidates: usesFrozenAssets ? 6 : 7,
+    ordering: usesFrozenAssets ? 'preserve' : 'source',
   });
+  if (usesFrozenAssets) {
+    await recordGenerationAssetProviderSkips(
+      context,
+      'designer',
+      preparedImages.skippedImages,
+    );
+  }
   await trace.setImages(preparedImages);
   const visualReferences = preparedImages.providerReferences;
+  const hasLogo = visualReferences.some((reference) => reference.kind === 'logo');
+  const selectedLogo = visualCandidates.find((reference) => reference.kind === 'logo');
+  const heroImg = visualCandidates.find((reference) => reference.kind === 'product')?.url
+    || (!usesFrozenAssets ? assets.primary_image_url || assets.images?.[0]?.url || '' : '');
   if (
     visualCandidates.some((reference) => reference.kind === 'style-board') &&
     !visualReferences.some((reference) => reference.kind === 'style-board')
@@ -233,17 +252,20 @@ export async function runDesignerStage(
       detail: 'Stored style board could not be inlined for the layout designer.',
     });
   }
+  const expectedUserReferences = usesFrozenAssets
+    ? visualCandidates.filter((reference) => reference.kind === 'user-reference').length
+    : userReferenceImages.length;
   const attachedUserReferences = visualReferences.filter(
     (reference) => reference.kind === 'user-reference',
   ).length;
-  if (attachedUserReferences < userReferenceImages.length) {
+  if (attachedUserReferences < expectedUserReferences) {
     logPipelineEvent({
       source: 'designer',
       campaignId: campaign.id,
       generationId: generation.id,
       status: 'degraded',
       code: 'reference_image_skipped',
-      detail: `${userReferenceImages.length - attachedUserReferences} of ${userReferenceImages.length} user reference image(s) could not be inlined for the layout designer.`,
+      detail: `${expectedUserReferences - attachedUserReferences} of ${expectedUserReferences} selected user reference image(s) could not be inlined for the layout designer.`,
     });
   }
 
@@ -277,7 +299,9 @@ export async function runDesignerStage(
   const parentContext = buildParentContextPrompt({
     instruction,
     parentLayout,
-    hasPreviousPoster: !!(parent as Record<string, unknown> | null)?.hero_image_url,
+    hasPreviousPoster: usesFrozenAssets
+      ? visualReferences.some((reference) => reference.kind === 'previous-poster')
+      : !!(parent as Record<string, unknown> | null)?.hero_image_url,
     refreshWebsite: c.generation_mode === 'website_refresh',
   });
 
@@ -333,11 +357,16 @@ export async function runDesignerStage(
     `WHAT IT DOES: ${whatItDoes}\n` +
     (features.length ? `AVAILABLE SUPPORTING COPY (select only what the hierarchy needs): ${features.join(' · ')}\n` : '') +
     `\nASSETS:\n` +
-    (hasLogo ? `LOGO: ${assets.logo_url} (the real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (none found — use the product name as the brand mark)\n') +
+    (hasLogo ? `LOGO: ${selectedLogo?.url ?? assets.logo_url} (the selected real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (not selected — use the product name as the brand mark)\n') +
     (heroImg ? `PRODUCT IMAGE: ${heroImg}\n` : '') +
     `ATTACHED VISUAL EVIDENCE: ${visualReferences.length} labeled image(s), including the previous poster when available.\n` +
     `\nDesign the poster layout JSON now (no CTA zone — the QR footer is the action).`;
-  const userContent = userContentWithImageReferences(user, visualReferences, 6);
+  const userContent = userContentWithImageReferences(
+    user,
+    visualReferences,
+    6,
+    usesFrozenAssets ? 'preserve' : 'source',
+  );
 
   let layout;
   try {

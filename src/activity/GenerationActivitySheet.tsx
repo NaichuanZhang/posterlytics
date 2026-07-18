@@ -3,9 +3,11 @@ import {
   CheckCheck,
   CheckCircle2,
   Clock3,
+  BadgeCheck,
   LoaderCircle,
   RotateCcw,
   X,
+  XCircle,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -218,6 +220,16 @@ function ActivityGroup({
                 <span className="activity-unread-dot" aria-label="Unread" />
               )}
             </button>
+            {item.status === 'awaiting_review' && (
+              <button
+                type="button"
+                className="activity-retry"
+                onClick={() => onOpen(item)}
+              >
+                <BadgeCheck size={14} aria-hidden="true" />
+                Review assets
+              </button>
+            )}
             {canRetryGeneration(item) && (
               <button
                 type="button"
@@ -241,6 +253,12 @@ function ActivityIcon({ item }: { item: GenerationActivityItem }) {
   }
   if (item.status === 'failed') {
     return <AlertCircle className="activity-icon is-failed" size={18} aria-hidden="true" />
+  }
+  if (item.status === 'canceled') {
+    return <XCircle className="activity-icon is-failed" size={18} aria-hidden="true" />
+  }
+  if (item.status === 'awaiting_review') {
+    return <BadgeCheck className="activity-icon is-ready" size={18} aria-hidden="true" />
   }
   return <LoaderCircle className="activity-icon generation-stage-spinner" size={18} aria-hidden="true" />
 }

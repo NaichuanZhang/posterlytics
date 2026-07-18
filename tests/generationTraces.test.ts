@@ -135,4 +135,17 @@ test('trace availability distinguishes legacy, complete, and incomplete captures
     terminalTraces,
   ), 'incomplete')
   assert.equal(generationTraceAvailability(CURRENT, terminalTraces.slice(0, 2)), 'incomplete')
+
+  const v2Traces = [
+    ...terminalTraces,
+    { stage: 'assets', status: 'succeeded' },
+  ] as GenerationStageTrace[]
+  assert.equal(generationTraceAvailability(
+    { ...CURRENT, trace_schema_version: 2 } as PosterGeneration,
+    v2Traces,
+  ), 'exact')
+  assert.equal(generationTraceAvailability(
+    { ...CURRENT, trace_schema_version: 2 } as PosterGeneration,
+    terminalTraces,
+  ), 'incomplete')
 })

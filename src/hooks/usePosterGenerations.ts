@@ -29,9 +29,11 @@ export function usePosterGenerations(campaignId: string | undefined) {
           .sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0)),
       )
       setActiveGenerations(rows.filter((generation) =>
-        ['created', 'analyzing', 'designing', 'painting'].includes(generation.status)
+        ['created', 'analyzing', 'reviewing', 'designing', 'painting'].includes(generation.status)
       ))
-      setFailedGenerations(rows.filter((generation) => generation.status === 'failed'))
+      setFailedGenerations(rows.filter((generation) =>
+        generation.status === 'failed' || generation.status === 'canceled'
+      ))
     }
     setLoading(false)
   }, [campaignId])

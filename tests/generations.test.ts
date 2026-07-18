@@ -61,6 +61,8 @@ test('overlayGeneration previews a snapshot without changing campaign state', ()
 
 test('generation stage transitions allow only active forward progress or failure', () => {
   assert.equal(canTransitionGenerationStatus('created', 'designing'), true)
+  assert.equal(canTransitionGenerationStatus('analyzing', 'reviewing'), true)
+  assert.equal(canTransitionGenerationStatus('reviewing', 'canceled'), true)
   assert.equal(canTransitionGenerationStatus('analyzing', 'painting'), true)
   assert.equal(canTransitionGenerationStatus('designing', 'failed'), true)
   assert.equal(canTransitionGenerationStatus('painting', 'ready'), true)

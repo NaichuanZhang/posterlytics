@@ -33,11 +33,13 @@ test('parseWorkspacePreferences accepts valid persisted preferences', () => {
       versionsPanelOpen: false,
       inspectorPanelOpen: true,
       zoom: 67,
+      assetSelectionMode: 'yolo',
     })),
     {
       versionsPanelOpen: false,
       inspectorPanelOpen: true,
       zoom: 67,
+      assetSelectionMode: 'yolo',
     },
   )
 })
@@ -55,6 +57,19 @@ test('parseWorkspacePreferences repairs partial, invalid, and malformed data', (
       versionsPanelOpen: false,
       inspectorPanelOpen: true,
       zoom: 'fit',
+      assetSelectionMode: 'editor',
     },
+  )
+})
+
+test('workspace preference migration defaults first asset selection to Editor', () => {
+  assert.equal(DEFAULT_WORKSPACE_PREFERENCES.assetSelectionMode, 'editor')
+  assert.equal(
+    parseWorkspacePreferences(JSON.stringify({
+      versionsPanelOpen: true,
+      inspectorPanelOpen: true,
+      zoom: 'fit',
+    })).assetSelectionMode,
+    'editor',
   )
 })

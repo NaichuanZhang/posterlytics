@@ -4,10 +4,12 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
+import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { GenerationReferences } from '../components/GenerationReferences'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { insforge } from '../lib/insforge'
+import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import { materializeReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -32,6 +34,7 @@ export function CampaignWizardPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { items: activityItems, refresh: refreshActivity } = useGenerationActivity()
+  const { preferences, updatePreferences } = useWorkspacePreferences()
   const [phase, setPhase] = useState<Phase>('form')
   const [error, setError] = useState<string | null>(null)
   const [draftId, setDraftId] = useState<string | null>(null)
@@ -105,10 +108,16 @@ export function CampaignWizardPage() {
         instruction: normalizeReferenceContext(referenceContext),
         referenceImages: uploaded,
         refreshWebsite: true,
+        assetSelectionMode: preferences.assetSelectionMode,
       })
       setJobId(result.job.id)
       setPhase('started')
       await refreshActivity()
+      if (result.generation.asset_selection_mode === 'editor') {
+        navigate(
+          `/campaigns/${campaignId}/generations/${result.generation.id}/assets`,
+        )
+      }
     } catch (cause) {
       if (uploaded.length > 0) await deleteReferenceImages(uploaded)
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -124,6 +133,11 @@ export function CampaignWizardPage() {
       setJobId(result.job.id)
       setPhase('started')
       await refreshActivity()
+      if (result.generation.asset_selection_mode === 'editor') {
+        navigate(
+          `/campaigns/${result.generation.campaign_id}/generations/${result.generation.id}/assets`,
+        )
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -134,6 +148,7 @@ export function CampaignWizardPage() {
     phase === 'started'
     && activity?.status !== 'succeeded'
     && activity?.status !== 'failed'
+    && activity?.status !== 'canceled'
   )
 
   return (
@@ -324,6 +339,10 @@ export function CampaignWizardPage() {
                 onRemoveExisting={() => {}}
                 pendingReferences={pendingReferences}
                 onPendingReferencesChange={setPendingReferences}
+              />
+              <AssetSelectionModeControl
+                value={preferences.assetSelectionMode}
+                onChange={(assetSelectionMode) => updatePreferences({ assetSelectionMode })}
               />
             </section>
 

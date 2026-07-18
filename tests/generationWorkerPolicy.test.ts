@@ -9,6 +9,10 @@ import {
 test('worker stage routing skips deterministic event layout work', () => {
   assert.equal(nextWorkerStage('analyze', 'product'), 'designer')
   assert.equal(nextWorkerStage('analyze', 'event'), 'hero')
+  assert.equal(nextWorkerStage('analyze', 'product', 2), 'assets')
+  assert.equal(nextWorkerStage('analyze', 'event', 2), 'assets')
+  assert.equal(nextWorkerStage('assets', 'product', 2), 'designer')
+  assert.equal(nextWorkerStage('assets', 'event', 2), 'hero')
   assert.equal(nextWorkerStage('designer', 'product'), 'hero')
   assert.equal(nextWorkerStage('hero', 'product'), null)
 })

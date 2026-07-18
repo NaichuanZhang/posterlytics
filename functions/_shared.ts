@@ -56,7 +56,7 @@ export interface GenerationStageRunContext {
 
 export async function stageAlreadySucceeded(
   context: Pick<GenerationStageRunContext, 'client' | 'userId' | 'campaignId' | 'generationId'>,
-  stage: 'analyze' | 'designer' | 'hero',
+  stage: 'analyze' | 'assets' | 'designer' | 'hero',
 ): Promise<boolean> {
   const { data, error } = await context.client.database
     .from('generation_stage_traces')
@@ -162,7 +162,7 @@ export function errorDetails(error: unknown): {
 export async function markGenerationFailed(
   client: BackendClient,
   generationId: string,
-  stage: 'analyze' | 'designer' | 'hero' | 'complete',
+  stage: 'analyze' | 'assets' | 'designer' | 'hero' | 'complete',
   error: unknown,
   code?: string,
   userId?: string,
@@ -199,6 +199,7 @@ export type ImageReferenceKind =
   | 'product';
 
 export interface TypedImageReference {
+  assetId?: string;
   kind: ImageReferenceKind;
   url: string;
   purpose: string;
@@ -221,6 +222,7 @@ export type TraceImageSkipReason =
   | 'image_limit';
 
 export interface TraceImageAsset {
+  asset_id?: string;
   source: ImageReferenceKind;
   purpose: string;
   url: string | null;
@@ -244,6 +246,63 @@ export interface PreparedImageReferences {
   candidateImages: TraceImageAsset[];
   attachedImages: TraceImageAsset[];
   skippedImages: TraceImageSkip[];
+}
+
+interface FrozenGenerationAssetRow {
+  id: string;
+  source: ImageReferenceKind;
+  url: string;
+  object_key: string | null;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  storage_source: string;
+  purpose: string;
+  selection_rank: number;
+}
+
+export async function loadFrozenGenerationImageReferences(
+  context: Pick<GenerationStageRunContext, 'client' | 'userId' | 'campaignId' | 'generationId'>,
+): Promise<TypedImageReference[]> {
+  const { data, error } = await context.client.database
+    .from('generation_assets')
+    .select('id, source, url, object_key, filename, mime_type, size_bytes, storage_source, purpose, selection_rank')
+    .eq('generation_id', context.generationId)
+    .eq('campaign_id', context.campaignId)
+    .eq('user_id', context.userId)
+    .eq('included', true)
+    .order('selection_rank', { ascending: true });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as FrozenGenerationAssetRow[]).map((asset) => ({
+    assetId: asset.id,
+    kind: asset.source,
+    url: asset.url,
+    key: asset.object_key ?? undefined,
+    filename: asset.filename ?? undefined,
+    mimeType: asset.mime_type ?? undefined,
+    sizeBytes: asset.size_bytes ?? undefined,
+    storageSource: asset.storage_source,
+    purpose: asset.purpose,
+  }));
+}
+
+export async function recordGenerationAssetProviderSkips(
+  context: Pick<GenerationStageRunContext, 'client' | 'userId' | 'generationId'>,
+  stage: 'designer' | 'hero',
+  skips: readonly TraceImageSkip[],
+): Promise<void> {
+  const auditable = skips.filter((skip) => !!skip.asset.asset_id);
+  if (auditable.length === 0) return;
+  const { error } = await context.client.database.rpc(
+    'record_generation_asset_provider_skips',
+    {
+      p_generation_id: context.generationId,
+      p_stage: stage,
+      p_skips: auditable,
+      p_user_id: context.userId,
+    },
+  );
+  if (error) throw new Error(error.message);
 }
 
 export interface TraceContentManifestEntry {
@@ -330,12 +389,31 @@ function orderReferences(
     .map(({ reference }) => reference);
 }
 
+function preserveImageReferenceOrder(
+  references: readonly TypedImageReference[],
+  maxImages: number,
+): TypedImageReference[] {
+  const seen = new Set<string>();
+  return references
+    .filter((reference) => {
+      if (!reference.url || seen.has(reference.url)) return false;
+      seen.add(reference.url);
+      return true;
+    })
+    .slice(0, Math.max(0, maxImages));
+}
+
 export function userContentWithImageReferences(
   text: string,
   references: readonly TypedImageReference[],
   maxImages = 6,
+  ordering: 'source' | 'painter' | 'preserve' = 'source',
 ): string | unknown[] {
-  const selected = orderImageReferences(references, maxImages);
+  const selected = ordering === 'preserve'
+    ? preserveImageReferenceOrder(references, maxImages)
+    : ordering === 'painter'
+      ? orderPainterImageReferences(references, maxImages)
+      : orderImageReferences(references, maxImages);
   if (selected.length === 0) return text;
   return [
     { type: 'text', text },
@@ -353,7 +431,7 @@ export function imageGenerationContent(
   prompt: string,
   references: readonly (TypedImageReference | string)[],
   maxImages = 6,
-  ordering: 'source' | 'painter' = 'source',
+  ordering: 'source' | 'painter' | 'preserve' = 'source',
 ): unknown[] {
   const content: unknown[] = [{ type: 'text', text: prompt }];
   if (references.every((reference) => typeof reference === 'string')) {
@@ -366,9 +444,11 @@ export function imageGenerationContent(
   const typed = references.filter(
     (reference): reference is TypedImageReference => typeof reference !== 'string',
   );
-  const ordered = ordering === 'painter'
-    ? orderPainterImageReferences(typed, maxImages)
-    : orderImageReferences(typed, maxImages);
+  const ordered = ordering === 'preserve'
+    ? preserveImageReferenceOrder(typed, maxImages)
+    : ordering === 'painter'
+      ? orderPainterImageReferences(typed, maxImages)
+      : orderImageReferences(typed, maxImages);
   for (const [index, reference] of ordered.entries()) {
     content.push({
       type: 'text',
@@ -940,7 +1020,7 @@ export async function prepareImageReferences(
     maxCandidates?: number;
     maxImageBytes?: number;
     maxTotalBytes?: number;
-    ordering?: 'source' | 'painter';
+    ordering?: 'source' | 'painter' | 'preserve';
     fetcher?: ModelImageFetcher;
   } = {},
 ): Promise<PreparedImageReferences> {
@@ -952,15 +1032,16 @@ export async function prepareImageReferences(
     ordering = 'source',
     fetcher = fetchImageForModel,
   } = opts;
-  const priority = ordering === 'painter'
-    ? PAINTER_REFERENCE_PRIORITY
-    : SOURCE_REFERENCE_PRIORITY;
   const positioned = references
     .map((reference, index) => ({ reference, candidatePosition: index + 1 }))
-    .sort((a, b) =>
-      priority[a.reference.kind] - priority[b.reference.kind] ||
-      a.candidatePosition - b.candidatePosition
-    );
+    .sort((a, b) => {
+      if (ordering === 'preserve') return a.candidatePosition - b.candidatePosition;
+      const priority = ordering === 'painter'
+        ? PAINTER_REFERENCE_PRIORITY
+        : SOURCE_REFERENCE_PRIORITY;
+      return priority[a.reference.kind] - priority[b.reference.kind]
+        || a.candidatePosition - b.candidatePosition;
+    });
   const candidateImages = positioned.map(({ reference, candidatePosition }) =>
     traceImageAsset(reference, candidatePosition)
   );
@@ -1078,7 +1159,7 @@ export async function inlineImageReferences(
     maxImages?: number;
     maxCandidates?: number;
     maxTotalBytes?: number;
-    ordering?: 'source' | 'painter';
+    ordering?: 'source' | 'painter' | 'preserve';
   } = {},
 ): Promise<TypedImageReference[]> {
   return (await prepareImageReferences(references, opts)).providerReferences;
@@ -1089,6 +1170,7 @@ function traceImageAsset(
   candidatePosition: number,
 ): TraceImageAsset {
   return {
+    asset_id: reference.assetId,
     source: reference.kind,
     purpose: reference.purpose.slice(0, 1000),
     url: durableTraceUrl(reference.url),
@@ -1201,7 +1283,7 @@ export interface TracedModelCall {
   contentManifest: TraceContentManifestEntry[];
 }
 
-type GenerationTraceStage = 'analyze' | 'designer' | 'hero';
+type GenerationTraceStage = 'analyze' | 'assets' | 'designer' | 'hero';
 export class StageTraceRecorder {
   private client: BackendClient;
   private generationId: string;
@@ -1317,13 +1399,13 @@ export class StageTraceRecorder {
     }
   }
 
-  async succeed(): Promise<void> {
+  async succeed(metadata: Record<string, unknown> = {}): Promise<void> {
     await this.persist({
       status: 'succeeded',
       completed_at: new Date().toISOString(),
       failure_code: null,
       failure_message: null,
-      failure_metadata: {},
+      failure_metadata: sanitizeTraceValue(metadata),
     });
   }
 
@@ -1859,8 +1941,9 @@ export async function aiImage(
   prompt: string,
   aspectRatio = '4:5',
   referenceImages: Array<TypedImageReference | string> = [],
+  ordering: 'source' | 'painter' | 'preserve' = 'painter',
 ): Promise<string> {
-  const content = imageGenerationContent(prompt, referenceImages, 6, 'painter');
+  const content = imageGenerationContent(prompt, referenceImages, 6, ordering);
 
   const ctl = new AbortController();
   const timeout = setTimeout(() => ctl.abort(), 90_000);

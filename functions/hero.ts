@@ -9,9 +9,11 @@ import {
   jsonResponse,
   createUserClient,
   compileLayoutPrompt,
+  loadFrozenGenerationImageReferences,
   logPipelineEvent,
   markGenerationFailed,
   prepareImageReferences,
+  recordGenerationAssetProviderSkips,
   resolvedImageModelId,
   stageAlreadySucceeded,
   StageTraceRecorder,
@@ -94,7 +96,7 @@ export async function runHeroStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key, trace_schema_version, asset_selection_status')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -197,7 +199,7 @@ export async function runHeroStage(
           (image): image is { url: string; key?: string } => !!image.url,
         ),
       ];
-  const candidates: TypedImageReference[] = [
+  const legacyCandidates: TypedImageReference[] = [
     ...(previousPosterUrl
       ? [{
           kind: 'previous-poster' as const,
@@ -251,29 +253,46 @@ export async function runHeroStage(
         }]
       : []),
   ];
+  const usesFrozenAssets = generationSnapshot.trace_schema_version === 2;
+  if (usesFrozenAssets && generationSnapshot.asset_selection_status !== 'completed') {
+    return jsonResponse({ error: 'generation assets have not been confirmed' }, 409);
+  }
+  const candidates = usesFrozenAssets
+    ? await loadFrozenGenerationImageReferences(context)
+    : legacyCandidates;
   const preparedImages = await prepareImageReferences(candidates, {
     maxImages: 6,
-    maxCandidates: 14,
+    maxCandidates: usesFrozenAssets ? 6 : 14,
     maxTotalBytes: 12_000_000,
-    ordering: 'painter',
+    ordering: usesFrozenAssets ? 'preserve' : 'painter',
   });
+  if (usesFrozenAssets) {
+    await recordGenerationAssetProviderSkips(
+      context,
+      'hero',
+      preparedImages.skippedImages,
+    );
+  }
   await trace.setImages(preparedImages);
   const referenceImages = preparedImages.providerReferences;
   const hasLogo = referenceImages.some((reference) => reference.kind === 'logo');
   const hasStyleBoard = referenceImages.some((reference) => reference.kind === 'style-board');
 
+  const expectedUsers = usesFrozenAssets
+    ? candidates.filter((reference) => reference.kind === 'user-reference').length
+    : userReferences.length;
   const attachedUsers = referenceImages.filter((reference) => reference.kind === 'user-reference').length;
-  if (attachedUsers < userReferences.length) {
+  if (attachedUsers < expectedUsers) {
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
       generationId: generation.id,
       status: 'degraded',
       code: 'reference_image_skipped',
-      detail: `${userReferences.length - attachedUsers} of ${userReferences.length} new reference image(s) could not be attached; painting with the ordered remainder.`,
+      detail: `${expectedUsers - attachedUsers} of ${expectedUsers} selected user reference image(s) could not be attached; painting with the ordered remainder.`,
     });
   }
-  if (assets.logo_url && !hasLogo) {
+  if (candidates.some((reference) => reference.kind === 'logo') && !hasLogo) {
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
@@ -283,7 +302,7 @@ export async function runHeroStage(
       detail: 'The authentic logo could not be attached or no capacity remained; the prompt forbids an invented symbol.',
     });
   }
-  if (!isEvent && screenshotUrl && !hasStyleBoard) {
+  if (candidates.some((reference) => reference.kind === 'style-board') && !hasStyleBoard) {
     logPipelineEvent({
       source: 'hero',
       campaignId: campaign.id,
@@ -294,12 +313,17 @@ export async function runHeroStage(
     });
   }
   const prompt = buildPosterPrompt(
-    generationSnapshot,
+    {
+      ...generationSnapshot,
+      reference_images: referenceImages.filter(
+        (reference) => reference.kind === 'user-reference',
+      ),
+    },
     style,
     hasLogo,
     hasStyleBoard,
     ((parent as Record<string, unknown> | null)?.poster_layout ?? null) as PosterLayout | null,
-    !!previousPosterUrl,
+    referenceImages.some((reference) => reference.kind === 'previous-poster'),
   );
 
   // Request 2:3 explicitly — aspect ratio only, never provider pixel dimensions
@@ -308,7 +332,12 @@ export async function runHeroStage(
   try {
     const messages = [{
       role: 'user',
-      content: imageGenerationContent(prompt, referenceImages, 6, 'painter'),
+      content: imageGenerationContent(
+        prompt,
+        referenceImages,
+        6,
+        usesFrozenAssets ? 'preserve' : 'painter',
+      ),
     }];
     imageSource = await trace.runModelCall(
       {
@@ -322,7 +351,12 @@ export async function runHeroStage(
         },
         contentManifest: buildTraceContentManifest(messages, preparedImages.attachedImages),
       },
-      () => aiImage(prompt, '2:3', referenceImages),
+      () => aiImage(
+        prompt,
+        '2:3',
+        referenceImages,
+        usesFrozenAssets ? 'preserve' : 'painter',
+      ),
     );
   } catch (e) {
     if (finalizeFailure) {

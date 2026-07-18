@@ -1,6 +1,8 @@
 import { insforge } from './insforge'
 import { getDeviceColorScheme } from './colorScheme'
 import type {
+  AssetSelectionMode,
+  GenerationAsset,
   GenerationActivity,
   GenerationJob,
   PosterGeneration,
@@ -21,6 +23,7 @@ export async function enqueuePosterGeneration(args: {
   instruction: string | null
   referenceImages: ReferenceImage[]
   refreshWebsite: boolean
+  assetSelectionMode: AssetSelectionMode
 }): Promise<EnqueuedPosterGeneration> {
   const { data, error } = await insforge.database.rpc('enqueue_poster_generation', {
     p_campaign_id: args.campaignId,
@@ -28,6 +31,7 @@ export async function enqueuePosterGeneration(args: {
     p_reference_images: args.referenceImages,
     p_refresh_website: args.refreshWebsite,
     p_color_scheme: getDeviceColorScheme(),
+    p_asset_selection_mode: args.assetSelectionMode,
   })
   if (error) throw new Error(error.message)
 
@@ -44,8 +48,12 @@ export async function createPosterGeneration(args: {
   instruction: string | null
   referenceImages: ReferenceImage[]
   refreshWebsite: boolean
+  assetSelectionMode?: AssetSelectionMode
 }): Promise<PosterGeneration> {
-  return (await enqueuePosterGeneration(args)).generation
+  return (await enqueuePosterGeneration({
+    ...args,
+    assetSelectionMode: args.assetSelectionMode ?? 'yolo',
+  })).generation
 }
 
 export async function retryPosterGeneration(
@@ -91,6 +99,81 @@ export async function activatePosterGeneration(generationId: string): Promise<Po
   return generation
 }
 
+export async function fetchGenerationAssets(
+  generationId: string,
+): Promise<GenerationAsset[]> {
+  const { data, error } = await insforge.database
+    .from('generation_assets')
+    .select('*')
+    .eq('generation_id', generationId)
+    .order('candidate_position', { ascending: true })
+  if (error) throw new Error(error.message)
+  return (data ?? []) as GenerationAsset[]
+}
+
+export async function fetchGenerationForAssetReview(
+  campaignId: string,
+  generationId: string,
+): Promise<PosterGeneration | null> {
+  const { data, error } = await insforge.database
+    .from('poster_generations')
+    .select('*')
+    .eq('id', generationId)
+    .eq('campaign_id', campaignId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data as PosterGeneration | null
+}
+
+export async function saveGenerationAssetSelection(
+  generationId: string,
+  assetIds: string[],
+): Promise<GenerationAsset[]> {
+  const { data, error } = await insforge.database.rpc(
+    'save_generation_asset_selection',
+    {
+      p_generation_id: generationId,
+      p_asset_ids: assetIds,
+    },
+  )
+  if (error) throw new Error(error.message)
+  return rpcRows<GenerationAsset>(data)
+}
+
+export async function confirmGenerationAssetSelection(
+  generationId: string,
+  assetIds: string[],
+): Promise<EnqueuedPosterGeneration & { assets: GenerationAsset[] }> {
+  const { data, error } = await insforge.database.rpc(
+    'confirm_generation_asset_selection',
+    {
+      p_generation_id: generationId,
+      p_asset_ids: assetIds,
+    },
+  )
+  if (error) throw new Error(error.message)
+  const result = rpcRow<EnqueuedPosterGeneration & { assets: GenerationAsset[] }>(data)
+  if (!result?.generation?.id || !result.job?.id) {
+    throw new Error('Asset selection could not be confirmed.')
+  }
+  return result
+}
+
+export async function cancelGenerationAssetReview(
+  generationId: string,
+): Promise<EnqueuedPosterGeneration> {
+  const { data, error } = await insforge.database.rpc(
+    'cancel_generation_asset_review',
+    { p_generation_id: generationId },
+  )
+  if (error) throw new Error(error.message)
+  const result = rpcRow<EnqueuedPosterGeneration>(data)
+  if (!result?.generation?.id || !result.job?.id) {
+    throw new Error('Asset review could not be canceled.')
+  }
+  return result
+}
+
 export async function invokeGenerationFunction(
   slug: GenerationFunction,
   campaignId: string,
@@ -127,4 +210,9 @@ export async function failPosterGeneration(
 function rpcRow<T>(value: unknown): T | null {
   if (Array.isArray(value)) return (value[0] as T | undefined) ?? null
   return value && typeof value === 'object' ? value as T : null
+}
+
+function rpcRows<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  return value && typeof value === 'object' ? [value as T] : []
 }

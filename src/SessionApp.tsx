@@ -18,6 +18,11 @@ const CampaignWizardPage = lazy(() =>
 const PosterEditorPage = lazy(() =>
   import('./pages/PosterEditorPage').then((module) => ({ default: module.PosterEditorPage }))
 )
+const GenerationAssetReviewPage = lazy(() =>
+  import('./pages/GenerationAssetReviewPage').then((module) => ({
+    default: module.GenerationAssetReviewPage,
+  }))
+)
 const PlacementsPage = lazy(() =>
   import('./pages/PlacementsPage').then((module) => ({ default: module.PlacementsPage }))
 )
@@ -70,6 +75,10 @@ export default function SessionApp() {
             />
             <Route path="/campaigns/new" element={<ProtectedPage><CampaignWizardPage /></ProtectedPage>} />
             <Route path="/campaigns/:id" element={<ProtectedPage><PosterEditorPage /></ProtectedPage>} />
+            <Route
+              path="/campaigns/:campaignId/generations/:generationId/assets"
+              element={<ProtectedPage><GenerationAssetReviewPage /></ProtectedPage>}
+            />
             <Route path="/campaigns/:id/placements" element={<ProtectedPage><PlacementsPage /></ProtectedPage>} />
             <Route path="/campaigns/:id/analytics" element={<ProtectedPage><AnalyticsPage /></ProtectedPage>} />
           </Routes>

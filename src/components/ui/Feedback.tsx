@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertCircle, Info } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
 
 export function Skeleton({ className = '' }: { className?: string }) {
   return <span className={`skeleton ${className}`.trim()} aria-hidden="true" />
@@ -31,11 +31,20 @@ export function InlineNotice({
   tone = 'info',
 }: {
   children: ReactNode
-  tone?: 'info' | 'error'
+  tone?: 'info' | 'error' | 'warning' | 'success'
 }) {
-  const Icon = tone === 'error' ? AlertCircle : Info
+  const Icon = tone === 'error'
+    ? AlertCircle
+    : tone === 'warning'
+      ? AlertTriangle
+      : tone === 'success'
+        ? CheckCircle2
+        : Info
   return (
-    <div className={`inline-notice inline-notice-${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
+    <div
+      className={`inline-notice inline-notice-${tone}`}
+      role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'}
+    >
       <Icon size={16} aria-hidden="true" />
       <div>{children}</div>
     </div>

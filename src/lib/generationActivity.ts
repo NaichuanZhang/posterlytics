@@ -9,8 +9,10 @@ export type GenerationStageStatus =
   | 'pending'
   | 'running'
   | 'done'
+  | 'review'
   | 'skipped'
   | 'error'
+  | 'canceled'
 
 export interface GenerationStageItem {
   key: GenerationJobStage
@@ -22,6 +24,7 @@ const ACTIVE_JOB_STATUSES = new Set<GenerationJobStatus>([
   'queued',
   'running',
   'retrying',
+  'awaiting_review',
 ])
 
 const GENERATION_STAGES: Array<{
@@ -29,12 +32,14 @@ const GENERATION_STAGES: Array<{
   label: string
 }> = [
   { key: 'analyze', label: 'Read website' },
+  { key: 'assets', label: 'Select assets' },
   { key: 'designer', label: 'Design layout' },
   { key: 'hero', label: 'Paint poster' },
 ]
 
 const STAGE_LABELS: Record<GenerationJobStage, string> = {
   analyze: 'Reading website',
+  assets: 'Selecting assets',
   designer: 'Designing layout',
   hero: 'Painting poster',
 }
@@ -50,8 +55,10 @@ export function generationActivityLabel(
 ): string {
   if (item.status === 'queued') return 'Queued'
   if (item.status === 'retrying') return 'Retrying'
+  if (item.status === 'awaiting_review') return 'Assets ready for review'
   if (item.status === 'succeeded') return 'Ready'
   if (item.status === 'failed') return 'Failed'
+  if (item.status === 'canceled') return 'Canceled'
   return STAGE_LABELS[item.stage]
 }
 
@@ -66,6 +73,9 @@ export function deriveGenerationStages(
     if (stage.key === 'analyze') {
       return item.generation_mode === 'website_refresh'
     }
+    if (stage.key === 'assets') {
+      return item.asset_selection_mode === 'editor' || item.asset_selection_mode === 'yolo'
+    }
     if (stage.key === 'designer') return item.scenario !== 'event'
     return true
   })
@@ -78,6 +88,8 @@ export function deriveGenerationStages(
     if (index < currentIndex) return { ...stage, status: 'done' as const }
     if (index > currentIndex) return { ...stage, status: 'pending' as const }
     if (item.status === 'failed') return { ...stage, status: 'error' as const }
+    if (item.status === 'canceled') return { ...stage, status: 'canceled' as const }
+    if (item.status === 'awaiting_review') return { ...stage, status: 'review' as const }
     if (item.status === 'queued') return { ...stage, status: 'pending' as const }
     return { ...stage, status: 'running' as const }
   })

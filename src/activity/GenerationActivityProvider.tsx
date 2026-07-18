@@ -190,7 +190,9 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
         })
     }
     setSheetOpen(false)
-    navigate(`/campaigns/${item.campaign_id}`)
+    navigate(item.status === 'awaiting_review'
+      ? `/campaigns/${item.campaign_id}/generations/${item.generation_id}/assets`
+      : `/campaigns/${item.campaign_id}`)
   }, [navigate, refresh])
 
   const markAllRead = useCallback(async () => {
@@ -216,7 +218,9 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
       notify('Generation restarted with the same inputs.', 'success')
       setSheetOpen(false)
       await refresh()
-      navigate(`/campaigns/${result.generation.campaign_id}`)
+      navigate(result.generation.asset_selection_mode === 'editor'
+        ? `/campaigns/${result.generation.campaign_id}/generations/${result.generation.id}/assets`
+        : `/campaigns/${result.generation.campaign_id}`)
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Generation could not be retried.'
       setError(message)
