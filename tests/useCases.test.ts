@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { zhCN } from '../src/i18n/messages.ts'
 import { POSTER_SIZES } from '../src/lib/posterSize.ts'
 import {
+  CREATABLE_USE_CASES,
   getUseCase,
   isUseCaseId,
   USE_CASE_IDS,
@@ -71,6 +72,20 @@ test('website and Amazon preserve current input requirements', () => {
   assert.equal(amazon.inputFields.productUrl.sourceKind, 'amazon')
 })
 
+test('only website and Amazon are exposed for creation with localized descriptions', () => {
+  assert.deepEqual(
+    CREATABLE_USE_CASES.map((useCase) => useCase.id),
+    ['website_product', 'amazon_listing'],
+  )
+  assert.deepEqual(
+    CREATABLE_USE_CASES.map((useCase) => zhCN[useCase.creationDescription!]),
+    [
+      '基于产品官网的内容和视觉风格创建。',
+      '基于亚马逊商品页及卖家提供的文案和图片创建。',
+    ],
+  )
+})
+
 test('event remains a non-creatable historical registry entry', () => {
   const event = getUseCase('event')
 
@@ -116,24 +131,29 @@ test('registry labels are localized without carrying a prompt recipe', () => {
   )
 })
 
-test('wizard persists intent with the shared exact-host classifier payload', () => {
+test('wizard persists explicit selected intent and source atomically', () => {
   assert.match(
     wizard,
-    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: isAmazonSourceUrl\(productUrl\)[\s\S]*\? 'amazon_listing'[\s\S]*: 'website_product'/,
+    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: selectedUseCaseId,[\s\S]*product_url: productUrl\.trim\(\)/,
   )
   assert.match(
     wizard,
     /\.insert\(\[\{ \.\.\.values, user_id: user\.id \}]\)/,
   )
   assert.match(wizard, /\.update\(values\)/)
+  assert.match(wizard, /CREATABLE_USE_CASES\.map/)
+  assert.match(wizard, /inputFields\.productUrl\.requirement/)
+  assert.match(wizard, /inputFields\.referenceImages\.requirement/)
   assert.doesNotMatch(wizard, /use_case:[\s\S]{0,120}(?:prompt|recipe)/i)
 })
 
 test('editor and preflight consume persisted intent while URL classification stays in the wizard', () => {
   assert.match(
     editorSource,
-    /campaign\.use_case === 'amazon_listing'/,
+    /getUseCase\(campaign\.use_case\)/,
   )
+  assert.match(editorSource, /campaignUseCase\.id === 'amazon_listing'/)
+  assert.match(editorSource, /allowedFormats=\{campaignUseCase\.allowedPosterFormats\}/)
   assert.match(
     generationTracesSource,
     /campaign\.use_case !== 'amazon_listing'/,

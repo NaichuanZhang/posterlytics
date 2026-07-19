@@ -48,7 +48,10 @@ try {
   await testActivityRouting(browser)
   await testGenerationDetailsSummary(browser)
   await testFailedGenerationDetails(browser)
+  await testCampaignWizardUseCases(browser)
+  await testCampaignWizardDraftSwitch(browser)
   await testCampaignWizardPreference(browser)
+  await testEditorUseCaseInputs(browser)
   await testRedNoteCoverFormat(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
@@ -390,6 +393,168 @@ async function testFailedGenerationDetails(browserInstance) {
   await context.close()
 }
 
+async function testCampaignWizardUseCases(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState()
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/new`)
+  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  const picker = page.locator('.use-case-picker')
+  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
+  assert.equal(await picker.getByRole('button').count(), 2)
+  await picker.getByText(
+    'Create from a product website and its visual identity.',
+    { exact: true },
+  ).waitFor()
+  await picker.getByText(
+    'Create from an Amazon listing plus seller-provided copy and images.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(await picker.getByText('Event', { exact: true }).count(), 0)
+  assert.equal(await picker.getByText(/social cover/i).count(), 0)
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/campaign-use-case-picker-desktop.png`,
+    fullPage: true,
+  })
+
+  await selectWizardUseCase(page, 'Website product')
+  assert.deepEqual(
+    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Product source', 'Campaign action', 'Generation references'],
+  )
+  assert.equal(await page.locator('#product-url').getAttribute('placeholder'), 'https://yourproduct.com')
+  assert.equal(
+    await page.locator('#destination-url').getAttribute('placeholder'),
+    'https://yourproduct.com/signup',
+  )
+  assert.equal(
+    await page.locator('.generation-references label').first().innerText(),
+    'Creative context (optional)',
+  )
+  assert.equal(
+    await page.locator('.generation-references .field-label').innerText(),
+    'Supporting images (optional)',
+  )
+  assert.equal(
+    await page.getByText('The website supplies the visual and product context.', {
+      exact: true,
+    }).count(),
+    1,
+  )
+  assert.equal(await page.getByText('Amazon seller reference mode', { exact: true }).count(), 0)
+  assert.equal(await page.locator('#poster-format option').count(), 5)
+
+  const amazonUrl =
+    'https://www.amazon.com/dp/B0EXAMPLE?ref_=abc%2Fdef&tag=seller%20bytes#details'
+  await page.locator('#product-url').fill(amazonUrl)
+  await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
+  await page.getByLabel('Amazon listing URL Required', { exact: true }).waitFor()
+  assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
+  assert.deepEqual(
+    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Product source', 'Listing copy and product images', 'Campaign action'],
+  )
+  const listingReferences = page.locator('section[aria-labelledby="references-heading"]')
+  assert.equal(
+    await listingReferences.locator('.generation-references label').first().innerText(),
+    'Listing copy (optional)',
+  )
+  assert.equal(
+    await listingReferences.locator('.generation-references .field-label').innerText(),
+    'Product and brand images (optional)',
+  )
+  await listingReferences.getByRole('group', { name: 'Asset selection mode' }).waitFor()
+  assert.equal(
+    await page.getByText('Generation references', { exact: true }).count(),
+    0,
+  )
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/campaign-amazon-form-desktop.png`,
+    fullPage: true,
+  })
+
+  await page.locator('#product-url').fill('https://example.com/product')
+  await page.getByRole('button', { name: 'Switch to Website product', exact: true }).click()
+  await page.getByLabel('Website URL Required', { exact: true }).waitFor()
+  assert.equal(await page.locator('#product-url').inputValue(), 'https://example.com/product')
+  assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
+
+  await page.locator('#product-url').fill(amazonUrl)
+  await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
+  await page.locator('#product-url').fill('https://amazon.co.uk/dp/B0UNSUPPORTED')
+  await page.locator('#product-name').fill('Unsupported marketplace')
+  await page.getByRole('button', { name: 'Generate poster', exact: true }).click()
+  await page.locator('.source-mismatch .inline-notice-error').waitFor()
+  assert.equal(
+    await page.locator('#product-url').evaluate((element) => element === document.activeElement),
+    true,
+  )
+  assert.deepEqual(state.campaignWrites, [])
+  assert.deepEqual(state.enqueueRequests, [])
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testCampaignWizardDraftSwitch(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ enqueueFailuresRemaining: 1 })
+  state.campaign.current_generation_id = null
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await openWizardForm(page, 'Website product')
+  await fillWizardRequiredFields(page, {
+    sourceUrl: 'https://example.com/product',
+    productName: 'Signal Studio',
+    destinationUrl: 'https://example.com/start',
+  })
+  await submitWizardAndWaitForEnqueue(page, state, 1)
+  await page.getByText('Mock enqueue failed.', { exact: false }).waitFor()
+  assert.deepEqual(
+    state.campaignWrites.map((write) => write.method),
+    ['POST', 'PATCH'],
+  )
+  assert.equal(state.campaignWrites[0].body[0].use_case, 'website_product')
+
+  const amazonUrl =
+    'https://www.amazon.com/dp/B0SWITCH?maas=maas_adg_api_123%2F456&ref_=aa_maas'
+  await page.locator('#destination-url').fill('')
+  await page.locator('#product-url').fill(amazonUrl)
+  await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
+  assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
+  await submitWizardAndWaitForEnqueue(page, state, 2)
+
+  assert.deepEqual(
+    state.campaignWrites.map((write) => write.method),
+    ['POST', 'PATCH', 'PATCH'],
+  )
+  const correction = state.campaignWrites.at(-1)
+  assert.equal(correction.method, 'PATCH')
+  assert.equal(correction.body.product_url, amazonUrl)
+  assert.equal(correction.body.use_case, 'amazon_listing')
+  assert.equal(correction.body.destination_url, amazonUrl)
+  assert.equal(state.enqueueModes.length, 1)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testCampaignWizardPreference(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
@@ -400,15 +565,67 @@ async function testCampaignWizardPreference(browserInstance) {
   await installBackendMock(context, state)
   const page = await context.newPage()
 
-  await page.goto(`${BASE_URL}/campaigns/new`)
-  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await openWizardForm(page, 'Website product')
   let mode = page.getByRole('group', { name: 'Asset selection mode' })
   assert.equal(await mode.getByRole('button', { name: 'Editor' }).getAttribute('aria-pressed'), 'true')
 
   await mode.getByRole('button', { name: 'Yolo' }).click()
   await page.reload()
+  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await selectWizardUseCase(page, 'Website product')
   mode = page.getByRole('group', { name: 'Asset selection mode' })
   assert.equal(await mode.getByRole('button', { name: 'Yolo' }).getAttribute('aria-pressed'), 'true')
+  await context.close()
+}
+
+async function testEditorUseCaseInputs(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  assert.equal(
+    await page.locator('.editor-inspector .generation-references label').first().innerText(),
+    'What should change? (optional)',
+  )
+  assert.equal(
+    await page.locator('.editor-inspector .generation-references .field-label').innerText(),
+    'Supporting images (optional)',
+  )
+  assert.equal(
+    await page.getByText('Amazon seller reference mode', { exact: true }).count(),
+    0,
+  )
+  assert.equal(await page.locator('#next-poster-format option').count(), 5)
+
+  state.campaign.use_case = 'amazon_listing'
+  state.currentGeneration.use_case = 'amazon_listing'
+  await page.reload()
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  assert.equal(
+    await page.locator('.editor-inspector .generation-references label').first().innerText(),
+    'Listing copy and creative direction (optional)',
+  )
+  assert.equal(
+    await page.locator('.editor-inspector .generation-references .field-label').innerText(),
+    'Product and brand images (optional)',
+  )
+  await page.getByText('Amazon seller reference mode', { exact: true }).waitFor()
+  assert.equal(await page.locator('#next-poster-format option').count(), 5)
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/amazon-editor-inputs-desktop.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(pageErrors, [])
   await context.close()
 }
 
@@ -427,8 +644,7 @@ async function testRedNoteCoverFormat(browserInstance) {
   const pageErrors = []
   page.on('pageerror', (error) => pageErrors.push(error))
 
-  await page.goto(`${BASE_URL}/campaigns/new`)
-  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await openWizardForm(page, 'Website product')
   assert.ok(
     (await page.locator('#poster-format option').allTextContents())
       .includes('Portrait 3:4 full bleed'),
@@ -436,6 +652,10 @@ async function testRedNoteCoverFormat(browserInstance) {
 
   await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
   await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  assert.ok(
+    (await page.locator('#next-poster-format option').allTextContents())
+      .includes('Portrait 3:4 full bleed'),
+  )
   const exportInspector = page.locator('section[aria-labelledby="export-heading"]')
   await exportInspector
     .getByText('Artwork-only export. No QR code or placement tracking is included.', {
@@ -518,8 +738,7 @@ async function testAssetModeTooltips(browserInstance) {
   const desktopErrors = []
   desktopPage.on('pageerror', (error) => desktopErrors.push(error))
 
-  await desktopPage.goto(`${BASE_URL}/campaigns/new`)
-  await desktopPage.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await openWizardForm(desktopPage, 'Website product')
   let mode = desktopPage.getByRole('group', { name: 'Asset selection mode' })
   await assertModeTooltipBehavior(
     desktopPage,
@@ -560,8 +779,7 @@ async function testAssetModeTooltips(browserInstance) {
   const mobileErrors = []
   mobilePage.on('pageerror', (error) => mobileErrors.push(error))
 
-  await mobilePage.goto(`${BASE_URL}/campaigns/new`)
-  await mobilePage.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await openWizardForm(mobilePage, 'Website product')
   mode = mobilePage.getByRole('group', { name: 'Asset selection mode' })
   await assertModeTooltipBehavior(
     mobilePage,
@@ -618,6 +836,38 @@ async function testBothEntryModes(browserInstance) {
   assert.deepEqual(state.enqueueModes, ['yolo', 'editor'])
   await page.waitForURL(new RegExp('/campaigns/campaign-asset/generations/generated-2/assets$'))
   await context.close()
+}
+
+async function openWizardForm(page, useCaseName) {
+  await page.goto(`${BASE_URL}/campaigns/new`)
+  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await selectWizardUseCase(page, useCaseName)
+}
+
+async function selectWizardUseCase(page, useCaseName) {
+  const picker = page.locator('.use-case-picker')
+  await picker.getByRole('button', { name: new RegExp(useCaseName) }).click()
+  await page.locator('.campaign-form').waitFor()
+}
+
+async function fillWizardRequiredFields(
+  page,
+  {
+    sourceUrl,
+    productName,
+    destinationUrl,
+  },
+) {
+  await page.locator('#product-url').fill(sourceUrl)
+  await page.locator('#product-name').fill(productName)
+  await page.locator('#destination-url').fill(destinationUrl)
+}
+
+async function submitWizardAndWaitForEnqueue(page, state, expectedRequestCount) {
+  await page.getByRole('button', {
+    name: /^(?:Generate poster|Retry generation)$/,
+  }).click()
+  await waitFor(() => state.enqueueRequests.length === expectedRequestCount)
 }
 
 async function assertModeTooltipBehavior(page, mode, container, action) {
@@ -787,6 +1037,16 @@ async function installBackendMock(context, state) {
       })
     }
     if (path === '/api/database/rpc/enqueue_poster_generation') {
+      state.enqueueRequests.push(body)
+      if (state.enqueueFailuresRemaining > 0) {
+        state.enqueueFailuresRemaining -= 1
+        return json(route, {
+          code: 'P0001',
+          message: 'Mock enqueue failed.',
+          details: null,
+          hint: null,
+        }, 400)
+      }
       const mode = body.p_asset_selection_mode
       state.enqueueModes.push(mode)
       const generation = {
@@ -807,6 +1067,17 @@ async function installBackendMock(context, state) {
       })
     }
     if (path === '/api/database/records/campaigns') {
+      const method = request.method()
+      if (method === 'POST') {
+        state.campaignWrites.push({ method, body })
+        Object.assign(state.campaign, body[0])
+        return json(route, { id: state.campaign.id })
+      }
+      if (method === 'PATCH') {
+        state.campaignWrites.push({ method, body })
+        Object.assign(state.campaign, body)
+        return json(route, [])
+      }
       return json(route, [state.campaign])
     }
     if (path === '/api/database/records/poster_generations') {
@@ -842,6 +1113,7 @@ function createState({
   selectedIds = ['asset-a', 'asset-b'],
   awaitingReviewActivity = false,
   editorReady = false,
+  enqueueFailuresRemaining = 0,
   saveFailuresRemaining = 0,
 } = {}) {
   const now = new Date().toISOString()
@@ -964,7 +1236,10 @@ function createState({
     savedSelections: [],
     confirmedSelections: [],
     cancelCalls: 0,
+    campaignWrites: [],
+    enqueueFailuresRemaining,
     enqueueModes: [],
+    enqueueRequests: [],
     failedGenerations: [],
     traceRequests: [],
     traces: [],

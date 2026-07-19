@@ -1,3 +1,8 @@
+import type {
+  CreatableUseCaseId,
+  UseCaseSourceKind,
+} from './useCases'
+
 const AMAZON_SOURCE_HOSTS = new Set([
   'amazon.com',
   'www.amazon.com',
@@ -7,14 +12,30 @@ const AMAZON_SOURCE_HOSTS = new Set([
   'amzn.eu',
 ])
 
-export function isAmazonSourceUrl(value: string): boolean {
+export type ProductSourceUrlKind = 'empty' | 'invalid' | 'website' | 'amazon'
+
+export function classifyProductSourceUrl(value: string): ProductSourceUrlKind {
+  const trimmed = value.trim()
+  if (!trimmed) return 'empty'
+
   try {
-    const url = new URL(value.trim())
-    return (
-      (url.protocol === 'https:' || url.protocol === 'http:')
-      && AMAZON_SOURCE_HOSTS.has(url.hostname)
-    )
+    const url = new URL(trimmed)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'invalid'
+    return AMAZON_SOURCE_HOSTS.has(url.hostname) ? 'amazon' : 'website'
   } catch {
-    return false
+    return 'invalid'
   }
+}
+
+export function isAmazonSourceUrl(value: string): boolean {
+  return classifyProductSourceUrl(value) === 'amazon'
+}
+
+export function getSourceUseCaseSwitchTarget(
+  expectedSource: UseCaseSourceKind,
+  actualSource: ProductSourceUrlKind,
+): CreatableUseCaseId | null {
+  if (expectedSource === 'website' && actualSource === 'amazon') return 'amazon_listing'
+  if (expectedSource === 'amazon' && actualSource === 'website') return 'website_product'
+  return null
 }

@@ -5,7 +5,36 @@ import {
   resolveInheritedStyleBoard,
 } from '../functions/_sourceAcquisition.ts'
 import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
-import { isAmazonSourceUrl } from '../src/lib/amazonSource.ts'
+import {
+  classifyProductSourceUrl,
+  getSourceUseCaseSwitchTarget,
+  isAmazonSourceUrl,
+} from '../src/lib/amazonSource.ts'
+
+test('product source classification distinguishes empty, invalid, website, and Amazon URLs', () => {
+  assert.equal(classifyProductSourceUrl('  '), 'empty')
+  assert.equal(classifyProductSourceUrl('B0EXAMPLE1'), 'invalid')
+  assert.equal(classifyProductSourceUrl('ftp://amazon.com/dp/B0EXAMPLE1'), 'invalid')
+  assert.equal(classifyProductSourceUrl('https://example.com/product'), 'website')
+  assert.equal(
+    classifyProductSourceUrl(' https://www.amazon.com/dp/B0EXAMPLE1 '),
+    'amazon',
+  )
+})
+
+test('source mismatch helper offers only the safe opposite-use-case switches', () => {
+  assert.equal(
+    getSourceUseCaseSwitchTarget('website', 'amazon'),
+    'amazon_listing',
+  )
+  assert.equal(
+    getSourceUseCaseSwitchTarget('amazon', 'website'),
+    'website_product',
+  )
+  assert.equal(getSourceUseCaseSwitchTarget('amazon', 'amazon'), null)
+  assert.equal(getSourceUseCaseSwitchTarget('amazon', 'invalid'), null)
+  assert.equal(getSourceUseCaseSwitchTarget('none', 'website'), null)
+})
 
 test('Amazon source classifier accepts only the supported exact hosts', () => {
   const accepted = [

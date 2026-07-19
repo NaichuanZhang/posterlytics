@@ -8,22 +8,25 @@ Live app: **https://3f9q2998.insforge.site**
 
 ## Product flow
 
-1. Sign in and create a product campaign.
-2. Enter the product URL, campaign copy, destination, and optional generation
-   context or reference images from files or public HTTPS URLs.
-3. `analyze` captures a theme-matched, multi-frame style board and prepares
-   source-grounded brand context and poster copy.
-4. `designer` creates a structured layout for the campaign's selected format
+1. Sign in, start a campaign, and choose Website product or Amazon listing.
+2. For a website product, enter the website URL, campaign copy, destination,
+   and optional generation context or reference images.
+3. For an Amazon listing, enter a supported listing URL and supply listing copy
+   plus product or brand images as the primary generation inputs.
+4. `analyze` captures a theme-matched, multi-frame style board for websites, or
+   uses seller-provided Amazon references without scraping the listing, and
+   prepares source-grounded brand context and poster copy.
+5. `designer` creates a structured layout for the campaign's selected format
    while preserving the source's visual treatment and density.
-5. `hero` paints the poster through OpenRouter at the registered provider aspect
+6. `hero` paints the poster through OpenRouter at the registered provider aspect
    using ordered visual references.
-6. Add placements, publish, and export either a placement-specific QR poster or
+7. Add placements, publish, and export either a placement-specific QR poster or
    an artwork-only social cover.
-7. A visit to the QR link is recorded and redirected to the destination URL.
-8. Analytics reports visits, unique visitors, device, OS, and country.
+8. A visit to the QR link is recorded and redirected to the destination URL.
+9. Analytics reports visits, unique visitors, device, OS, and country.
 
-New campaign creation is product-only. Existing event campaigns remain
-renderable and can be regenerated.
+New campaign creation exposes the website-product and Amazon-listing product
+use cases. Existing event campaigns remain renderable and can be regenerated.
 
 ## Amazon seller reference mode
 
@@ -33,8 +36,8 @@ Posterlytics therefore treats supported Amazon URLs as reference-only sources.
 
 1. Use a URL on `amazon.com`, `www.amazon.com`, `a.co`, `amzn.to`,
    `amzn.asia`, or `amzn.eu` as the product source.
-2. Paste the relevant listing copy into Generation references and add up to five
-   product or brand images by file or public HTTPS URL.
+2. Add the relevant listing copy and up to five product or brand images in the
+   promoted listing-input section, using files or public HTTPS URLs.
 3. Use the listing URL, including any Amazon Attribution parameters, as the
    destination. Posterlytics preserves its existing query bytes and appends only
    missing placement UTM parameters.
@@ -63,6 +66,9 @@ banners, and Amazon policy validation are not supported yet.
 - **Poster formats:** `src/lib/posterSize.ts` is shared by the SPA and bundled
   edge functions. Campaigns store the next target format; generations snapshot
   the format used for historical render and export.
+- **Use cases:** `src/lib/useCases.ts` defines creatable intent, input
+  requirements, and allowed formats. Campaigns persist intent and generations
+  snapshot it for server-side recipe selection.
 
 ## Develop
 

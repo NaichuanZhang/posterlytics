@@ -8,6 +8,7 @@ import {
   FOOTER_H,
   getPosterMatteX,
   getPosterQrBandGeometry,
+  getSelectablePosterSizes,
   getPosterSize,
   hasPosterQrBand,
   MATTE_GAP,
@@ -96,6 +97,20 @@ test('registry contains the approved presets in stable order', () => {
   assert.deepEqual(
     POSTER_SIZES.map((size) => size.slug),
     PRESET_EXPECTATIONS.map((size) => size.slug),
+  )
+})
+
+test('selectable formats preserve registry order and grandfather the current format', () => {
+  assert.deepEqual(
+    getSelectablePosterSizes(['luma_1x1', 'a4_2x3']).map((size) => size.slug),
+    ['a4_2x3', 'luma_1x1'],
+  )
+  assert.deepEqual(
+    getSelectablePosterSizes(
+      ['a4_2x3', 'luma_1x1'],
+      'rednote_cover_3x4',
+    ).map((size) => size.slug),
+    ['a4_2x3', 'rednote_cover_3x4', 'luma_1x1'],
   )
 })
 

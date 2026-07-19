@@ -58,6 +58,7 @@ import {
   type PendingReference,
 } from '../lib/references'
 import type { PosterGeneration } from '../lib/types'
+import { getUseCase } from '../lib/useCases'
 import { buildViewUrl } from '../lib/viewUrl'
 
 type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete' | 'format'
@@ -221,7 +222,8 @@ export function PosterEditorPage() {
   const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
-  const amazonReferenceMode = campaign.use_case === 'amazon_listing'
+  const campaignUseCase = getUseCase(campaign.use_case)
+  const amazonReferenceMode = campaignUseCase.id === 'amazon_listing'
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
@@ -238,6 +240,19 @@ export function PosterEditorPage() {
   const showDesktopVersions = !isMobileWorkspace && (
     isVersionsDrawer ? versionsDrawerOpen : preferences.versionsPanelOpen
   )
+  const useCaseReferenceProps = amazonReferenceMode
+    ? {
+        contextLabel: t('Listing copy and creative direction'),
+        contextPlaceholder: t('Paste updated listing copy, approved claims, or describe what should change.'),
+        contextHint: t('Seller-provided copy is the primary copy source.'),
+        referenceImagesLabel: t('Product and brand images'),
+        referenceImagesHint: t('Seller-provided images are the primary visual source.'),
+      }
+    : {
+        contextLabel: t('What should change?'),
+        contextPlaceholder: t('Make the headline larger, replace the product image, or adjust the mood.'),
+        contextHint: t('Everything else stays consistent.'),
+      }
 
   async function generateVersion() {
     if (!user || generating || uploadingInputs) return
@@ -428,6 +443,7 @@ export function PosterEditorPage() {
         id="next-poster-format"
         value={targetPosterSize.slug}
         disabled={generationInputsDisabled || !!busy}
+        allowedFormats={campaignUseCase.allowedPosterFormats}
         onChange={(posterFormat) => void updatePosterFormat(posterFormat)}
       />
       <GenerationReferences
@@ -438,9 +454,10 @@ export function PosterEditorPage() {
         pendingReferences={pendingReferences}
         onPendingReferencesChange={setPendingReferences}
         disabled={generationInputsDisabled}
-        contextLabel={t('What should change?')}
-        contextPlaceholder={t('Make the headline larger, replace the product image, or adjust the mood.')}
-        contextHint={t('Everything else stays consistent.')}
+        contextRequirement={campaignUseCase.inputFields.referenceContext}
+        referenceImagesRequirement={campaignUseCase.inputFields.referenceImages.requirement}
+        referenceImagesMinimumCount={campaignUseCase.inputFields.referenceImages.minimumCount}
+        {...useCaseReferenceProps}
       />
       {amazonReferenceMode && (
         <InlineNotice>

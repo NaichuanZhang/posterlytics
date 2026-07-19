@@ -147,6 +147,15 @@ export function getPosterSize(value: unknown): PosterSize {
   return POSTER_SIZE_BY_SLUG.get(value)!
 }
 
+export function getSelectablePosterSizes(
+  allowedSlugs: readonly PosterSizeSlug[],
+  currentSlug?: PosterSizeSlug,
+): PosterSize[] {
+  const selectable = new Set<PosterSizeSlug>(allowedSlugs)
+  if (currentSlug) selectable.add(currentSlug)
+  return POSTER_SIZES.filter((size) => selectable.has(size.slug))
+}
+
 export function hasPosterQrBand(
   size: PosterSize,
 ): size is PosterSize & { readonly qrBand: Extract<PosterQrBand, { mode: 'scaled' }> } {

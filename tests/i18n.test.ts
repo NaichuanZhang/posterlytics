@@ -111,6 +111,14 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Refine without starting over.': '迭代，不必推倒重来。',
     'Know what got scanned.': '每次扫码，都有迹可循。',
     'Campaign type does not match its source.': '推广活动类型与来源不匹配。',
+    'Choose a campaign type': '选择推广活动类型',
+    'Create from a product website and its visual identity.':
+      '基于产品官网的内容和视觉风格创建。',
+    'Create from an Amazon listing plus seller-provided copy and images.':
+      '基于亚马逊商品页及卖家提供的文案和图片创建。',
+    'Listing copy and product images': '商品文案与产品图片',
+    'Switch to Amazon listing': '切换到亚马逊商品',
+    'Switch to Website product': '切换到网站产品',
   }
 
   for (const [key, value] of Object.entries(expected)) {

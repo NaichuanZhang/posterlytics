@@ -26,6 +26,7 @@ import {
   type ReferenceUrlRejection,
 } from '../lib/references'
 import type { ReferenceImage } from '../lib/types'
+import type { UseCaseFieldRequirement } from '../lib/useCases'
 
 interface Props {
   context: string
@@ -35,9 +36,14 @@ interface Props {
   pendingReferences: PendingReference[]
   onPendingReferencesChange: Dispatch<SetStateAction<PendingReference[]>>
   disabled?: boolean
+  contextRequirement?: UseCaseFieldRequirement
   contextLabel?: string
   contextPlaceholder?: string
   contextHint?: string
+  referenceImagesRequirement?: UseCaseFieldRequirement
+  referenceImagesMinimumCount?: number
+  referenceImagesLabel?: string
+  referenceImagesHint?: string
 }
 
 type ReferenceRejection =
@@ -52,9 +58,14 @@ export function GenerationReferences({
   pendingReferences,
   onPendingReferencesChange,
   disabled = false,
+  contextRequirement = 'optional',
   contextLabel,
   contextPlaceholder,
   contextHint,
+  referenceImagesRequirement = 'optional',
+  referenceImagesMinimumCount = 0,
+  referenceImagesLabel,
+  referenceImagesHint,
 }: Props) {
   const { formatNumber, t } = useI18n()
   const [rejections, setRejections] = useState<ReferenceRejection[]>([])
@@ -78,6 +89,7 @@ export function GenerationReferences({
   const resolvedContextLabel = contextLabel ?? t('Creative context')
   const resolvedContextPlaceholder = contextPlaceholder
     ?? t('Audience, campaign goals, visual direction, required details, or anything the generator should preserve.')
+  const resolvedReferenceImagesLabel = referenceImagesLabel ?? t('Supporting images')
 
   useEffect(() => {
     if (!isUnavailable) return
@@ -193,201 +205,220 @@ export function GenerationReferences({
 
   return (
     <div className="generation-references">
-      <div className="field">
-        <label htmlFor={contextId}>
-          {resolvedContextLabel} <span className="hint">{t('(optional)')}</span>
-        </label>
-        <textarea
-          id={contextId}
-          className="textarea"
-          value={context}
-          maxLength={MAX_REFERENCE_CONTEXT_LENGTH}
-          disabled={disabled}
-          placeholder={resolvedContextPlaceholder}
-          onChange={(event) => onContextChange(event.target.value)}
-        />
-        <div className="hint">
-          {contextHint ? `${contextHint} ` : ''}
-          {t('{current} / {maximum} characters', {
-            current: formatNumber(context.length),
-            maximum: formatNumber(MAX_REFERENCE_CONTEXT_LENGTH),
-          })}
+      {contextRequirement !== 'hidden' && (
+        <div className="field">
+          <label htmlFor={contextId}>
+            {resolvedContextLabel}{' '}
+            {contextRequirement === 'required' ? (
+              <span className="required-label">{t('Required')}</span>
+            ) : (
+              <span className="hint">{t('(optional)')}</span>
+            )}
+          </label>
+          <textarea
+            id={contextId}
+            className="textarea"
+            value={context}
+            required={contextRequirement === 'required'}
+            maxLength={MAX_REFERENCE_CONTEXT_LENGTH}
+            disabled={disabled}
+            placeholder={resolvedContextPlaceholder}
+            onChange={(event) => onContextChange(event.target.value)}
+          />
+          <div className="hint">
+            {contextHint ? `${contextHint} ` : ''}
+            {t('{current} / {maximum} characters', {
+              current: formatNumber(context.length),
+              maximum: formatNumber(MAX_REFERENCE_CONTEXT_LENGTH),
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="field" style={{ marginBottom: 0 }}>
-        <div className="field-label" id={imageLabelId}>
-          {t('Supporting images')} <span className="hint">{t('(optional)')}</span>
-        </div>
-        <input
-          ref={inputRef}
-          id={imageInputId}
-          className="reference-file-input"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          multiple
-          hidden
-          tabIndex={-1}
-          disabled={isUnavailable}
-          onChange={selectFiles}
-        />
-        <div className="reference-source-grid">
-          <button
-            type="button"
-            className={[
-              'reference-dropzone',
-              isDragging ? 'is-drag-active' : '',
-              isFull ? 'is-full' : '',
-              disabled ? 'is-disabled' : '',
-            ].filter(Boolean).join(' ')}
-            aria-labelledby={`${imageLabelId} ${imageActionId}`}
-            aria-describedby={[
-              imageStatusId,
-              imageHintId,
-              rejections.length > 0 ? imageErrorId : '',
-            ].filter(Boolean).join(' ')}
-            aria-disabled={isUnavailable}
-            onClick={() => {
-              if (!isUnavailable) inputRef.current?.click()
-            }}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDragEnd={() => {
-              dragDepth.current = 0
-              setIsDragging(false)
-            }}
-            onDrop={handleDrop}
-          >
-            <span className="reference-dropzone-icon" aria-hidden="true">
-              <ImagePlus size={22} strokeWidth={2} />
-            </span>
-            <span className="reference-dropzone-copy">
-              <strong id={imageActionId}>
-                {disabled
-                  ? t('Image selection unavailable')
-                  : isFull
-                    ? t('{count} images added', { count: MAX_REFERENCE_IMAGES })
-                    : isDragging
-                      ? t('Drop image to add')
-                      : t('Drop image or browse')}
-              </strong>
-              <span id={imageStatusId}>
-                {disabled
-                  ? t('Wait for the current action to finish.')
-                  : isFull
-                    ? t('Remove an image to add another.')
-                    : t(
-                      remainingSlots === 1
-                        ? '{count} slot available'
-                        : '{count} slots available',
-                      { count: remainingSlots },
-                    )}
-              </span>
-            </span>
-          </button>
-
-          <div className={`reference-url-panel${isUnavailable ? ' is-disabled' : ''}`}>
-            <label htmlFor={urlInputId}>{t('Image URL')}</label>
-            <div className="reference-url-content">
+      {referenceImagesRequirement !== 'hidden' && (
+        <div className="field" style={{ marginBottom: 0 }}>
+          <div className="field-label" id={imageLabelId}>
+            {resolvedReferenceImagesLabel}{' '}
+            {referenceImagesRequirement === 'required' ? (
+              <span className="required-label">{t('Required')}</span>
+            ) : (
+              <span className="hint">{t('(optional)')}</span>
+            )}
+          </div>
+          <input
+            ref={inputRef}
+            id={imageInputId}
+            className="reference-file-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            hidden
+            tabIndex={-1}
+            disabled={isUnavailable}
+            onChange={selectFiles}
+          />
+          <div className="reference-source-grid">
+            <button
+              type="button"
+              className={[
+                'reference-dropzone',
+                isDragging ? 'is-drag-active' : '',
+                isFull ? 'is-full' : '',
+                disabled ? 'is-disabled' : '',
+              ].filter(Boolean).join(' ')}
+              aria-labelledby={`${imageLabelId} ${imageActionId}`}
+              aria-describedby={[
+                imageStatusId,
+                imageHintId,
+                rejections.length > 0 ? imageErrorId : '',
+              ].filter(Boolean).join(' ')}
+              aria-disabled={isUnavailable}
+              onClick={() => {
+                if (!isUnavailable) inputRef.current?.click()
+              }}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDragEnd={() => {
+                dragDepth.current = 0
+                setIsDragging(false)
+              }}
+              onDrop={handleDrop}
+            >
               <span className="reference-dropzone-icon" aria-hidden="true">
-                <Link2 size={20} strokeWidth={2} />
+                <ImagePlus size={22} strokeWidth={2} />
               </span>
-              <div className="reference-url-control">
-                <input
-                  id={urlInputId}
-                  type="url"
-                  inputMode="url"
-                  autoComplete="url"
-                  placeholder="https://…/pic.jpg"
-                  value={urlInput}
-                  disabled={isUnavailable}
-                  aria-describedby={[
-                    imageHintId,
-                    rejections.length > 0 ? imageErrorId : '',
-                  ].filter(Boolean).join(' ')}
-                  onChange={(event) => setUrlInput(event.target.value)}
-                  onKeyDown={handleUrlKeyDown}
-                />
-                <button
-                  type="button"
-                  disabled={isUnavailable || !urlInput.trim()}
-                  aria-label={t('Add image URL')}
-                  title={t('Add image URL')}
-                  onClick={submitUrl}
-                >
-                  <Plus size={16} strokeWidth={2} aria-hidden="true" />
-                </button>
+              <span className="reference-dropzone-copy">
+                <strong id={imageActionId}>
+                  {disabled
+                    ? t('Image selection unavailable')
+                    : isFull
+                      ? t('{count} images added', { count: MAX_REFERENCE_IMAGES })
+                      : isDragging
+                        ? t('Drop image to add')
+                        : t('Drop image or browse')}
+                </strong>
+                <span id={imageStatusId}>
+                  {disabled
+                    ? t('Wait for the current action to finish.')
+                    : isFull
+                      ? t('Remove an image to add another.')
+                      : t(
+                        remainingSlots === 1
+                          ? '{count} slot available'
+                          : '{count} slots available',
+                        { count: remainingSlots },
+                      )}
+                </span>
+              </span>
+            </button>
+
+            <div className={`reference-url-panel${isUnavailable ? ' is-disabled' : ''}`}>
+              <label htmlFor={urlInputId}>{t('Image URL')}</label>
+              <div className="reference-url-content">
+                <span className="reference-dropzone-icon" aria-hidden="true">
+                  <Link2 size={20} strokeWidth={2} />
+                </span>
+                <div className="reference-url-control">
+                  <input
+                    id={urlInputId}
+                    type="url"
+                    inputMode="url"
+                    autoComplete="url"
+                    placeholder="https://…/pic.jpg"
+                    value={urlInput}
+                    disabled={isUnavailable}
+                    aria-describedby={[
+                      imageHintId,
+                      rejections.length > 0 ? imageErrorId : '',
+                    ].filter(Boolean).join(' ')}
+                    onChange={(event) => setUrlInput(event.target.value)}
+                    onKeyDown={handleUrlKeyDown}
+                  />
+                  <button
+                    type="button"
+                    disabled={isUnavailable || !urlInput.trim()}
+                    aria-label={t('Add image URL')}
+                    title={t('Add image URL')}
+                    onClick={submitUrl}
+                  >
+                    <Plus size={16} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <div className="hint" id={imageHintId}>
-          {t('Up to {count} public HTTPS JPEG, PNG, or WebP images, 10 MB each.', {
-            count: MAX_REFERENCE_IMAGES,
-          })}
-        </div>
-        {rejections.length > 0 && (
-          <div className="reference-errors" id={imageErrorId} role="alert">
-            <ul>
-              {rejections.map((rejection, index) => (
-                <li key={`${rejection.kind}-${rejectionKey(rejection)}-${index}`}>
-                  {referenceRejectionMessage(rejection, t)}
-                </li>
-              ))}
-            </ul>
+          <div className="hint" id={imageHintId}>
+            {referenceImagesHint ? `${referenceImagesHint} ` : ''}
+            {t('Up to {count} public HTTPS JPEG, PNG, or WebP images, 10 MB each.', {
+              count: MAX_REFERENCE_IMAGES,
+            })}
+            {referenceImagesMinimumCount > 0 && (
+              <> {t('Add at least {count} images.', { count: referenceImagesMinimumCount })}</>
+            )}
           </div>
-        )}
+          {rejections.length > 0 && (
+            <div className="reference-errors" id={imageErrorId} role="alert">
+              <ul>
+                {rejections.map((rejection, index) => (
+                  <li key={`${rejection.kind}-${rejectionKey(rejection)}-${index}`}>
+                    {referenceRejectionMessage(rejection, t)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-        {(existingImages.length > 0 || pendingReferences.length > 0) && (
-          <div className="reference-grid">
-            {existingImages.map((image) => (
-              <ReferenceTile
-                key={image.key}
-                name={image.name}
-                src={image.url}
-                disabled={disabled}
-                onRemove={() => {
-                  clearRejections()
-                  onRemoveExisting(image)
-                }}
-              />
-            ))}
-            {pendingReferences.map((reference) => (
-              reference.kind === 'file' ? (
-                <PendingFileTile
-                  key={reference.id}
-                  file={reference.file}
-                  disabled={disabled}
-                  onRemove={() => {
-                    clearRejections()
-                    onPendingReferencesChange((current) =>
-                      current.filter((item) => item.id !== reference.id)
-                    )
-                  }}
-                />
-              ) : (
+          {(existingImages.length > 0 || pendingReferences.length > 0) && (
+            <div className="reference-grid">
+              {existingImages.map((image) => (
                 <ReferenceTile
-                  key={reference.id}
-                  name={reference.name}
-                  src={reference.url}
-                  sourceTitle={reference.url}
-                  status={reference.previewStatus}
+                  key={image.key}
+                  name={image.name}
+                  src={image.url}
                   disabled={disabled}
-                  onLoad={() => updateUrlReference(reference, 'ready')}
-                  onError={() => updateUrlReference(reference, 'error')}
                   onRemove={() => {
                     clearRejections()
-                    onPendingReferencesChange((current) =>
-                      current.filter((item) => item.id !== reference.id)
-                    )
+                    onRemoveExisting(image)
                   }}
                 />
-              )
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+              {pendingReferences.map((reference) => (
+                reference.kind === 'file' ? (
+                  <PendingFileTile
+                    key={reference.id}
+                    file={reference.file}
+                    disabled={disabled}
+                    onRemove={() => {
+                      clearRejections()
+                      onPendingReferencesChange((current) =>
+                        current.filter((item) => item.id !== reference.id)
+                      )
+                    }}
+                  />
+                ) : (
+                  <ReferenceTile
+                    key={reference.id}
+                    name={reference.name}
+                    src={reference.url}
+                    sourceTitle={reference.url}
+                    status={reference.previewStatus}
+                    disabled={disabled}
+                    onLoad={() => updateUrlReference(reference, 'ready')}
+                    onError={() => updateUrlReference(reference, 'error')}
+                    onRemove={() => {
+                      clearRejections()
+                      onPendingReferencesChange((current) =>
+                        current.filter((item) => item.id !== reference.id)
+                      )
+                    }}
+                  />
+                )
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

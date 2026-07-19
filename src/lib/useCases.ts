@@ -8,6 +8,7 @@ export const USE_CASE_IDS = [
 ] as const
 
 export type UseCaseId = (typeof USE_CASE_IDS)[number]
+export type CreatableUseCaseId = Exclude<UseCaseId, 'event'>
 export type UseCaseFieldRequirement = 'required' | 'optional' | 'hidden'
 export type UseCaseSourceKind = 'website' | 'amazon' | 'none'
 
@@ -30,6 +31,7 @@ export interface UseCaseInputFieldSpec {
 export interface UseCaseDescriptor<Id extends UseCaseId = UseCaseId> {
   readonly id: Id
   readonly label: TranslationKey
+  readonly creationDescription: TranslationKey | null
   readonly creationEnabled: boolean
   readonly inputFields: UseCaseInputFieldSpec
   readonly allowedPosterFormats: readonly PosterSizeSlug[]
@@ -53,6 +55,7 @@ export const USE_CASES = [
   {
     id: 'website_product',
     label: catalogLabel('Website product'),
+    creationDescription: catalogLabel('Create from a product website and its visual identity.'),
     creationEnabled: true,
     inputFields: {
       productUrl: { requirement: 'required', sourceKind: 'website' },
@@ -70,6 +73,7 @@ export const USE_CASES = [
   {
     id: 'amazon_listing',
     label: catalogLabel('Amazon listing'),
+    creationDescription: catalogLabel('Create from an Amazon listing plus seller-provided copy and images.'),
     creationEnabled: true,
     inputFields: {
       productUrl: { requirement: 'required', sourceKind: 'amazon' },
@@ -87,6 +91,7 @@ export const USE_CASES = [
   {
     id: 'event',
     label: catalogLabel('Event'),
+    creationDescription: null,
     creationEnabled: false,
     inputFields: {
       productUrl: { requirement: 'hidden', sourceKind: 'none' },
@@ -102,6 +107,10 @@ export const USE_CASES = [
     trackingEnabled: true,
   },
 ] as const satisfies readonly UseCaseDescriptor[]
+
+export const CREATABLE_USE_CASES = USE_CASES.filter(
+  (useCase) => useCase.creationEnabled,
+) as readonly UseCaseDescriptor<CreatableUseCaseId>[]
 
 const USE_CASE_BY_ID = new Map<UseCaseId, UseCaseDescriptor>(
   USE_CASES.map((useCase) => [useCase.id, useCase]),
