@@ -45,6 +45,7 @@ const SELECTED = {
 const CAMPAIGN = {
   id: 'campaign-1',
   current_generation_id: CURRENT.id,
+  product_url: 'https://example.com/product',
   brand_assets: CURRENT.brand_assets,
   screenshot_url: CURRENT.screenshot_url,
   screenshot_key: CURRENT.screenshot_key,
@@ -93,6 +94,25 @@ test('website-refresh preflight labels runtime-discovered assets as expected pla
     ['logo', 'product', 'style-board'],
   )
   assert.match(preflight.instruction, /refined next version/)
+})
+
+test('Amazon refresh preflight omits unavailable website evidence', () => {
+  const preflight = deriveGenerationPreflight({
+    campaign: {
+      ...CAMPAIGN,
+      product_url: 'https://www.amazon.com/dp/B0EXAMPLE1',
+    },
+    currentGeneration: CURRENT,
+    selectedGeneration: CURRENT,
+    instruction: '',
+    pendingReferences: [],
+    refreshWebsite: true,
+  })
+
+  assert.deepEqual(
+    preflight.assets.map((asset) => asset.source),
+    ['previous-poster'],
+  )
 })
 
 test('preflight and legacy reconstruction localize generated helper copy', () => {

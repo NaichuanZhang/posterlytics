@@ -43,6 +43,7 @@ import {
   isActiveGenerationJob,
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
+import { isAmazonSourceUrl } from '../lib/amazonSource'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
@@ -221,6 +222,7 @@ export function PosterEditorPage() {
   const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
+  const amazonReferenceMode = isAmazonSourceUrl(campaign.product_url)
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
@@ -441,6 +443,14 @@ export function PosterEditorPage() {
         contextPlaceholder={t('Make the headline larger, replace the product image, or adjust the mood.')}
         contextHint={t('Everything else stays consistent.')}
       />
+      {amazonReferenceMode && (
+        <InlineNotice>
+          <strong>{t('Amazon seller reference mode')}</strong>
+          <span>
+            {t('Amazon listings cannot be read reliably. Add listing copy and product or brand images under Generation references; Posterlytics will use those references instead of scraping the listing.')}
+          </span>
+        </InlineNotice>
+      )}
       <AssetSelectionModeControl
         value={preferences.assetSelectionMode}
         disabled={generationInputsDisabled}

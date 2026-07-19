@@ -1,0 +1,84 @@
+import { isAmazonSourceUrl } from '../src/lib/amazonSource.ts';
+import {
+  captureSite,
+  type CaptureColorScheme,
+  type CaptureResult,
+} from './_shared.ts';
+
+export type ProductSourceMode = 'website' | 'amazon-reference';
+
+export interface ProductSourceAcquisition {
+  mode: ProductSourceMode;
+  html: string;
+  capture: CaptureResult | null;
+}
+
+interface SourceAcquisitionDependencies {
+  fetchHtml: (url: string) => Promise<string>;
+  capture: (
+    url: string,
+    colorScheme: CaptureColorScheme,
+  ) => Promise<CaptureResult>;
+}
+
+export interface StyleBoardPointers {
+  screenshotUrl: string | null;
+  screenshotKey: string | null;
+}
+
+async function fetchProductHtml(productUrl: string): Promise<string> {
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const response = await fetch(productUrl, {
+      signal: ctl.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+      },
+    });
+    return response.ok ? await response.text() : '';
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const DEFAULT_DEPENDENCIES: SourceAcquisitionDependencies = {
+  fetchHtml: fetchProductHtml,
+  capture: captureSite,
+};
+
+export async function acquireProductSource(
+  productUrl: string,
+  colorScheme: CaptureColorScheme,
+  dependencies: SourceAcquisitionDependencies = DEFAULT_DEPENDENCIES,
+): Promise<ProductSourceAcquisition> {
+  if (isAmazonSourceUrl(productUrl)) {
+    return {
+      mode: 'amazon-reference',
+      html: '',
+      capture: null,
+    };
+  }
+
+  return {
+    mode: 'website',
+    html: await dependencies.fetchHtml(productUrl),
+    capture: await dependencies.capture(productUrl, colorScheme),
+  };
+}
+
+export function resolveInheritedStyleBoard(
+  mode: ProductSourceMode,
+  inherited: StyleBoardPointers,
+): StyleBoardPointers {
+  if (mode === 'amazon-reference') {
+    return {
+      screenshotUrl: null,
+      screenshotKey: null,
+    };
+  }
+  return { ...inherited };
+}

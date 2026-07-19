@@ -25,6 +25,25 @@ Live app: **https://3f9q2998.insforge.site**
 New campaign creation is product-only. Existing event campaigns remain
 renderable and can be regenerated.
 
+## Amazon seller reference mode
+
+Amazon listing pages are not reliable automation sources: a raw request or
+browser capture can return a CAPTCHA that looks like successful evidence.
+Posterlytics therefore treats supported Amazon URLs as reference-only sources.
+
+1. Use a URL on `amazon.com`, `www.amazon.com`, `a.co`, `amzn.to`,
+   `amzn.asia`, or `amzn.eu` as the product source.
+2. Paste the relevant listing copy into Generation references and add up to five
+   product or brand images by file or public HTTPS URL.
+3. Use the listing URL, including any Amazon Attribution parameters, as the
+   destination. Posterlytics preserves its existing query bytes and appends only
+   missing placement UTM parameters.
+4. Generate and export an existing off-Amazon poster format with its tracked QR.
+
+This mode intentionally does not scrape the listing. Bare ASIN input, regional
+Amazon storefronts, Sponsored Brands 1200x628, A+/lifestyle images, brand-store
+banners, and Amazon policy validation are not supported yet.
+
 ## Architecture
 
 - **App:** Vite, React, and TypeScript in `src/`.
@@ -37,7 +56,8 @@ renderable and can be regenerated.
 - **Capture:** `capture-service/` is a Playwright + Sharp compute service that
   returns visible-DOM design tokens, a weighted pixel palette, theme
   classification, and a compressed three-frame style board. It enforces a
-  12-second deadline and blocks private-network targets.
+  12-second deadline and blocks private-network targets. Classified Amazon
+  sources bypass both this service and raw HTML acquisition.
 - **Data:** Owner-only campaign data and visits-only analytics are exposed
   through RLS and narrow `SECURITY DEFINER` RPCs.
 - **Poster formats:** `src/lib/posterSize.ts` is shared by the SPA and bundled

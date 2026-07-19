@@ -22,6 +22,7 @@ import {
   enqueuePosterGeneration,
   retryPosterGeneration,
 } from '../lib/generationApi'
+import { isAmazonSourceUrl } from '../lib/amazonSource'
 import {
   DEFAULT_POSTER_SIZE_SLUG,
   getPosterSize,
@@ -162,6 +163,7 @@ export function CampaignWizardPage() {
     && activity?.status !== 'failed'
     && activity?.status !== 'canceled'
   )
+  const amazonReferenceMode = isAmazonSourceUrl(productUrl)
 
   return (
     <AppShell
@@ -285,6 +287,16 @@ export function CampaignWizardPage() {
                     onChange={(event) => setProductUrl(event.target.value)}
                   />
                 </div>
+                {amazonReferenceMode && (
+                  <div className="field field-wide">
+                    <InlineNotice>
+                      <strong>{t('Amazon seller reference mode')}</strong>
+                      <span>
+                        {t('Amazon listings cannot be read reliably. Add listing copy and product or brand images under Generation references; Posterlytics will use those references instead of scraping the listing.')}
+                      </span>
+                    </InlineNotice>
+                  </div>
+                )}
                 <div className="field">
                   <label htmlFor="product-name">
                     {t('Product name')} <span className="required-label">{t('Required')}</span>

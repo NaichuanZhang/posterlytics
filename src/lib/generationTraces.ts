@@ -11,6 +11,7 @@ import {
   translate,
   type SupportedLocale,
 } from './i18n'
+import { isAmazonSourceUrl } from './amazonSource'
 
 export const TRACE_SOURCE_LABEL_KEYS: Record<TraceImageSource, TranslationKey> = {
   'previous-poster': 'Previous poster',
@@ -155,11 +156,13 @@ export function deriveGenerationPreflight(args: {
   }
 
   if (refreshWebsite) {
-    assets.push(
-      runtimeAsset('logo', translate(locale, 'Website logo'), locale),
-      runtimeAsset('product', translate(locale, 'Website product imagery'), locale),
-      runtimeAsset('style-board', translate(locale, 'Website style board'), locale),
-    )
+    if (!isAmazonSourceUrl(campaign.product_url)) {
+      assets.push(
+        runtimeAsset('logo', translate(locale, 'Website logo'), locale),
+        runtimeAsset('product', translate(locale, 'Website product imagery'), locale),
+        runtimeAsset('style-board', translate(locale, 'Website style board'), locale),
+      )
+    }
   } else {
     if (snapshot.brand_assets?.logo_url) {
       assets.push({

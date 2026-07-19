@@ -35,6 +35,32 @@ test('decorateDestinationUrl preserves a destination fragment', () => {
   )
 })
 
+test('decorateDestinationUrl preserves Amazon Attribution query bytes exactly', () => {
+  assert.equal(
+    decorateDestinationUrl(
+      'https://www.amazon.com/dp/B0EXAMPLE1?maas=maas_adg_123&ref_=aa_maas&tag=seller-20&ascsubtag=summer%2Flaunch%20one#customerReviews',
+      attribution,
+    ),
+    'https://www.amazon.com/dp/B0EXAMPLE1?maas=maas_adg_123&ref_=aa_maas&tag=seller-20&ascsubtag=summer%2Flaunch%20one&utm_source=posterlytics&utm_medium=qr&utm_campaign=Summer+Launch&utm_content=retail-window-7#customerReviews',
+  )
+})
+
+test('decorateDestinationUrl detects encoded UTM keys without reserializing them', () => {
+  assert.equal(
+    decorateDestinationUrl(
+      'https://www.amazon.com/dp/B0EXAMPLE1?%75tm_source=owner%20campaign&ascsubtag=launch%2Fone',
+      attribution,
+    ),
+    'https://www.amazon.com/dp/B0EXAMPLE1?%75tm_source=owner%20campaign&ascsubtag=launch%2Fone&utm_medium=qr&utm_campaign=Summer+Launch&utm_content=retail-window-7',
+  )
+})
+
+test('decorateDestinationUrl returns fully attributed destinations byte-for-byte', () => {
+  const destination =
+    'https://www.amazon.com/dp/B0EXAMPLE1?utm_source=owner%20source&utm_medium=affiliate&utm_campaign=summer%2Flaunch&utm_content=hero%20slot'
+  assert.equal(decorateDestinationUrl(destination, attribution), destination)
+})
+
 test('decorateDestinationUrl returns an unparseable destination unchanged', () => {
   const destination = 'not a valid destination'
   assert.equal(decorateDestinationUrl(destination, attribution), destination)

@@ -194,6 +194,8 @@ export const ENGLISH_MESSAGE_IDS = [
   'Destination URL',
   'Generation references',
   'Add direction or images that are not present on the website.',
+  'Amazon seller reference mode',
+  'Amazon listings cannot be read reliably. Add listing copy and product or brand images under Generation references; Posterlytics will use those references instead of scraping the listing.',
   'Campaign draft saved.',
   'Correct the issue and retry this draft.',
   'Retry generation',
@@ -766,6 +768,9 @@ export const zhCN: Record<TranslationKey, string> = {
   'Destination URL': '目标 URL',
   'Generation references': '生成参考素材',
   'Add direction or images that are not present on the website.': '补充网站中没有的创意方向或图片。',
+  'Amazon seller reference mode': '亚马逊卖家参考素材模式',
+  'Amazon listings cannot be read reliably. Add listing copy and product or brand images under Generation references; Posterlytics will use those references instead of scraping the listing.':
+    '亚马逊商品详情页无法稳定读取。请在“生成参考素材”中添加商品文案以及产品或品牌图片；Posterlytics 将使用这些参考素材，而不会抓取商品详情页。',
   'Campaign draft saved.': '推广活动草稿已保存。',
   'Correct the issue and retry this draft.': '修正问题后重试此草稿。',
   'Retry generation': '重新生成',

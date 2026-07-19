@@ -257,7 +257,8 @@ export interface RedirectAttribution {
 }
 
 // Add customer-visible attribution without overriding campaign-owner choices.
-// URL parsing and serialization also place the query before any fragment.
+// Parse for validation and key detection, but append to the raw query so signed
+// or provider-owned parameter bytes are not normalized by URLSearchParams.
 export function decorateDestinationUrl(
   destinationUrl: string,
   attribution: RedirectAttribution,
@@ -270,11 +271,24 @@ export function decorateDestinationUrl(
       ['utm_campaign', attribution.campaign],
       ['utm_content', attribution.placementCode],
     ] as const;
+    const additions = parameters.filter(([key]) => !url.searchParams.has(key));
+    if (additions.length === 0) return destinationUrl;
 
-    for (const [key, value] of parameters) {
-      if (!url.searchParams.has(key)) url.searchParams.append(key, value);
-    }
-    return url.toString();
+    const fragmentIndex = destinationUrl.indexOf('#');
+    const base = fragmentIndex === -1
+      ? destinationUrl
+      : destinationUrl.slice(0, fragmentIndex);
+    const fragment = fragmentIndex === -1
+      ? ''
+      : destinationUrl.slice(fragmentIndex);
+    const separator = !base.includes('?')
+      ? '?'
+      : base.endsWith('?') || base.endsWith('&')
+        ? ''
+        : '&';
+    const appendedQuery = new URLSearchParams();
+    for (const [key, value] of additions) appendedQuery.append(key, value);
+    return `${base}${separator}${appendedQuery.toString()}${fragment}`;
   } catch {
     return destinationUrl;
   }

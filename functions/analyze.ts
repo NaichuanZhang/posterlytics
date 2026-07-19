@@ -24,12 +24,18 @@ import {
   formatEventLines,
   isLumaHost,
   type BackendClient,
+  type CaptureResult,
   type DesignTokens,
   type EventDetails,
   type GenerationStageRunContext,
   type TraceImageAsset,
   type TypedImageReference,
 } from './_shared.ts';
+import {
+  acquireProductSource,
+  resolveInheritedStyleBoard,
+  type ProductSourceMode,
+} from './_sourceAcquisition.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
 //   1. scrapes the product site (HTML)
@@ -173,8 +179,12 @@ export async function runAnalyzeStage(
 
   const productUrl: string = (campaign as Record<string, string>).product_url;
 
-  // 1. Scrape the site. Legacy events retain the strict Luma allowlist.
+  // 1. Acquire source evidence. Legacy events retain the strict Luma allowlist.
+  // Amazon product pages intentionally use seller-provided references because
+  // both raw fetches and browser captures commonly return CAPTCHA evidence.
   let scrapeHtml = '';
+  let productSourceMode: ProductSourceMode = 'website';
+  let productCapture: CaptureResult | null = null;
   if (scenario === 'event') {
     try {
       const target = new URL(productUrl);
@@ -185,21 +195,10 @@ export async function runAnalyzeStage(
       scrapeHtml = '';
     }
   } else {
-    try {
-      const ctl = new AbortController();
-      const timeout = setTimeout(() => ctl.abort(), 5000);
-      const response = await fetch(productUrl, {
-        signal: ctl.signal,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-        },
-      });
-      clearTimeout(timeout);
-      if (response.ok) scrapeHtml = await response.text();
-    } catch {
-      scrapeHtml = '';
-    }
+    const acquisition = await acquireProductSource(productUrl, colorScheme);
+    productSourceMode = acquisition.mode;
+    scrapeHtml = acquisition.html;
+    productCapture = acquisition.capture;
   }
 
   // 1b. For the event scenario, parse the Luma page's schema.org/Event JSON-LD
@@ -216,8 +215,10 @@ export async function runAnalyzeStage(
   // null when the service is unconfigured/unreachable, in which case we fall
   // back to the regex-mined colors below. (Capture happens here so its palette
   // can seed the model and its tokens are persisted.)
-  const capture = await captureSite(productUrl, colorScheme);
-  if (capture.error) {
+  const capture = scenario === 'event'
+    ? await captureSite(productUrl, colorScheme)
+    : productCapture;
+  if (capture?.error) {
     logPipelineEvent({
       source: 'capture',
       campaignId: campaign.id,
@@ -228,12 +229,12 @@ export async function runAnalyzeStage(
       error: capture.error.message,
     });
   }
-  const design_tokens: DesignTokens | null = capture.tokens;
+  const design_tokens: DesignTokens | null = capture?.tokens ?? null;
   // A successful browser capture is self-contained evidence: only viewport-
   // visible computed DOM colors and style-board pixels are used. Raw HTML color
   // mining is retained strictly for a capture failure/unconfigured fallback.
-  const captureSucceeded = capture.error === null;
-  const hasCapturedEvidence = !!design_tokens || !!capture.styleBoardDataUrl;
+  const captureSucceeded = capture?.error === null;
+  const hasCapturedEvidence = !!design_tokens || !!capture?.styleBoardDataUrl;
   const fallbackHtmlColors = captureSucceeded ? [] : extractColors(scrapeHtml);
   const siteColors = design_tokens
     ? dedupeColors([
@@ -295,10 +296,14 @@ export async function runAnalyzeStage(
     (generation as Record<string, unknown>).screenshot_url ?? '',
   ) || null;
   const previousScreenshotKey = String((generation as Record<string, unknown>).screenshot_key ?? '') || null;
-  let screenshot_url: string | null = previousScreenshotUrl;
-  let screenshot_key: string | null = previousScreenshotKey;
+  const inheritedStyleBoard = resolveInheritedStyleBoard(productSourceMode, {
+    screenshotUrl: previousScreenshotUrl,
+    screenshotKey: previousScreenshotKey,
+  });
+  let screenshot_url: string | null = inheritedStyleBoard.screenshotUrl;
+  let screenshot_key: string | null = inheritedStyleBoard.screenshotKey;
   let uploadedStyleBoardKey: string | null = null;
-  if (capture.styleBoardDataUrl) {
+  if (capture?.styleBoardDataUrl) {
     try {
       const blob = dataUrlToBlob(capture.styleBoardDataUrl);
       const styleBoardKey = `style-board/${campaign.id}/${generation.id}/style-board.jpg`;
@@ -363,7 +368,9 @@ export async function runAnalyzeStage(
       mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
       sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
       storageSource: 'user-upload',
-      purpose: `User-supplied creative reference ${index + 1}; use only where it agrees with or intentionally supplements the source page.`,
+      purpose: productSourceMode === 'amazon-reference'
+        ? `Seller-supplied product or brand reference ${index + 1}; treat as primary visual evidence for this Amazon product.`
+        : `User-supplied creative reference ${index + 1}; use only where it agrees with or intentionally supplements the source page.`,
     })),
   ];
   const preparedAnalysisImages = await prepareImageReferences(analysisCandidates, {
@@ -467,10 +474,20 @@ export async function runAnalyzeStage(
   // Every product poster is designed by the layout agent (`designer`) and painted
   // by `hero` — analyze only produces faithful brand context + structured copy.
   // (The fixed cozy/saas template modes were removed; designer is the one path.)
+  const amazonReferenceMode = productSourceMode === 'amazon-reference';
+  const sourceBrief = amazonReferenceMode
+    ? 'Given seller-provided Amazon listing copy, product or brand images, and GTM inputs, describe only visual characteristics actually present in those references. The Amazon listing URL was intentionally not fetched. '
+    : 'Given a product website, a multi-frame source style board, and GTM inputs, describe only visual characteristics actually observed. ';
+  const paletteBrief = amazonReferenceMode
+    ? 'The palette MUST reflect the seller-provided visual references. Preserve dominant neutrals and restrained accents instead of amplifying every vivid pixel. '
+    : 'The palette and usage proportions MUST reflect the supplied deterministic capture evidence. Preserve dominant neutrals and restrained accents instead of amplifying every vivid pixel. ';
+  const densityBrief = amazonReferenceMode
+    ? 'Classify density only from the seller-provided references, not from how much marketing copy is available.'
+    : 'Classify density from the observed page hierarchy, not from how much marketing copy is available.';
   const sys =
-    'You are a senior product marketer and visual-evidence analyst. Given a product website, a multi-frame source ' +
-    'style board, and GTM inputs, describe only visual characteristics actually observed, then produce structured ' +
-    'copy and a brand word-portrait. The first attached image, when present, is the PRIMARY brand evidence. Adapt ' +
+    'You are a senior product marketer and visual-evidence analyst. ' +
+    sourceBrief +
+    'Then produce structured copy and a brand word-portrait. The first attached image, when present, is the PRIMARY brand evidence. Adapt ' +
     'the evidence for a poster later; do not copy navigation or website controls. Never infer a visual medium from ' +
     'the product category: for example, do not automatically choose risograph for a game. Output STRICT JSON only ' +
     '— no prose, no code fences.\n' +
@@ -489,21 +506,29 @@ export async function runAnalyzeStage(
     '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
     'UI vibe, signature colors (name the hex), and overall feel",' +
     '"qr_label":"<=4 words for the scan caption, e.g. Scan to Start"}\n' +
-    'Keep all copy SHORT and legible. The palette and usage proportions MUST reflect the supplied deterministic ' +
-    'capture evidence. Preserve dominant neutrals and restrained accents instead of amplifying every vivid pixel. ' +
-    'Do not substitute generic SaaS blue or introduce colors absent from the evidence. Classify density from the ' +
-    'observed page hierarchy, not from how much marketing copy is available.';
+    'Keep all copy SHORT and legible. ' +
+    paletteBrief +
+    'Do not substitute generic SaaS blue or introduce colors absent from the evidence. ' +
+    densityBrief;
   const capturedPalette = design_tokens?.colors.visualPalette ?? [];
   const paletteEvidence = capturedPalette.length
     ? capturedPalette
         .map((entry) => `${entry.color} ${(entry.proportion * 100).toFixed(1)}%`)
         .join(', ')
     : siteColors.join(', ');
-  const evidenceSource = hasCapturedEvidence
-    ? 'browser-visible DOM plus weighted style-board pixels'
-    : captureSucceeded
-      ? 'browser capture succeeded but yielded no usable visual palette'
-      : `raw HTML color fallback${assets.themeColor ? ` (theme-color ${assets.themeColor})` : ''}`;
+  const evidenceSource = amazonReferenceMode
+    ? 'seller-provided copy and images; Amazon fetch and browser capture intentionally skipped'
+    : hasCapturedEvidence
+      ? 'browser-visible DOM plus weighted style-board pixels'
+      : captureSucceeded
+        ? 'browser capture succeeded but yielded no usable visual palette'
+        : `raw HTML color fallback${assets.themeColor ? ` (theme-color ${assets.themeColor})` : ''}`;
+  const sourceText = amazonReferenceMode
+    ? 'AUTOMATED AMAZON LISTING TEXT: (not fetched; use the seller-provided creative context below)'
+    : `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}`;
+  const referenceInstruction = amazonReferenceMode
+    ? `The seller supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} product or brand image(s). Treat them as primary product and visual evidence.`
+    : `The user supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} supporting image(s). Treat them as secondary visual references, not text to reproduce verbatim.`;
   const user =
     `PRODUCT NAME: ${campaign.product_name}\n` +
     `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
@@ -513,9 +538,9 @@ export async function runAnalyzeStage(
     `CAPTURED PAGE THEME: ${design_tokens?.colors.theme ?? '(unclassified)'}\n` +
     `WEIGHTED COLOR USAGE (preserve these proportions): ${paletteEvidence || '(none found — infer restrained defaults)'}\n` +
     `VISIBLE DOM COLOR ROLES: bg ${design_tokens?.colors.bg ?? '(unknown)'}, text ${design_tokens?.colors.text ?? '(unknown)'}, primary ${design_tokens?.colors.primary ?? '(unknown)'}, accent ${design_tokens?.colors.accent ?? '(unknown)'}\n\n` +
-    `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}\n\n` +
+    `${sourceText}\n\n` +
     `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
-    `The user supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} supporting image(s). Treat them as secondary visual references, not text to reproduce verbatim.`;
+    referenceInstruction;
   const userContent = userContentWithImageReferences(user, referenceImages, 6);
 
   let parsed: ParsedContent;
@@ -637,7 +662,11 @@ export async function runAnalyzeStage(
   }
   await trace.addArtifact({
     kind: 'analysis',
-    metadata: { scenario: 'product', used_fallback: usedFallback },
+    metadata: {
+      scenario: 'product',
+      source_mode: productSourceMode,
+      used_fallback: usedFallback,
+    },
   });
   await trace.succeed();
 
