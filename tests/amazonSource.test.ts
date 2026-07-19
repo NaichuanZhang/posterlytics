@@ -4,6 +4,7 @@ import {
   acquireProductSource,
   resolveInheritedStyleBoard,
 } from '../functions/_sourceAcquisition.ts'
+import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
 import { isAmazonSourceUrl } from '../src/lib/amazonSource.ts'
 
 test('Amazon source classifier accepts only the supported exact hosts', () => {
@@ -44,6 +45,7 @@ test('Amazon acquisition returns reference mode without raw fetch or capture I/O
   const acquisition = await acquireProductSource(
     'https://www.amazon.com/dp/B0EXAMPLE1',
     'light',
+    resolveProductUseCaseRecipe('amazon_listing'),
     {
       fetchHtml: async () => {
         fetchCalls += 1
@@ -84,6 +86,7 @@ test('ordinary website acquisition retains raw fetch and browser capture', async
   const acquisition = await acquireProductSource(
     'https://example.com/product',
     'dark',
+    resolveProductUseCaseRecipe('website_product'),
     {
       fetchHtml: async (url) => {
         calls.push(`fetch:${url}`)
@@ -105,6 +108,54 @@ test('ordinary website acquisition retains raw fetch and browser capture', async
     'fetch:https://example.com/product',
     'capture:https://example.com/product:dark',
   ])
+})
+
+test('recognized Amazon URLs never perform I/O even under website intent', async () => {
+  let ioCalls = 0
+  const acquisition = await acquireProductSource(
+    'https://www.amazon.com/dp/B0EXAMPLE1',
+    'light',
+    resolveProductUseCaseRecipe('website_product'),
+    {
+      fetchHtml: async () => {
+        ioCalls += 1
+        return '<html>unsafe</html>'
+      },
+      capture: async () => {
+        ioCalls += 1
+        throw new Error('capture must not run')
+      },
+    },
+  )
+
+  assert.deepEqual(acquisition, {
+    mode: 'amazon-reference',
+    html: '',
+    capture: null,
+  })
+  assert.equal(ioCalls, 0)
+})
+
+test('Amazon intent remains no-I/O if a caller reaches acquisition before rejection', async () => {
+  let ioCalls = 0
+  const acquisition = await acquireProductSource(
+    'https://example.com/product',
+    'light',
+    resolveProductUseCaseRecipe('amazon_listing'),
+    {
+      fetchHtml: async () => {
+        ioCalls += 1
+        return '<html>unsafe</html>'
+      },
+      capture: async () => {
+        ioCalls += 1
+        throw new Error('capture must not run')
+      },
+    },
+  )
+
+  assert.equal(acquisition.mode, 'amazon-reference')
+  assert.equal(ioCalls, 0)
 })
 
 test('Amazon refresh clears inherited style-board pointers without mutating them', () => {

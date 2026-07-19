@@ -36,6 +36,10 @@ import {
   resolveInheritedStyleBoard,
   type ProductSourceMode,
 } from './_sourceAcquisition.ts';
+import {
+  resolveProductUseCaseRecipe,
+  useCaseSourceMismatch,
+} from './_useCasePolicy.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
 //   1. scrapes the product site (HTML)
@@ -118,7 +122,7 @@ export async function runAnalyzeStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, generation_mode, instruction, reference_images, scenario, screenshot_url, screenshot_key')
+    .select('id, campaign_id, status, generation_mode, instruction, reference_images, scenario, use_case, screenshot_url, screenshot_key')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -138,6 +142,30 @@ export async function runAnalyzeStage(
     || await stageAlreadySucceeded(context, 'analyze')
   ) {
     return jsonResponse({ generation_id: generation.id, idempotent: true });
+  }
+  const productUrl = String(
+    (campaign as Record<string, unknown>).product_url ?? '',
+  );
+  const sourceMismatch = useCaseSourceMismatch(
+    (generation as Record<string, unknown>).use_case,
+    productUrl,
+  );
+  if (sourceMismatch) {
+    if (finalizeFailure) {
+      await markGenerationFailed(
+        client,
+        generation.id,
+        'analyze',
+        sourceMismatch.message,
+        sourceMismatch.code,
+        userId,
+      );
+    }
+    return jsonResponse({
+      error: sourceMismatch.message,
+      code: sourceMismatch.code,
+      retryable: sourceMismatch.retryable,
+    }, 409);
   }
 
   const { error: stageError } = await client.database
@@ -176,8 +204,9 @@ export async function runAnalyzeStage(
         .filter((image) => typeof image.url === 'string' && image.url)
         .slice(0, 5)
     : [];
-
-  const productUrl: string = (campaign as Record<string, string>).product_url;
+  const productRecipe = resolveProductUseCaseRecipe(
+    (generation as Record<string, unknown>).use_case,
+  );
 
   // 1. Acquire source evidence. Legacy events retain the strict Luma allowlist.
   // Amazon product pages intentionally use seller-provided references because
@@ -195,7 +224,11 @@ export async function runAnalyzeStage(
       scrapeHtml = '';
     }
   } else {
-    const acquisition = await acquireProductSource(productUrl, colorScheme);
+    const acquisition = await acquireProductSource(
+      productUrl,
+      colorScheme,
+      productRecipe,
+    );
     productSourceMode = acquisition.mode;
     scrapeHtml = acquisition.html;
     productCapture = acquisition.capture;
@@ -357,7 +390,7 @@ export async function runAnalyzeStage(
           filename: 'Website style board',
           mimeType: 'image/jpeg',
           storageSource: 'website-capture',
-          purpose: 'Primary source evidence: three page viewports showing palette proportions, typography, imagery, lighting, motifs, hierarchy, and density.',
+          purpose: productRecipe.references.analysisStyleBoard,
         }]
       : []),
     ...userReferenceImages.map((image, index) => ({
@@ -368,9 +401,7 @@ export async function runAnalyzeStage(
       mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
       sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
       storageSource: 'user-upload',
-      purpose: productSourceMode === 'amazon-reference'
-        ? `Seller-supplied product or brand reference ${index + 1}; treat as primary visual evidence for this Amazon product.`
-        : `User-supplied creative reference ${index + 1}; use only where it agrees with or intentionally supplements the source page.`,
+      purpose: productRecipe.references.analysisUserReference(index + 1),
     })),
   ];
   const preparedAnalysisImages = await prepareImageReferences(analysisCandidates, {
@@ -474,19 +505,9 @@ export async function runAnalyzeStage(
   // Every product poster is designed by the layout agent (`designer`) and painted
   // by `hero` — analyze only produces faithful brand context + structured copy.
   // (The fixed cozy/saas template modes were removed; designer is the one path.)
-  const amazonReferenceMode = productSourceMode === 'amazon-reference';
-  const sourceBrief = amazonReferenceMode
-    ? 'Given seller-provided Amazon listing copy, product or brand images, and GTM inputs, describe only visual characteristics actually present in those references. The Amazon listing URL was intentionally not fetched. '
-    : 'Given a product website, a multi-frame source style board, and GTM inputs, describe only visual characteristics actually observed. ';
-  const paletteBrief = amazonReferenceMode
-    ? 'The palette MUST reflect the seller-provided visual references. Preserve dominant neutrals and restrained accents instead of amplifying every vivid pixel. '
-    : 'The palette and usage proportions MUST reflect the supplied deterministic capture evidence. Preserve dominant neutrals and restrained accents instead of amplifying every vivid pixel. ';
-  const densityBrief = amazonReferenceMode
-    ? 'Classify density only from the seller-provided references, not from how much marketing copy is available.'
-    : 'Classify density from the observed page hierarchy, not from how much marketing copy is available.';
   const sys =
     'You are a senior product marketer and visual-evidence analyst. ' +
-    sourceBrief +
+    productRecipe.analyze.sourceBrief +
     'Then produce structured copy and a brand word-portrait. The first attached image, when present, is the PRIMARY brand evidence. Adapt ' +
     'the evidence for a poster later; do not copy navigation or website controls. Never infer a visual medium from ' +
     'the product category: for example, do not automatically choose risograph for a game. Output STRICT JSON only ' +
@@ -507,28 +528,24 @@ export async function runAnalyzeStage(
     'UI vibe, signature colors (name the hex), and overall feel",' +
     '"qr_label":"<=4 words for the scan caption, e.g. Scan to Start"}\n' +
     'Keep all copy SHORT and legible. ' +
-    paletteBrief +
+    productRecipe.analyze.paletteBrief +
     'Do not substitute generic SaaS blue or introduce colors absent from the evidence. ' +
-    densityBrief;
+    productRecipe.analyze.densityBrief;
   const capturedPalette = design_tokens?.colors.visualPalette ?? [];
   const paletteEvidence = capturedPalette.length
     ? capturedPalette
         .map((entry) => `${entry.color} ${(entry.proportion * 100).toFixed(1)}%`)
         .join(', ')
     : siteColors.join(', ');
-  const evidenceSource = amazonReferenceMode
-    ? 'seller-provided copy and images; Amazon fetch and browser capture intentionally skipped'
-    : hasCapturedEvidence
-      ? 'browser-visible DOM plus weighted style-board pixels'
-      : captureSucceeded
-        ? 'browser capture succeeded but yielded no usable visual palette'
-        : `raw HTML color fallback${assets.themeColor ? ` (theme-color ${assets.themeColor})` : ''}`;
-  const sourceText = amazonReferenceMode
-    ? 'AUTOMATED AMAZON LISTING TEXT: (not fetched; use the seller-provided creative context below)'
-    : `WEBSITE TEXT (truncated):\n${visibleText || '(scrape failed — rely on the inputs above)'}`;
-  const referenceInstruction = amazonReferenceMode
-    ? `The seller supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} product or brand image(s). Treat them as primary product and visual evidence.`
-    : `The user supplied ${referenceImages.filter((image) => image.kind === 'user-reference').length} supporting image(s). Treat them as secondary visual references, not text to reproduce verbatim.`;
+  const evidenceSource = productRecipe.analyze.evidenceSource({
+    hasCapturedEvidence,
+    captureSucceeded,
+    themeColor: assets.themeColor ?? null,
+  });
+  const sourceText = productRecipe.analyze.sourceText(visibleText);
+  const referenceInstruction = productRecipe.analyze.referenceInstruction(
+    referenceImages.filter((image) => image.kind === 'user-reference').length,
+  );
   const user =
     `PRODUCT NAME: ${campaign.product_name}\n` +
     `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +

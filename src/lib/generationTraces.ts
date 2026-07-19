@@ -11,7 +11,6 @@ import {
   translate,
   type SupportedLocale,
 } from './i18n'
-import { isAmazonSourceUrl } from './amazonSource'
 
 export const TRACE_SOURCE_LABEL_KEYS: Record<TraceImageSource, TranslationKey> = {
   'previous-poster': 'Previous poster',
@@ -156,7 +155,7 @@ export function deriveGenerationPreflight(args: {
   }
 
   if (refreshWebsite) {
-    if (!isAmazonSourceUrl(campaign.product_url)) {
+    if (campaign.use_case !== 'amazon_listing') {
       assets.push(
         runtimeAsset('logo', translate(locale, 'Website logo'), locale),
         runtimeAsset('product', translate(locale, 'Website product imagery'), locale),

@@ -26,6 +26,7 @@ import {
   type PosterSize,
   type TypedImageReference,
 } from './_shared.ts';
+import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
 
 // `hero` renders the registered artwork frame as a single AI image. Products
 // compile the LLM-designed poster_layout (produced by the `designer` agent) into
@@ -102,7 +103,7 @@ export async function runHeroStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, poster_format, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key, trace_schema_version, asset_selection_status')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, poster_format, use_case, style_profile, poster_spec, poster_content, poster_copy, brand_essence, poster_layout, brand_assets, scenario, event_details, screenshot_url, screenshot_key, design_status, hero_image_url, hero_image_key, trace_schema_version, asset_selection_status')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -164,6 +165,9 @@ export async function runHeroStage(
     ...(generation as Record<string, unknown>),
     ...(campaign as Record<string, unknown>),
   };
+  const recipe = resolveProductUseCaseRecipe(
+    (generation as Record<string, unknown>).use_case,
+  );
   const posterSize = getPosterSize(
     (generation as Record<string, unknown>).poster_format,
   );
@@ -221,7 +225,7 @@ export async function runHeroStage(
             : undefined,
           filename: 'Previous poster',
           storageSource: 'poster-version',
-          purpose: 'Primary edit source: keep every visual choice that the user did not explicitly ask to change.',
+          purpose: recipe.references.heroPrevious,
         }]
       : []),
     ...userReferences.map((image, index) => ({
@@ -232,7 +236,7 @@ export async function runHeroStage(
       mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
       sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
       storageSource: 'user-upload',
-      purpose: `New supporting image ${index + 1}; use it only for the requested change while preserving the parent poster.`,
+      purpose: recipe.references.heroUserReference(index + 1),
     })),
     ...(assets.logo_url
       ? [{
@@ -241,7 +245,7 @@ export async function runHeroStage(
           key: assets.logo_key,
           filename: 'Brand logo',
           storageSource: 'website-asset',
-          purpose: 'Authentic brand logo; reproduce faithfully only if this reference remains attached.',
+          purpose: recipe.references.heroLogo,
         }]
       : []),
     ...productImages.map((image, index) => ({
@@ -250,7 +254,7 @@ export async function runHeroStage(
       key: image.key,
       filename: `Product image ${index + 1}`,
       storageSource: 'website-asset',
-      purpose: `Authentic product or brand image ${index + 1}; preserve its real subject and visual details.`,
+      purpose: recipe.references.heroProduct(index + 1),
     })),
     ...(!isEvent && screenshotUrl
       ? [{
@@ -261,7 +265,7 @@ export async function runHeroStage(
             : undefined,
           filename: 'Website style board',
           storageSource: 'website-capture',
-          purpose: 'Supporting source evidence for palette, typography, imagery treatment, lighting, texture, motifs, and density.',
+          purpose: recipe.references.heroStyleBoard,
         }]
       : []),
   ];
@@ -338,6 +342,7 @@ export async function runHeroStage(
     referenceImages.some((reference) => reference.kind === 'previous-poster'),
     posterSize,
     parentPosterSize,
+    recipe,
   );
 
   // Request the registered ratio explicitly, never provider pixel dimensions.
@@ -526,6 +531,7 @@ function buildPosterPrompt(
   hasPreviousPoster = false,
   posterSize: PosterSize = DEFAULT_POSTER_SIZE,
   parentPosterSize: PosterSize | null = null,
+  recipe = resolveProductUseCaseRecipe(undefined),
 ): string {
   const instruction = String(c.instruction ?? '').trim().slice(0, 4000);
   const referenceCount = Array.isArray(c.reference_images) ? c.reference_images.length : 0;
@@ -536,6 +542,7 @@ function buildPosterPrompt(
     refreshWebsite: c.generation_mode === 'website_refresh',
     posterSize,
     parentPosterSize,
+    recipe,
   });
   const referenceBlock =
     `\n\n${parentContext}` +
@@ -549,9 +556,9 @@ function buildPosterPrompt(
     hasStyleBoard,
   };
   if (layout && Array.isArray(layout.zones) && layout.zones.length > 0) {
-    return compileLayoutPrompt(layout, ctx, posterSize) + referenceBlock;
+    return compileLayoutPrompt(layout, ctx, posterSize, recipe) + referenceBlock;
   }
-  return compileLayoutPrompt(fallbackLayout(c), ctx, posterSize) + referenceBlock;
+  return compileLayoutPrompt(fallbackLayout(c), ctx, posterSize, recipe) + referenceBlock;
 }
 
 // A safe generic layout for when poster_layout is absent (designer failed or

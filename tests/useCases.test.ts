@@ -18,6 +18,22 @@ const registrySource = readFileSync(
   new URL('../src/lib/useCases.ts', import.meta.url),
   'utf8',
 )
+const editorSource = readFileSync(
+  new URL('../src/pages/PosterEditorPage.tsx', import.meta.url),
+  'utf8',
+)
+const generationTracesSource = readFileSync(
+  new URL('../src/lib/generationTraces.ts', import.meta.url),
+  'utf8',
+)
+const designerSource = readFileSync(
+  new URL('../functions/designer.ts', import.meta.url),
+  'utf8',
+)
+const heroSource = readFileSync(
+  new URL('../functions/hero.ts', import.meta.url),
+  'utf8',
+)
 
 test('registry contains only the persisted use cases shipped in this cycle', () => {
   assert.deepEqual(USE_CASE_IDS, [
@@ -111,4 +127,31 @@ test('wizard persists intent with the shared exact-host classifier payload', () 
   )
   assert.match(wizard, /\.update\(values\)/)
   assert.doesNotMatch(wizard, /use_case:[\s\S]{0,120}(?:prompt|recipe)/i)
+})
+
+test('editor and preflight consume persisted intent while URL classification stays in the wizard', () => {
+  assert.match(
+    editorSource,
+    /campaign\.use_case === 'amazon_listing'/,
+  )
+  assert.match(
+    generationTracesSource,
+    /campaign\.use_case !== 'amazon_listing'/,
+  )
+  assert.doesNotMatch(editorSource, /isAmazonSourceUrl/)
+  assert.doesNotMatch(generationTracesSource, /isAmazonSourceUrl/)
+  assert.match(wizard, /isAmazonSourceUrl\(productUrl\)/)
+})
+
+test('content stages resolve recipes from the frozen generation snapshot', () => {
+  for (const source of [designerSource, heroSource]) {
+    assert.match(
+      source,
+      /resolveProductUseCaseRecipe\(\s*\(generation as Record<string, unknown>\)\.use_case,\s*\)/,
+    )
+    assert.doesNotMatch(
+      source,
+      /resolveProductUseCaseRecipe\((?:c|generationSnapshot)\.use_case\)/,
+    )
+  }
 })

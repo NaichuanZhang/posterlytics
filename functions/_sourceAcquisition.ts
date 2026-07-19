@@ -4,8 +4,12 @@ import {
   type CaptureColorScheme,
   type CaptureResult,
 } from './_shared.ts';
+import type {
+  ProductSourceMode,
+  ProductUseCaseRecipe,
+} from './_useCasePolicy.ts';
 
-export type ProductSourceMode = 'website' | 'amazon-reference';
+export type { ProductSourceMode } from './_useCasePolicy.ts';
 
 export interface ProductSourceAcquisition {
   mode: ProductSourceMode;
@@ -53,9 +57,15 @@ const DEFAULT_DEPENDENCIES: SourceAcquisitionDependencies = {
 export async function acquireProductSource(
   productUrl: string,
   colorScheme: CaptureColorScheme,
+  recipe: ProductUseCaseRecipe,
   dependencies: SourceAcquisitionDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<ProductSourceAcquisition> {
-  if (isAmazonSourceUrl(productUrl)) {
+  // URL classification is the independent safety boundary: even a malformed
+  // persisted recipe can never make a recognized Amazon host fetch or capture.
+  if (
+    isAmazonSourceUrl(productUrl)
+    || recipe.acquisitionMode === 'amazon-reference'
+  ) {
     return {
       mode: 'amazon-reference',
       html: '',

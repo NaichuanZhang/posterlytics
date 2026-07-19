@@ -203,11 +203,13 @@ export function PosterVersionHistory({
                     </time>
                   </span>
                   <small>
-                    {generation.failure_message || (
-                      generation.status === 'canceled'
-                        ? t('Canceled before poster generation.')
-                        : t('Generation did not complete.')
-                    )}
+                    {generation.failure_code === 'use_case_source_mismatch'
+                      ? t('Campaign type does not match its source.')
+                      : generation.failure_message || (
+                          generation.status === 'canceled'
+                            ? t('Canceled before poster generation.')
+                            : t('Generation did not complete.')
+                        )}
                   </small>
                   <ListTree size={14} aria-hidden="true" />
                 </button>

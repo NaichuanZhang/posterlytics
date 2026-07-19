@@ -110,6 +110,7 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'From website to wall.': '从网页，到墙面。',
     'Refine without starting over.': '迭代，不必推倒重来。',
     'Know what got scanned.': '每次扫码，都有迹可循。',
+    'Campaign type does not match its source.': '推广活动类型与来源不匹配。',
   }
 
   for (const [key, value] of Object.entries(expected)) {

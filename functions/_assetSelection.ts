@@ -15,6 +15,7 @@ import {
   type TraceImageSkip,
   type TypedImageReference,
 } from './_shared.ts';
+import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
 
 const MAX_SELECTED_ASSETS = 6;
 const MAX_CANDIDATE_ASSETS = 50;
@@ -37,6 +38,7 @@ interface AssetSnapshot {
   screenshot_url: string | null;
   screenshot_key: string | null;
   scenario: string;
+  use_case: string | null;
   asset_selection_mode: 'editor' | 'yolo';
   asset_selection_status: 'pending' | 'completed';
   trace_schema_version: number | null;
@@ -85,10 +87,11 @@ export class AssetSelectionValidationError extends Error {
 export function buildGenerationAssetCandidates(
   generation: Pick<
     AssetSnapshot,
-    'generation_mode' | 'reference_images' | 'brand_assets' | 'screenshot_url' | 'screenshot_key' | 'scenario'
+    'generation_mode' | 'reference_images' | 'brand_assets' | 'screenshot_url' | 'screenshot_key' | 'scenario' | 'use_case'
   >,
   parent: ParentSnapshot | null,
 ): GenerationAssetCandidate[] {
+  const recipe = resolveProductUseCaseRecipe(generation.use_case);
   const assets = generation.brand_assets ?? {};
   const productImages = generation.scenario === 'event'
     ? []
@@ -112,8 +115,8 @@ export function buildGenerationAssetCandidates(
           filename: 'Previous poster',
           storageSource: 'poster-version',
           purpose: generation.generation_mode === 'website_refresh'
-            ? 'Current poster version; preserve useful visual continuity while applying refreshed website evidence.'
-            : 'Primary edit source; preserve every visual choice not explicitly changed by the user.',
+            ? recipe.references.assetPreviousRefresh
+            : recipe.references.assetPreviousIteration,
         }]
       : []),
     ...generation.reference_images
@@ -126,7 +129,7 @@ export function buildGenerationAssetCandidates(
         mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
         sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
         storageSource: 'user-upload',
-        purpose: `User-supplied creative reference ${index + 1}; use it only where it supports the requested change.`,
+        purpose: recipe.references.assetUserReference(index + 1),
       })),
     ...(assets.logo_url
       ? [{
@@ -135,7 +138,7 @@ export function buildGenerationAssetCandidates(
           key: assets.logo_key,
           filename: 'Brand logo',
           storageSource: 'website-asset',
-          purpose: 'Authentic brand logo; reproduce it faithfully when included.',
+          purpose: recipe.references.assetLogo,
         }]
       : []),
     ...productImages.map((image, index) => ({
@@ -144,7 +147,7 @@ export function buildGenerationAssetCandidates(
       key: image.key,
       filename: `Product image ${index + 1}`,
       storageSource: 'website-asset',
-      purpose: `Authentic product or brand image ${index + 1}; preserve its real subject and visual details.`,
+      purpose: recipe.references.assetProduct(index + 1),
     })),
     ...(generation.screenshot_url
       ? [{
@@ -153,7 +156,7 @@ export function buildGenerationAssetCandidates(
           key: generation.screenshot_key ?? undefined,
           filename: 'Website style board',
           storageSource: 'website-capture',
-          purpose: 'Website evidence for palette, typography, imagery treatment, lighting, texture, motifs, and density.',
+          purpose: recipe.references.assetStyleBoard,
         }]
       : []),
   ];
@@ -476,7 +479,7 @@ async function loadGeneration(
 ): Promise<AssetSnapshot | null> {
   const { data, error } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, user_id, parent_generation_id, generation_mode, instruction, reference_images, brand_assets, screenshot_url, screenshot_key, scenario, asset_selection_mode, asset_selection_status, trace_schema_version')
+    .select('id, campaign_id, user_id, parent_generation_id, generation_mode, instruction, reference_images, brand_assets, screenshot_url, screenshot_key, scenario, use_case, asset_selection_mode, asset_selection_status, trace_schema_version')
     .eq('id', context.generationId)
     .eq('campaign_id', context.campaignId)
     .eq('user_id', context.userId)

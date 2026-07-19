@@ -7,6 +7,10 @@ import {
   hasPosterQrBand,
   type PosterSize,
 } from '../src/lib/posterSize.ts';
+import {
+  resolveProductUseCaseRecipe,
+  type ProductUseCaseRecipe,
+} from './_useCasePolicy.ts';
 
 export {
   DEFAULT_POSTER_SIZE,
@@ -2020,10 +2024,12 @@ export function buildParentContextPrompt(args: {
   refreshWebsite?: boolean;
   posterSize?: PosterSize;
   parentPosterSize?: PosterSize | null;
+  recipe?: ProductUseCaseRecipe;
 }): string {
   const instruction = args.instruction?.trim().slice(0, 4000) ||
     'Create a refined next version without introducing gratuitous changes.';
   const posterSize = args.posterSize ?? DEFAULT_POSTER_SIZE;
+  const stages = (args.recipe ?? resolveProductUseCaseRecipe(undefined)).stages;
   const formatChange = args.parentPosterSize &&
       args.parentPosterSize.slug !== posterSize.slug
     ? `FORMAT CHANGE: The target frame is ${getPosterFrameLabel(posterSize)}. Recompose the poster for this frame.`
@@ -2035,7 +2041,7 @@ export function buildParentContextPrompt(args: {
       `USER REQUEST: ${instruction}`,
       formatChange,
       args.refreshWebsite
-        ? 'Use the freshly captured website evidence as the visual source of truth.'
+        ? stages.parentFirstRefresh
         : '',
     ].filter(Boolean).join('\n');
   }
@@ -2052,8 +2058,8 @@ export function buildParentContextPrompt(args: {
     formatChange,
     'PRESERVATION RULE: Keep every element, word, hierarchy choice, crop, color role, type treatment, texture, motif, spacing relationship, and composition decision that the user did not explicitly ask to change.',
     args.refreshWebsite
-      ? 'WEBSITE REFRESH: Reconcile newly captured brand evidence only where it conflicts with stale brand facts; the requested delta and preservation rule still govern the edit.'
-      : 'BRAND SNAPSHOT: Reuse the current version brand analysis; do not reinterpret the website or invent a new direction.',
+      ? stages.parentRefresh
+      : stages.parentSnapshot,
     `PARENT LAYOUT JSON: ${layout}`,
   ].join('\n');
 }
@@ -2098,6 +2104,7 @@ export function compileLayoutPrompt(
   layout: PosterLayout,
   ctx: { product: string; essence: string; hasLogo?: boolean; hasStyleBoard?: boolean },
   posterSize: PosterSize = DEFAULT_POSTER_SIZE,
+  recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
 ): string {
   const p = layout.palette_roles;
   const actionInstructions = productPosterActionInstructions(posterSize);
@@ -2122,8 +2129,8 @@ export function compileLayoutPrompt(
     ? '\nA reference image of the brand LOGO is provided alongside this prompt — reproduce it FAITHFULLY (exact shape, proportions, and colors) in the top brand row. Do not redraw, restyle, or distort it.\n'
     : '\nNo authentic logo image is attached. If the layout calls for a brand identifier, render only the product name already supplied in its quoted zone, as plain text. Do not invent or render any logo, icon, emblem, monogram, mascot, or brand symbol.\n';
   const sourceEvidence = ctx.hasStyleBoard
-    ? 'A labeled STYLE BOARD image captured from the real source page is attached. Treat it as the primary brand-style evidence while preserving the painter priority described by each reference label.'
-    : 'No source style board is attached; rely on the source-derived direction and palette below.';
+    ? recipe.stages.heroStyleBoardAttached
+    : recipe.stages.heroStyleBoardMissing;
   const proportions = p.proportions?.length
     ? p.proportions
         .map((entry) => `${entry.color} about ${Math.round(entry.proportion * 100)}%`)
@@ -2147,11 +2154,11 @@ export function compileLayoutPrompt(
       'Preserve the source page\'s DENSE rhythm: layer the supplied zones and supporting visual detail while keeping every element legible.',
   };
 
-  return `Create a single ${getPosterFrameLabel(posterSize)} product-promotion poster. Custom art-directed layout (NOT a generic template).
+  return `Create a single ${getPosterFrameLabel(posterSize)} ${recipe.stages.heroPosterKind}. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
 ${visualDirection ? `${visualDirection}\n` : ''}${sourceEvidence}
 
-Translate the observed visual language into a poster-specific composition. Do not copy navigation bars, menus, browser chrome, app screens, cards, buttons, tabs, form controls, or other website UI. Do not impose category stereotypes or substitute a trendy medium that is not evidenced by the source. Any REFERENCE PURPOSE labels attached after this prompt are instructions only and must never appear as poster text.
+${recipe.stages.heroTranslationRule}
 
 ${actionInstructions.painterRule}
 

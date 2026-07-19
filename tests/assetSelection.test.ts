@@ -12,6 +12,7 @@ import { prepareImageReferences } from '../functions/_shared.ts'
 const generation = {
   generation_mode: 'iteration' as const,
   scenario: 'product',
+  use_case: 'website_product',
   reference_images: [{
     key: 'references/support.png',
     url: 'https://assets.example/support.png',
@@ -50,6 +51,48 @@ test('candidate construction deduplicates primary product imagery and preserves 
     1,
   )
   assert.equal(new Set(candidates.map((candidate) => candidate.candidateKey)).size, 6)
+})
+
+test('candidate purposes are selected through use-case recipes without prompt drift', () => {
+  const website = buildGenerationAssetCandidates(generation, {
+    hero_image_url: 'https://assets.example/previous.png',
+    hero_image_key: 'poster/previous.png',
+  })
+  const amazon = buildGenerationAssetCandidates({
+    ...generation,
+    use_case: 'amazon_listing',
+  }, {
+    hero_image_url: 'https://assets.example/previous.png',
+    hero_image_key: 'poster/previous.png',
+  })
+
+  assert.deepEqual(
+    amazon.map((candidate) => candidate.purpose),
+    website.map((candidate) => candidate.purpose),
+  )
+  assert.deepEqual(website.map((candidate) => candidate.purpose), [
+    'Primary edit source; preserve every visual choice not explicitly changed by the user.',
+    'User-supplied creative reference 1; use it only where it supports the requested change.',
+    'Authentic brand logo; reproduce it faithfully when included.',
+    'Authentic product or brand image 1; preserve its real subject and visual details.',
+    'Authentic product or brand image 3; preserve its real subject and visual details.',
+    'Website evidence for palette, typography, imagery treatment, lighting, texture, motifs, and density.',
+  ])
+})
+
+test('event candidates retain the bespoke no-product path', () => {
+  const candidates = buildGenerationAssetCandidates({
+    ...generation,
+    scenario: 'event',
+    use_case: 'event',
+  }, null)
+
+  assert.equal(candidates.some((candidate) => candidate.kind === 'product'), false)
+  assert.deepEqual(candidates.map((candidate) => candidate.kind), [
+    'user-reference',
+    'logo',
+    'style-board',
+  ])
 })
 
 test('candidate validation retains unavailable rows with auditable reasons', async () => {

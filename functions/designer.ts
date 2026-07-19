@@ -27,6 +27,7 @@ import {
   type PosterLayout,
   type TypedImageReference,
 } from './_shared.ts';
+import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
 
 // `designer` is the layout-design agent for the `designer` poster style. It runs
 // BETWEEN analyze and hero: given the brand context analyze produced
@@ -102,7 +103,7 @@ export async function runDesignerStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, poster_format, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout, trace_schema_version, asset_selection_status')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, poster_format, use_case, brand_essence, style_profile, poster_copy, poster_content, design_tokens, brand_assets, screenshot_url, screenshot_key, poster_layout, trace_schema_version, asset_selection_status')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -163,6 +164,9 @@ export async function runDesignerStage(
     ...(generation as Record<string, unknown>),
     ...(campaign as Record<string, unknown>),
   };
+  const recipe = resolveProductUseCaseRecipe(
+    (generation as Record<string, unknown>).use_case,
+  );
   const posterSize = getPosterSize(
     (generation as Record<string, unknown>).poster_format,
   );
@@ -199,7 +203,7 @@ export async function runDesignerStage(
             : undefined,
           filename: 'Previous poster',
           storageSource: 'poster-version',
-          purpose: 'The current poster to edit. Preserve every visual choice not explicitly changed by the user request.',
+          purpose: recipe.references.designerPrevious,
         }]
       : []),
     ...(typeof c.screenshot_url === 'string' && c.screenshot_url
@@ -209,7 +213,7 @@ export async function runDesignerStage(
           key: typeof c.screenshot_key === 'string' ? c.screenshot_key : undefined,
           filename: 'Website style board',
           storageSource: 'website-capture',
-          purpose: 'Primary source evidence: merged page viewports for observed palette proportions, typography, imagery, lighting, motifs, composition, and density.',
+          purpose: recipe.references.designerStyleBoard,
         }]
       : []),
     ...userReferenceImages.map((image, index) => ({
@@ -220,7 +224,7 @@ export async function runDesignerStage(
       mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
       sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
       storageSource: 'user-upload',
-      purpose: `User-supplied creative reference ${index + 1}; secondary to the source style board.`,
+      purpose: recipe.references.designerUserReference(index + 1),
     })),
   ];
   const usesFrozenAssets = c.trace_schema_version === 2;
@@ -314,14 +318,15 @@ export async function runDesignerStage(
     refreshWebsite: c.generation_mode === 'website_refresh',
     posterSize,
     parentPosterSize,
+    recipe,
   });
   const actionInstructions = productPosterActionInstructions(posterSize);
 
   const sys =
-    `You are an award-winning poster art director creating the next version of a ${getPosterFrameLabel(posterSize)} product poster. ` +
+    `You are an award-winning poster art director creating the next version of a ${getPosterFrameLabel(posterSize)} ${recipe.stages.designerPosterKind}. ` +
     'Follow the iteration contract exactly: preserve the parent composition and every unspecified choice, changing ' +
-    'only what the user requested. Reference-purpose labels identify the previous poster, source style board, and ' +
-    'supporting images. Use observed evidence rather than category assumptions or a generic template. Never pick a ' +
+    `only what the user requested. Reference-purpose labels identify the ${recipe.stages.designerReferenceSubjects} ` +
+    `${recipe.stages.designerEvidenceRule} Never pick a ` +
     'medium from a category stereotype; for example, a game is not automatically risograph. Output STRICT JSON only ' +
     '(no prose, no code fences) ' +
     'matching this schema:\n' +
@@ -354,7 +359,7 @@ export async function runDesignerStage(
     `BRAND ESSENCE (word-portrait for the art director): ${essence || '(none)'}\n` +
     `BRAND COLORS (use these for palette_roles): bg ${palHint.bg}, text ${palHint.text}, primary ${palHint.primary}, accent ${palHint.accent}${palHint.secondary ? `, secondary ${palHint.secondary}` : ''}${palHint.supporting?.length ? `, supporting ${palHint.supporting.join(', ')}` : ''}\n` +
     `WEIGHTED COLOR USAGE: ${palHint.proportions?.length ? palHint.proportions.map((entry) => `${entry.color} ${(entry.proportion * 100).toFixed(1)}%`).join(', ') : '(not available)'}\n` +
-    `SOURCE VISUAL OBSERVATIONS:\n` +
+    `${recipe.stages.designerSourceObservationsHeading}\n` +
     `- Imagery: ${sp.imagery || '(read from the style board)'}\n` +
     `- Typography: ${sp.typography_treatment || `${sp.fonts.heading} headings / ${sp.fonts.body} body`}\n` +
     `- Lighting: ${sp.lighting || '(read from the style board)'}\n` +

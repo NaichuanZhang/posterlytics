@@ -43,7 +43,6 @@ import {
   isActiveGenerationJob,
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
-import { isAmazonSourceUrl } from '../lib/amazonSource'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
@@ -222,7 +221,7 @@ export function PosterEditorPage() {
   const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
-  const amazonReferenceMode = isAmazonSourceUrl(campaign.product_url)
+  const amazonReferenceMode = campaign.use_case === 'amazon_listing'
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity

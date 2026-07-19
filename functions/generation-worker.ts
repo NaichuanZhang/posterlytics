@@ -16,6 +16,7 @@ import {
   type WorkerFailure,
   type WorkerStage,
 } from './_workerPolicy.ts';
+import { useCaseSourceMismatch } from './_useCasePolicy.ts';
 
 interface ClaimedJob {
   id: string;
@@ -33,6 +34,7 @@ interface GenerationState {
   id: string;
   status: string;
   scenario: string;
+  use_case: string | null;
   trace_schema_version: number | null;
 }
 
@@ -80,7 +82,7 @@ export default async function (req: Request): Promise<Response> {
   return jsonResponse({ claimed: jobs.length, results });
 }
 
-async function processClaimedJob(
+export async function processClaimedJob(
   client: BackendClient,
   workerId: string,
   job: ClaimedJob,
@@ -102,11 +104,20 @@ async function processClaimedJob(
     });
   }
 
-  const traceStatus = await loadTraceStatus(client, job);
   if (generation.status === 'ready') {
+    const traceStatus = await loadTraceStatus(client, job);
     await reconcileReadyTrace(client, job, traceStatus);
     return advance(client, workerId, job, null);
   }
+  const sourceMismatch = useCaseSourceMismatch(
+    generation.use_case,
+    await loadCampaignProductUrl(client, job),
+  );
+  if (sourceMismatch) {
+    return recordFailure(client, workerId, job, sourceMismatch);
+  }
+
+  const traceStatus = await loadTraceStatus(client, job);
   if (traceStatus === 'succeeded' || traceStatus === 'skipped') {
     return advance(
       client,
@@ -248,13 +259,27 @@ async function loadGeneration(
 ): Promise<GenerationState | null> {
   const { data, error } = await client.database
     .from('poster_generations')
-    .select('id, status, scenario, trace_schema_version')
+    .select('id, status, scenario, use_case, trace_schema_version')
     .eq('id', job.generation_id)
     .eq('campaign_id', job.campaign_id)
     .eq('user_id', job.user_id)
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data as GenerationState | null;
+}
+
+async function loadCampaignProductUrl(
+  client: BackendClient,
+  job: ClaimedJob,
+): Promise<unknown> {
+  const { data, error } = await client.database
+    .from('campaigns')
+    .select('product_url')
+    .eq('id', job.campaign_id)
+    .eq('user_id', job.user_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { product_url?: unknown } | null)?.product_url;
 }
 
 async function loadTraceStatus(

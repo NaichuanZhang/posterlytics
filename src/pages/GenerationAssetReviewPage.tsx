@@ -310,7 +310,9 @@ export function GenerationAssetReviewPage() {
           <InlineNotice tone="warning">{t('This asset review was canceled.')}</InlineNotice>
         ) : generation.status === 'failed' ? (
           <InlineNotice tone="error">
-            {generation.failure_message || t('Asset preparation failed.')}
+            {generation.failure_code === 'use_case_source_mismatch'
+              ? t('Campaign type does not match its source.')
+              : generation.failure_message || t('Asset preparation failed.')}
           </InlineNotice>
         ) : (
           <>

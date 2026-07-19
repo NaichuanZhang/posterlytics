@@ -46,6 +46,7 @@ const CAMPAIGN = {
   id: 'campaign-1',
   current_generation_id: CURRENT.id,
   product_url: 'https://example.com/product',
+  use_case: 'website_product',
   brand_assets: CURRENT.brand_assets,
   screenshot_url: CURRENT.screenshot_url,
   screenshot_key: CURRENT.screenshot_key,
@@ -101,6 +102,7 @@ test('Amazon refresh preflight omits unavailable website evidence', () => {
     campaign: {
       ...CAMPAIGN,
       product_url: 'https://www.amazon.com/dp/B0EXAMPLE1',
+      use_case: 'amazon_listing',
     },
     currentGeneration: CURRENT,
     selectedGeneration: CURRENT,
@@ -111,6 +113,42 @@ test('Amazon refresh preflight omits unavailable website evidence', () => {
 
   assert.deepEqual(
     preflight.assets.map((asset) => asset.source),
+    ['previous-poster'],
+  )
+})
+
+test('preflight follows persisted use case instead of sniffing the source URL', () => {
+  const websiteIntent = deriveGenerationPreflight({
+    campaign: {
+      ...CAMPAIGN,
+      product_url: 'https://www.amazon.com/dp/B0EXAMPLE1',
+      use_case: 'website_product',
+    },
+    currentGeneration: CURRENT,
+    selectedGeneration: CURRENT,
+    instruction: '',
+    pendingReferences: [],
+    refreshWebsite: true,
+  })
+  const amazonIntent = deriveGenerationPreflight({
+    campaign: {
+      ...CAMPAIGN,
+      product_url: 'https://example.com/product',
+      use_case: 'amazon_listing',
+    },
+    currentGeneration: CURRENT,
+    selectedGeneration: CURRENT,
+    instruction: '',
+    pendingReferences: [],
+    refreshWebsite: true,
+  })
+
+  assert.deepEqual(
+    websiteIntent.assets.filter((asset) => asset.runtime).map((asset) => asset.source),
+    ['logo', 'product', 'style-board'],
+  )
+  assert.deepEqual(
+    amazonIntent.assets.map((asset) => asset.source),
     ['previous-poster'],
   )
 })
