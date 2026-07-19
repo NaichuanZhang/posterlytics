@@ -52,6 +52,7 @@ try {
   await testCampaignWizardDraftSwitch(browser)
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
+  await testSocialCoverFrozenHint(browser)
   await testRedNoteCoverFormat(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
@@ -409,7 +410,7 @@ async function testCampaignWizardUseCases(browserInstance) {
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
   const picker = page.locator('.use-case-picker')
   await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  assert.equal(await picker.getByRole('button').count(), 2)
+  assert.equal(await picker.getByRole('button').count(), 3)
   await picker.getByText(
     'Create from a product website and its visual identity.',
     { exact: true },
@@ -418,14 +419,45 @@ async function testCampaignWizardUseCases(browserInstance) {
     'Create from an Amazon listing plus seller-provided copy and images.',
     { exact: true },
   ).waitFor()
+  await picker.getByText(
+    'Create full-bleed artwork from creative references and direction.',
+    { exact: true },
+  ).waitFor()
   assert.equal(await picker.getByText('Event', { exact: true }).count(), 0)
-  assert.equal(await picker.getByText(/social cover/i).count(), 0)
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/campaign-use-case-picker-desktop.png`,
     fullPage: true,
   })
 
+  await selectWizardUseCase(page, 'Social cover')
+  assert.deepEqual(
+    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Creative references and direction', 'Artwork details'],
+  )
+  assert.equal(await page.locator('#product-url').count(), 0)
+  assert.equal(await page.locator('#destination-url').count(), 0)
+  assert.equal(await page.locator('#cta-text').count(), 0)
+  assert.equal(await page.locator('#platform-hint').count(), 1)
+  assert.equal(await page.locator('#poster-format option').count(), 1)
+  assert.equal(await page.locator('#poster-format').inputValue(), 'rednote_cover_3x4')
+  const socialReferences = page.locator('section[aria-labelledby="references-heading"]')
+  assert.equal(
+    await socialReferences.locator('.generation-references label').first().innerText(),
+    'Creative direction (optional)',
+  )
+  assert.match(
+    await socialReferences.locator('.generation-references .field-label').innerText(),
+    /^Creative references Required/,
+  )
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster', exact: true }).isDisabled(),
+    true,
+  )
+  await assertNoOverflow(page)
+
+  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
+  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
   await selectWizardUseCase(page, 'Website product')
   assert.deepEqual(
     await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
@@ -629,6 +661,80 @@ async function testEditorUseCaseInputs(browserInstance) {
   await context.close()
 }
 
+async function testSocialCoverFrozenHint(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  Object.assign(state.campaign, {
+    product_url: null,
+    destination_url: null,
+    use_case: 'social_cover',
+    platform_hint: 'Instagram',
+    poster_format: 'rednote_cover_3x4',
+  })
+  Object.assign(state.currentGeneration, {
+    instruction: null,
+    use_case: 'social_cover',
+    platform_hint: 'Instagram',
+    poster_format: 'rednote_cover_3x4',
+  })
+  state.placements = []
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+
+  const platformSelect = page.locator('#next-platform-hint')
+  assert.equal(await platformSelect.inputValue(), 'Instagram')
+  await platformSelect.selectOption('__other__')
+  const customPlatform = page.locator('#next-platform-hint-other')
+  await customPlatform.focus()
+  await customPlatform.fill('YouTube')
+  assert.equal(
+    await customPlatform.evaluate((element) => element === document.activeElement),
+    true,
+  )
+  assert.equal(await platformSelect.inputValue(), '__other__')
+  await page.keyboard.press('Tab')
+  await customPlatform.waitFor({ state: 'detached' })
+  assert.equal(await platformSelect.inputValue(), 'YouTube')
+
+  const versions = page.getByRole('region', { name: 'Versions' })
+  if (await versions.count() === 0) {
+    await page.getByRole('button', { name: 'Toggle versions panel' }).click()
+  }
+  await versions.locator('.version-row').first().click()
+  const selected = versions.locator('.selected-version')
+  await selected.getByText('Initial reference-based artwork', { exact: true }).waitFor()
+  await selected.getByText('Target platform: Instagram', { exact: true }).waitFor()
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/social-cover-version-details-desktop.png`,
+    fullPage: true,
+  })
+
+  await selected.getByRole('button', { name: 'Generation details' }).click()
+  const dialog = page.locator('.generation-details-sheet')
+  await dialog.getByText('Initial reference-based artwork', { exact: true }).waitFor()
+  await dialog.getByText('Target platform: Instagram', { exact: true }).waitFor()
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/social-cover-generation-details-desktop.png`,
+    fullPage: true,
+  })
+
+  await page.locator('select[aria-label="Language"]').selectOption('zh-CN')
+  await dialog.getByText('目标平台：Instagram', { exact: true }).waitFor()
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testRedNoteCoverFormat(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
@@ -702,7 +808,7 @@ async function testRedNoteCoverFormat(browserInstance) {
 
   state.placements = [state.placement]
   await page.goto(`${BASE_URL}/campaigns/campaign-asset/placements`)
-  await page.getByRole('heading', { name: 'Placements' }).waitFor()
+  await page.getByRole('heading', { name: 'Placements', exact: true }).waitFor()
   await page.getByText('Each placement has a distinct tracked link.', {
     exact: true,
   }).waitFor()
@@ -1143,6 +1249,7 @@ function createState({
     reference_images: [],
     scenario: 'product',
     use_case: 'website_product',
+    platform_hint: null,
     event_details: null,
     current_generation_id: 'generation-current',
     poster_format: 'a4_2x3',
@@ -1160,6 +1267,7 @@ function createState({
     poster_format: 'a4_2x3',
     scenario: 'product',
     use_case: 'website_product',
+    platform_hint: null,
     event_details: null,
     style_profile: null,
     poster_copy: null,

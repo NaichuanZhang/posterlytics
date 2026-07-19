@@ -95,6 +95,28 @@ test('event candidates retain the bespoke no-product path', () => {
   ])
 })
 
+test('social candidates use only previous artwork and fresh user references', () => {
+  const candidates = buildGenerationAssetCandidates({
+    ...generation,
+    generation_mode: 'website_refresh',
+    use_case: 'social_cover',
+  }, {
+    hero_image_url: 'https://assets.example/previous.png',
+    hero_image_key: 'poster/previous.png',
+  })
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.kind),
+    ['previous-poster', 'user-reference'],
+  )
+  assert.match(candidates[0].purpose, /Previous artwork/)
+  assert.match(candidates[1].purpose, /Primary creative reference 1/)
+  assert.doesNotMatch(
+    candidates.map((candidate) => candidate.purpose).join('\n'),
+    /website|product image|style board/i,
+  )
+})
+
 test('candidate validation retains unavailable rows with auditable reasons', async () => {
   const candidates = buildGenerationAssetCandidates(generation, null).slice(0, 2)
   const validated = await validateGenerationAssetCandidates(

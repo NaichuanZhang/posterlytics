@@ -60,6 +60,14 @@ export async function acquireProductSource(
   recipe: ProductUseCaseRecipe,
   dependencies: SourceAcquisitionDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<ProductSourceAcquisition> {
+  if (recipe.acquisitionMode === 'reference-only') {
+    return {
+      mode: 'reference-only',
+      html: '',
+      capture: null,
+    };
+  }
+
   // URL classification is the independent safety boundary: even a malformed
   // persisted recipe can never make a recognized Amazon host fetch or capture.
   if (
@@ -84,7 +92,7 @@ export function resolveInheritedStyleBoard(
   mode: ProductSourceMode,
   inherited: StyleBoardPointers,
 ): StyleBoardPointers {
-  if (mode === 'amazon-reference') {
+  if (mode !== 'website') {
     return {
       screenshotUrl: null,
       screenshotKey: null,

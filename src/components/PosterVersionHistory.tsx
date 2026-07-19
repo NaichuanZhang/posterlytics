@@ -140,7 +140,22 @@ export function PosterVersionHistory({
           <strong>{t('Version {number}', {
             number: selectedGeneration.version_number ?? '-',
           })}</strong>
-          <p>{selectedGeneration.instruction || t('Initial website-based poster')}</p>
+          <div className="selected-version-summary">
+            <p>
+              {selectedGeneration.instruction || t(
+                selectedGeneration.use_case === 'social_cover'
+                  ? 'Initial reference-based artwork'
+                  : 'Initial website-based poster',
+              )}
+            </p>
+            {selectedGeneration.platform_hint && (
+              <small>
+                {t('Target platform: {platform}', {
+                  platform: selectedGeneration.platform_hint,
+                })}
+              </small>
+            )}
+          </div>
           <button
             type="button"
             className="button button-secondary button-small"

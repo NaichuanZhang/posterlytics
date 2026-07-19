@@ -16,6 +16,7 @@ import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { GenerationReferences } from '../components/GenerationReferences'
+import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
@@ -42,6 +43,7 @@ import {
   getPosterSize,
   type PosterSizeSlug,
 } from '../lib/posterSize'
+import { normalizePlatformHint } from '../lib/platformHints'
 import {
   CREATABLE_USE_CASES,
   getUseCase,
@@ -70,6 +72,7 @@ export function CampaignWizardPage() {
   const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
   const [posterFormat, setPosterFormat] = useState<PosterSizeSlug>(DEFAULT_POSTER_SIZE_SLUG)
+  const [platformHint, setPlatformHint] = useState('')
   const [referenceContext, setReferenceContext] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
   const productUrlInputRef = useRef<HTMLInputElement>(null)
@@ -88,6 +91,14 @@ export function CampaignWizardPage() {
     && productSourceKind === 'invalid'
   )
   const amazonListing = selectedUseCaseId === 'amazon_listing'
+  const socialCover = selectedUseCaseId === 'social_cover'
+  const minimumReferenceImages = inputFields
+    ? Math.max(
+        inputFields.referenceImages.minimumCount,
+        inputFields.referenceImages.requirement === 'required' ? 1 : 0,
+      )
+    : 0
+  const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
 
   function selectUseCase(useCaseId: CreatableUseCaseId) {
     const nextUseCase = getUseCase(useCaseId)
@@ -121,24 +132,32 @@ export function CampaignWizardPage() {
     if (!user) throw new Error(t('Sign in before creating a campaign.'))
     if (!selectedUseCaseId) throw new Error(t('Choose a use case before creating a campaign.'))
 
-    const resolvedDestinationUrl =
-      selectedUseCaseId === 'amazon_listing'
-      && !destinationUrl.trim()
-      && isAmazonSourceUrl(productUrl)
-        ? productUrl.trim()
-        : destinationUrl.trim()
-    if (resolvedDestinationUrl !== destinationUrl) {
+    const fields = getUseCase(selectedUseCaseId).inputFields
+    const resolvedProductUrl = fields.productUrl.requirement === 'hidden'
+      ? null
+      : productUrl.trim()
+    const resolvedDestinationUrl = fields.destinationUrl === 'hidden'
+      ? null
+      : selectedUseCaseId === 'amazon_listing'
+        && !destinationUrl.trim()
+        && isAmazonSourceUrl(productUrl)
+          ? productUrl.trim()
+          : destinationUrl.trim()
+    if (resolvedDestinationUrl && resolvedDestinationUrl !== destinationUrl) {
       setDestinationUrl(resolvedDestinationUrl)
     }
 
     const values = {
       scenario: 'product',
       use_case: selectedUseCaseId,
-      product_url: productUrl.trim(),
+      product_url: resolvedProductUrl,
       product_name: productName.trim(),
       tagline: tagline.trim() || null,
       cta_text: ctaText.trim() || 'Learn more',
       destination_url: resolvedDestinationUrl,
+      platform_hint: fields.platformHint === 'hidden'
+        ? null
+        : normalizePlatformHint(platformHint),
       poster_format: posterFormat,
       status: 'draft',
     }
@@ -173,10 +192,6 @@ export function CampaignWizardPage() {
       productUrlInputRef.current?.focus()
       return
     }
-    const minimumReferenceImages = Math.max(
-      inputFields.referenceImages.minimumCount,
-      inputFields.referenceImages.requirement === 'required' ? 1 : 0,
-    )
     if (pendingReferences.length < minimumReferenceImages) {
       setError(t('Add at least {count} images.', { count: minimumReferenceImages }))
       return
@@ -313,7 +328,7 @@ export function CampaignWizardPage() {
       return null
     }
 
-    const amazonReferenceProps = amazonListing
+    const referenceProps = amazonListing
       ? {
           contextLabel: t('Listing copy'),
           contextPlaceholder: t('Paste the product title, bullets, description, and approved claims.'),
@@ -321,6 +336,14 @@ export function CampaignWizardPage() {
           referenceImagesLabel: t('Product and brand images'),
           referenceImagesHint: t('Seller-provided images are the primary visual source.'),
         }
+      : socialCover
+        ? {
+            contextLabel: t('Creative direction'),
+            contextPlaceholder: t('Describe the mood, visual hook, audience, and anything the artwork should preserve.'),
+            contextHint: t('Creative direction is interpreted together with the reference images.'),
+            referenceImagesLabel: t('Creative references'),
+            referenceImagesHint: t('Reference images are the primary visual source.'),
+          }
       : {}
 
     return (
@@ -331,11 +354,15 @@ export function CampaignWizardPage() {
             <h2 id="references-heading">
               {amazonListing
                 ? t('Listing copy and product images')
+                : socialCover
+                  ? t('Creative references and direction')
                 : t('Generation references')}
             </h2>
             <p>
               {amazonListing
                 ? t('Provide the seller-owned text and visuals Posterlytics should use.')
+                : socialCover
+                  ? t('Start with at least one image, then add any context that should shape the artwork.')
                 : t('Add direction or images that are not present on the website.')}
             </p>
           </div>
@@ -350,7 +377,7 @@ export function CampaignWizardPage() {
           contextRequirement={fields.referenceContext}
           referenceImagesRequirement={fields.referenceImages.requirement}
           referenceImagesMinimumCount={fields.referenceImages.minimumCount}
-          {...amazonReferenceProps}
+          {...referenceProps}
         />
         <AssetSelectionModeControl
           value={preferences.assetSelectionMode}
@@ -390,7 +417,9 @@ export function CampaignWizardPage() {
               : working
                 ? t('Generation continues in the background after the inputs are queued.')
                 : selectedUseCase
-                  ? t('Set the source, message, and tracked destination.')
+                  ? socialCover
+                    ? t('Set artwork details, creative references, and an optional platform hint.')
+                    : t('Set the source, message, and tracked destination.')
                   : t('Choose the campaign source that matches what you want to create.')}
           </p>
         </div>
@@ -475,7 +504,9 @@ export function CampaignWizardPage() {
                 <span className="use-case-card-icon" aria-hidden="true">
                   {useCase.id === 'amazon_listing'
                     ? <ShoppingBag size={22} />
-                    : <Globe2 size={22} />}
+                    : useCase.id === 'social_cover'
+                      ? <ImagePlus size={22} />
+                      : <Globe2 size={22} />}
                 </span>
                 <span className="use-case-card-copy">
                   <strong>{t(useCase.label)}</strong>
@@ -509,14 +540,24 @@ export function CampaignWizardPage() {
               </button>
             </div>
 
+            {socialCover && renderGenerationReferences(inputFields)}
+
             <section className="form-section" aria-labelledby="source-heading">
               <div className="form-section-heading">
-                <span><Globe2 size={17} aria-hidden="true" /></span>
+                <span>
+                  {socialCover
+                    ? <ImagePlus size={17} aria-hidden="true" />
+                    : <Globe2 size={17} aria-hidden="true" />}
+                </span>
                 <div>
-                  <h2 id="source-heading">{t('Product source')}</h2>
+                  <h2 id="source-heading">
+                    {socialCover ? t('Artwork details') : t('Product source')}
+                  </h2>
                   <p>
                     {amazonListing
                       ? t('Use a supported Amazon listing URL. Posterlytics will use seller-provided references instead of scraping the page.')
+                      : socialCover
+                        ? t('Name the artwork and choose its full-bleed output format.')
                       : t('The website supplies the visual and product context.')}
                   </p>
                 </div>
@@ -591,14 +632,14 @@ export function CampaignWizardPage() {
                 {inputFields.productName !== 'hidden' && (
                   <div className="field">
                     <label htmlFor="product-name">
-                      {t('Product name')}{' '}
+                      {socialCover ? t('Artwork name') : t('Product name')}{' '}
                       <FieldRequirement requirement={inputFields.productName} />
                     </label>
                     <input
                       id="product-name"
                       className="input"
                       required={inputFields.productName === 'required'}
-                      placeholder="Northstar Reports"
+                      placeholder={socialCover ? t('Summer launch cover') : 'Northstar Reports'}
                       value={productName}
                       onChange={(event) => setProductName(event.target.value)}
                     />
@@ -607,13 +648,16 @@ export function CampaignWizardPage() {
                 {inputFields.tagline !== 'hidden' && (
                   <div className="field">
                     <label htmlFor="tagline">
-                      {t('Tagline')} <FieldRequirement requirement={inputFields.tagline} />
+                      {socialCover ? t('Supporting line') : t('Tagline')}{' '}
+                      <FieldRequirement requirement={inputFields.tagline} />
                     </label>
                     <input
                       id="tagline"
                       className="input"
                       required={inputFields.tagline === 'required'}
-                      placeholder={t('Reports your team can act on')}
+                      placeholder={socialCover
+                        ? t('A short optional line')
+                        : t('Reports your team can act on')}
                       value={tagline}
                       onChange={(event) => setTagline(event.target.value)}
                     />
@@ -625,12 +669,19 @@ export function CampaignWizardPage() {
                   allowedFormats={selectedUseCase.allowedPosterFormats}
                   onChange={setPosterFormat}
                 />
+                {inputFields.platformHint !== 'hidden' && (
+                  <PlatformHintField
+                    id="platform-hint"
+                    value={platformHint}
+                    onChange={setPlatformHint}
+                  />
+                )}
               </div>
             </section>
 
             {amazonListing && renderGenerationReferences(inputFields)}
             {renderCampaignAction(inputFields)}
-            {!amazonListing && renderGenerationReferences(inputFields)}
+            {!amazonListing && !socialCover && renderGenerationReferences(inputFields)}
 
             {error && (
               <InlineNotice tone="error">
@@ -643,7 +694,10 @@ export function CampaignWizardPage() {
               <button
                 className="button button-primary"
                 type="submit"
-                disabled={!pendingReferencesReady(pendingReferences)}
+                disabled={
+                  !referenceMinimumMet
+                  || !pendingReferencesReady(pendingReferences)
+                }
               >
                 <Sparkles size={16} aria-hidden="true" />
                 {draftId ? t('Retry generation') : t('Generate poster')}
@@ -661,18 +715,30 @@ export function CampaignWizardPage() {
               <span>{tagline.trim() || t('Poster preview pending')}</span>
             </div>
             <dl>
-              <div>
-                <dt>{t('Source')}</dt>
-                <dd>{summarizeUrl(productUrl) || t('Not set')}</dd>
-              </div>
-              <div>
-                <dt>{t('Action')}</dt>
-                <dd>{ctaText.trim() || t('Not set')}</dd>
-              </div>
-              <div>
-                <dt>{t('Destination')}</dt>
-                <dd>{summarizeUrl(destinationUrl) || t('Not set')}</dd>
-              </div>
+              {inputFields.productUrl.requirement !== 'hidden' && (
+                <div>
+                  <dt>{t('Source')}</dt>
+                  <dd>{summarizeUrl(productUrl) || t('Not set')}</dd>
+                </div>
+              )}
+              {inputFields.ctaText !== 'hidden' && (
+                <div>
+                  <dt>{t('Action')}</dt>
+                  <dd>{ctaText.trim() || t('Not set')}</dd>
+                </div>
+              )}
+              {inputFields.destinationUrl !== 'hidden' && (
+                <div>
+                  <dt>{t('Destination')}</dt>
+                  <dd>{summarizeUrl(destinationUrl) || t('Not set')}</dd>
+                </div>
+              )}
+              {inputFields.platformHint !== 'hidden' && (
+                <div>
+                  <dt>{t('Target platform')}</dt>
+                  <dd>{platformHint.trim() || t('No platform hint')}</dd>
+                </div>
+              )}
               <div>
                 <dt>{t('References')}</dt>
                 <dd>

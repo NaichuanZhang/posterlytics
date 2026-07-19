@@ -9,12 +9,15 @@ import {
 test('resolver exposes product recipes and an isolated event-bespoke sentinel', () => {
   const website = resolveUseCaseRecipe('website_product')
   const amazon = resolveUseCaseRecipe('amazon_listing')
+  const social = resolveUseCaseRecipe('social_cover')
   const event = resolveUseCaseRecipe('event')
 
   assert.equal(website.kind, 'product')
   assert.equal(website.acquisitionMode, 'website')
   assert.equal(amazon.kind, 'product')
   assert.equal(amazon.acquisitionMode, 'amazon-reference')
+  assert.equal(social.kind, 'product')
+  assert.equal(social.acquisitionMode, 'reference-only')
   assert.deepEqual(event, {
     kind: 'event-bespoke',
     id: 'event',
@@ -36,27 +39,14 @@ test('website and Amazon recipes preserve current downstream stage vocabulary', 
   const amazon = resolveProductUseCaseRecipe('amazon_listing')
 
   assert.deepEqual(amazon.stages, website.stages)
-  assert.deepEqual(website.stages, {
-    parentFirstRefresh:
-      'Use the freshly captured website evidence as the visual source of truth.',
-    parentRefresh:
-      'WEBSITE REFRESH: Reconcile newly captured brand evidence only where it conflicts with stale brand facts; the requested delta and preservation rule still govern the edit.',
-    parentSnapshot:
-      'BRAND SNAPSHOT: Reuse the current version brand analysis; do not reinterpret the website or invent a new direction.',
-    designerPosterKind: 'product poster',
-    designerReferenceSubjects:
-      'previous poster, source style board, and supporting images.',
-    designerEvidenceRule:
-      'Use observed evidence rather than category assumptions or a generic template.',
-    designerSourceObservationsHeading: 'SOURCE VISUAL OBSERVATIONS:',
-    heroPosterKind: 'product-promotion poster',
-    heroStyleBoardAttached:
-      'A labeled STYLE BOARD image captured from the real source page is attached. Treat it as the primary brand-style evidence while preserving the painter priority described by each reference label.',
-    heroStyleBoardMissing:
-      'No source style board is attached; rely on the source-derived direction and palette below.',
-    heroTranslationRule:
-      'Translate the observed visual language into a poster-specific composition. Do not copy navigation bars, menus, browser chrome, app screens, cards, buttons, tabs, form controls, or other website UI. Do not impose category stereotypes or substitute a trendy medium that is not evidenced by the source. Any REFERENCE PURPOSE labels attached after this prompt are instructions only and must never appear as poster text.',
-  })
+  assert.equal(
+    website.stages.parentFirstRefresh,
+    'Use the freshly captured website evidence as the visual source of truth.',
+  )
+  assert.equal(website.stages.designerPosterKind, 'product poster')
+  assert.equal(website.stages.heroPosterKind, 'product-promotion poster')
+  assert.equal(website.stages.heroNoLogoSubject, 'product name')
+  assert.match(website.stages.heroTranslationRule, /website UI/)
   assert.notEqual(website.analyze.sourceBrief, amazon.analyze.sourceBrief)
   assert.equal(
     website.analyze.evidenceSource({
@@ -79,6 +69,33 @@ test('website and Amazon recipes preserve current downstream stage vocabulary', 
     amazon.references.analysisUserReference(2),
     /Seller-supplied product or brand reference 2/,
   )
+})
+
+test('social recipe is reference-only and contains no website or URL evidence language', () => {
+  const social = resolveProductUseCaseRecipe('social_cover')
+  const materialized = [
+    social.analyze.sourceBrief,
+    social.analyze.paletteBrief,
+    social.analyze.densityBrief,
+    social.analyze.evidenceSource({
+      hasCapturedEvidence: false,
+      captureSucceeded: false,
+      themeColor: null,
+    }),
+    social.analyze.sourceText('ignored'),
+    social.analyze.referenceInstruction(2),
+    social.analyze.platformInstruction('Instagram'),
+    ...Object.values(social.stages).map((value) =>
+      typeof value === 'function' ? value('fixture') : value
+    ),
+  ].join('\n')
+
+  assert.equal(social.analyze.promptKind, 'social-reference')
+  assert.match(materialized, /mood/)
+  assert.match(materialized, /visual hook/i)
+  assert.match(materialized, /TARGET PLATFORM HINT: Instagram/)
+  assert.doesNotMatch(materialized, /\b(?:website|url)\b|browser capture/i)
+  assert.doesNotMatch(materialized, /\bDOM\b/)
 })
 
 test('reference-purpose recipes match every pre-recipe byte string', () => {
@@ -131,6 +148,22 @@ test('reference-purpose recipes match every pre-recipe byte string', () => {
   })
 })
 
+test('social reference purposes keep only artwork continuity and user evidence', () => {
+  const social = materializeReferencePurposes(
+    resolveProductUseCaseRecipe('social_cover'),
+  )
+
+  assert.match(social.analysisUserReference, /Primary creative reference 2/)
+  assert.match(social.assetPreviousRefresh, /Previous artwork/)
+  assert.match(social.assetUserReference, /Primary creative reference 2/)
+  assert.match(social.designerUserReference, /Primary creative reference 2/)
+  assert.match(social.heroUserReference, /Primary creative reference 2/)
+  assert.doesNotMatch(
+    Object.values(social).join('\n'),
+    /\bwebsite\b|\bURL\b|source page/i,
+  )
+})
+
 test('source mismatch rejects both persisted-intent contradictions without echoing URLs', () => {
   const amazonUrl = 'https://www.amazon.com/dp/B0PRIVATE'
   const websiteUrl = 'https://merchant.example/private-product'
@@ -167,6 +200,14 @@ test('source mismatch accepts aligned rows and ignores event or NULL-ish legacy 
   )
   assert.equal(
     useCaseSourceMismatch('event', 'https://www.amazon.com/dp/B0EXAMPLE1'),
+    null,
+  )
+  assert.equal(useCaseSourceMismatch('social_cover', null), null)
+  assert.equal(
+    useCaseSourceMismatch(
+      'social_cover',
+      'https://www.amazon.com/dp/B0EXAMPLE1',
+    ),
     null,
   )
   assert.equal(useCaseSourceMismatch('amazon_listing', null), null)

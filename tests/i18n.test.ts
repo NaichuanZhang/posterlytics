@@ -119,6 +119,7 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Listing copy and product images': '商品文案与产品图片',
     'Switch to Amazon listing': '切换到亚马逊商品',
     'Switch to Website product': '切换到网站产品',
+    'Target platform: {platform}': '目标平台：{platform}',
   }
 
   for (const [key, value] of Object.entries(expected)) {

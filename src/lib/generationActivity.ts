@@ -57,7 +57,7 @@ export function isActiveGenerationJob(
 }
 
 export function generationActivityLabel(
-  item: Pick<GenerationActivityItem, 'status' | 'stage'>,
+  item: Pick<GenerationActivityItem, 'status' | 'stage' | 'use_case'>,
   locale: SupportedLocale = DEFAULT_LOCALE,
 ): string {
   if (item.status === 'queued') return translate(locale, 'Queued')
@@ -66,6 +66,9 @@ export function generationActivityLabel(
   if (item.status === 'succeeded') return translate(locale, 'Ready')
   if (item.status === 'failed') return translate(locale, 'Failed')
   if (item.status === 'canceled') return translate(locale, 'Canceled')
+  if (item.stage === 'analyze' && item.use_case === 'social_cover') {
+    return translate(locale, 'Analyzing references')
+  }
   const stageLabel = STAGE_LABELS[item.stage]
   return stageLabel ? translate(locale, stageLabel) : String(item.stage)
 }
@@ -73,7 +76,11 @@ export function generationActivityLabel(
 export function generationStageLabel(
   stage: GenerationJobStage,
   locale: SupportedLocale = DEFAULT_LOCALE,
+  useCase?: GenerationActivityItem['use_case'],
 ): string {
+  if (stage === 'analyze' && useCase === 'social_cover') {
+    return translate(locale, 'Analyze references')
+  }
   const stageLabel = STAGE_LABELS[stage]
   return stageLabel ? translate(locale, stageLabel) : String(stage)
 }
@@ -96,16 +103,23 @@ export function deriveGenerationStages(
 
   return GENERATION_STAGES.map((stage) => {
     const index = applicable.findIndex((candidate) => candidate.key === stage.key)
-    const label = translate(locale, stage.label)
-    if (index === -1) return { key: stage.key, label, status: 'skipped' as const }
-    if (item.status === 'succeeded') return { key: stage.key, label, status: 'done' as const }
-    if (index < currentIndex) return { key: stage.key, label, status: 'done' as const }
-    if (index > currentIndex) return { key: stage.key, label, status: 'pending' as const }
-    if (item.status === 'failed') return { key: stage.key, label, status: 'error' as const }
-    if (item.status === 'canceled') return { key: stage.key, label, status: 'canceled' as const }
-    if (item.status === 'awaiting_review') return { key: stage.key, label, status: 'review' as const }
-    if (item.status === 'queued') return { key: stage.key, label, status: 'pending' as const }
-    return { key: stage.key, label, status: 'running' as const }
+    let status: GenerationStageStatus
+    if (index === -1) status = 'skipped'
+    else if (item.status === 'succeeded') status = 'done'
+    else if (index < currentIndex) status = 'done'
+    else if (index > currentIndex) status = 'pending'
+    else if (item.status === 'failed') status = 'error'
+    else if (item.status === 'canceled') status = 'canceled'
+    else if (item.status === 'awaiting_review') status = 'review'
+    else if (item.status === 'queued') status = 'pending'
+    else status = 'running'
+
+    const labelKey = stage.key === 'analyze' && item.use_case === 'social_cover'
+      ? status === 'done'
+        ? 'References analyzed'
+        : 'Analyze references'
+      : stage.label
+    return { key: stage.key, label: translate(locale, labelKey), status }
   })
 }
 

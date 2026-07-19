@@ -25,6 +25,9 @@ const GENERATION_FUNCTION_ERROR_KEYS: Record<GenerationFunction, TranslationKey>
   hero: 'Image model failed',
 }
 
+const SOCIAL_REFERENCE_MINIMUM_ERROR =
+  'Social cover generation requires at least one reference image.'
+
 export interface EnqueuedPosterGeneration {
   generation: PosterGeneration
   job: GenerationJob
@@ -46,7 +49,16 @@ export async function enqueuePosterGeneration(args: {
     p_color_scheme: getDeviceColorScheme(),
     p_asset_selection_mode: args.assetSelectionMode,
   })
-  if (error) throw new Error(error.message)
+  if (error) {
+    throw new Error(
+      error.message === SOCIAL_REFERENCE_MINIMUM_ERROR
+        ? translate(
+            args.locale ?? DEFAULT_LOCALE,
+            'Social cover generation requires at least one reference image.',
+          )
+        : error.message,
+    )
+  }
 
   const result = rpcRow<EnqueuedPosterGeneration>(data)
   if (!result?.generation?.id || !result.job?.id) {

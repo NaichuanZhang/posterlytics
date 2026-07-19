@@ -20,7 +20,7 @@ export function filterCampaigns<T extends FilterableCampaign>(
 
     return [
       campaign.product_name,
-      campaign.product_url,
+      campaign.product_url ?? '',
       campaign.status,
       campaign.is_generating ? 'generating' : '',
     ]

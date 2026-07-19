@@ -23,15 +23,18 @@ export interface PipelinePromptGoldens {
   analyze: {
     website_product: { system: string; user: string }
     amazon_listing: { system: string; user: string }
+    social_cover: { system: string; user: string }
     event: { system: string; user: string }
   }
   designer: {
     website_product: { system: string; user: string }
     amazon_listing: { system: string; user: string }
+    social_cover: { system: string; user: string }
   }
   hero: {
     website_product: string
     amazon_listing: string
+    social_cover: string
     event: string
   }
 }
@@ -40,6 +43,7 @@ const USER_ID = 'user-fixture'
 const CAMPAIGN_ID = 'campaign-fixture'
 const GENERATION_ID = 'generation-fixture'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const SOCIAL_REFERENCE_URL = 'https://assets.example/social-reference.png'
 
 const PRODUCT_LAYOUT = {
   composition: 'asymmetric editorial stack',
@@ -87,6 +91,52 @@ const PRODUCT_LAYOUT = {
   ],
 }
 
+const SOCIAL_LAYOUT = {
+  ...PRODUCT_LAYOUT,
+  composition: 'full-bleed diagonal editorial sweep',
+  mood: 'kinetic, luminous',
+  art_style: 'layered editorial collage',
+  imagery: 'silhouetted figure crossing a luminous field',
+  typography_treatment: 'condensed display type with quiet supporting text',
+  lighting: 'hard side light with a saturated glow',
+  texture: 'fine photographic grain',
+  motifs: ['cropped circles', 'diagonal light bands'],
+  palette_roles: {
+    bg: '#111111',
+    text: '#f7f4ed',
+    primary: '#f45b69',
+    accent: '#70c1b3',
+    supporting: ['#235789'],
+    proportions: [
+      { color: '#111111', proportion: 0.62 },
+      { color: '#f45b69', proportion: 0.2 },
+    ],
+  },
+  zones: [
+    {
+      band: 'top',
+      role: 'plain-text identity line',
+      content: 'Summer Signals',
+      emphasis: 'low',
+      align: 'left',
+    },
+    {
+      band: 'upper',
+      role: 'visual hook headline',
+      content: 'Follow the light',
+      emphasis: 'high',
+      align: 'left',
+    },
+    {
+      band: 'mid',
+      role: 'supporting artwork detail',
+      content: 'A new season in motion',
+      emphasis: 'med',
+      align: 'left',
+    },
+  ],
+}
+
 export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePromptGoldens> {
   return {
     analyze: {
@@ -100,6 +150,11 @@ export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePro
         'https://www.amazon.com/dp/B0FIXTURE1',
         'product',
       ),
+      social_cover: await captureAnalyzePrompt(
+        'social_cover',
+        null,
+        'product',
+      ),
       event: await captureAnalyzePrompt(
         'event',
         'https://lu.ma/fixture-summit',
@@ -109,10 +164,12 @@ export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePro
     designer: {
       website_product: await captureDesignerPrompt('website_product'),
       amazon_listing: await captureDesignerPrompt('amazon_listing'),
+      social_cover: await captureDesignerPrompt('social_cover'),
     },
     hero: {
       website_product: await captureHeroPrompt('website_product', 'product'),
       amazon_listing: await captureHeroPrompt('amazon_listing', 'product'),
+      social_cover: await captureHeroPrompt('social_cover', 'product'),
       event: await captureHeroPrompt('event', 'event'),
     },
   }
@@ -144,8 +201,11 @@ export async function runAnalyzeMismatchCompatibility(
 }
 
 export async function captureAnalyzeSourceMode(
-  useCase: Extract<UseCaseId, 'website_product' | 'amazon_listing'>,
-  productUrl: string,
+  useCase: Extract<
+    UseCaseId,
+    'website_product' | 'amazon_listing' | 'social_cover'
+  >,
+  productUrl: string | null,
 ): Promise<unknown> {
   const state = createState(useCase, productUrl, 'product')
   await withHarnessGlobals(
@@ -170,7 +230,7 @@ export async function captureAnalyzeSourceMode(
 
 async function captureAnalyzePrompt(
   useCase: UseCaseId,
-  productUrl: string,
+  productUrl: string | null,
   scenario: 'product' | 'event',
 ): Promise<{ system: string; user: string }> {
   const state = createState(useCase, productUrl, scenario)
@@ -194,11 +254,16 @@ async function captureAnalyzePrompt(
 }
 
 async function captureDesignerPrompt(
-  useCase: Extract<UseCaseId, 'website_product' | 'amazon_listing'>,
+  useCase: Extract<
+    UseCaseId,
+    'website_product' | 'amazon_listing' | 'social_cover'
+  >,
 ): Promise<{ system: string; user: string }> {
-  const productUrl = useCase === 'amazon_listing'
-    ? 'https://www.amazon.com/dp/B0FIXTURE1'
-    : 'https://example.com/products/northstar'
+  const productUrl = useCase === 'social_cover'
+    ? null
+    : useCase === 'amazon_listing'
+      ? 'https://www.amazon.com/dp/B0FIXTURE1'
+      : 'https://example.com/products/northstar'
   const state = createState(useCase, productUrl, 'product')
   const response = await withHarnessGlobals(
     state,
@@ -224,6 +289,8 @@ async function captureHeroPrompt(
 ): Promise<string> {
   const productUrl = useCase === 'amazon_listing'
     ? 'https://www.amazon.com/dp/B0FIXTURE1'
+    : useCase === 'social_cover'
+      ? null
     : scenario === 'event'
       ? 'https://lu.ma/fixture-summit'
       : 'https://example.com/products/northstar'
@@ -251,19 +318,33 @@ async function captureHeroPrompt(
 
 function createState(
   useCase: UseCaseId,
-  productUrl: string,
+  productUrl: string | null,
   scenario: 'product' | 'event',
 ): HarnessState {
+  const socialCover = useCase === 'social_cover'
   const campaign = {
     id: CAMPAIGN_ID,
     user_id: USER_ID,
     product_url: productUrl,
-    product_name: scenario === 'event' ? 'Fixture Summit' : 'Northstar',
-    tagline: scenario === 'event' ? 'Builders meet here' : 'Operational clarity',
-    cta_text: scenario === 'event' ? 'Reserve a seat' : 'Start now',
-    destination_url: productUrl,
+    product_name: scenario === 'event'
+      ? 'Fixture Summit'
+      : socialCover
+        ? 'Summer Signals'
+        : 'Northstar',
+    tagline: scenario === 'event'
+      ? 'Builders meet here'
+      : socialCover
+        ? 'A new season in motion'
+        : 'Operational clarity',
+    cta_text: scenario === 'event'
+      ? 'Reserve a seat'
+      : socialCover
+        ? 'Learn more'
+        : 'Start now',
+    destination_url: socialCover ? null : productUrl,
     scenario,
     use_case: useCase,
+    platform_hint: socialCover ? 'Instagram' : null,
   }
   const generation = {
     id: GENERATION_ID,
@@ -272,11 +353,22 @@ function createState(
     status: 'created',
     parent_generation_id: null,
     generation_mode: 'website_refresh',
-    instruction: 'Keep the hierarchy focused and use the supplied proof points.',
-    reference_images: [],
-    poster_format: 'a4_2x3',
+    instruction: socialCover
+      ? 'Keep the mood kinetic and make the diagonal light band the visual hook.'
+      : 'Keep the hierarchy focused and use the supplied proof points.',
+    reference_images: socialCover
+      ? [{
+          key: 'references/social-reference.png',
+          url: SOCIAL_REFERENCE_URL,
+          name: 'social-reference.png',
+          mime_type: 'image/png',
+          size_bytes: 8,
+        }]
+      : [],
+    poster_format: socialCover ? 'rednote_cover_3x4' : 'a4_2x3',
     scenario,
     use_case: useCase,
+    platform_hint: socialCover ? 'Instagram' : null,
     screenshot_url: null,
     screenshot_key: null,
     style_profile: {
@@ -292,34 +384,66 @@ function createState(
         ],
       },
       fonts: { heading: 'Space Grotesk', body: 'Inter' },
-      tone: 'precise, confident',
-      layout_hint: 'asymmetric editorial stack',
-      imagery: 'one isolated product close-up',
-      typography_treatment: 'high-contrast grotesk hierarchy',
-      lighting: 'soft directional studio light',
-      texture: 'subtle uncoated paper grain',
-      motifs: ['thin registration lines'],
-      composition: 'asymmetric editorial stack',
+      tone: socialCover ? 'kinetic, luminous' : 'precise, confident',
+      layout_hint: socialCover
+        ? 'full-bleed diagonal editorial sweep'
+        : 'asymmetric editorial stack',
+      imagery: socialCover
+        ? 'silhouetted figure crossing a luminous field'
+        : 'one isolated product close-up',
+      typography_treatment: socialCover
+        ? 'condensed display type with quiet supporting text'
+        : 'high-contrast grotesk hierarchy',
+      lighting: socialCover
+        ? 'hard side light with a saturated glow'
+        : 'soft directional studio light',
+      texture: socialCover
+        ? 'fine photographic grain'
+        : 'subtle uncoated paper grain',
+      motifs: socialCover
+        ? ['cropped circles', 'diagonal light bands']
+        : ['thin registration lines'],
+      composition: socialCover
+        ? 'full-bleed diagonal editorial sweep'
+        : 'asymmetric editorial stack',
       density: 'balanced',
     },
     poster_copy: {
-      hook: scenario === 'event' ? 'Meet the builders' : 'See the signal',
+      hook: scenario === 'event'
+        ? 'Meet the builders'
+        : socialCover
+          ? 'Follow the light'
+          : 'See the signal',
       what_it_does: scenario === 'event'
         ? 'A focused evening for builders.'
-        : 'Decisions without delay.',
+        : socialCover
+          ? 'A new season in motion.'
+          : 'Decisions without delay.',
       features: ['Fast setup', 'Shared context'],
-      cta: scenario === 'event' ? 'Reserve a seat' : 'Start now',
+      cta: scenario === 'event'
+        ? 'Reserve a seat'
+        : socialCover
+          ? ''
+          : 'Start now',
     },
     poster_content: {
-      headline: scenario === 'event' ? 'Meet the builders' : 'See the signal',
+      headline: scenario === 'event'
+        ? 'Meet the builders'
+        : socialCover
+          ? 'Follow the light'
+          : 'See the signal',
       what_it_does: scenario === 'event'
         ? 'A focused evening for builders.'
-        : 'Decisions without delay.',
+        : socialCover
+          ? 'A new season in motion.'
+          : 'Decisions without delay.',
       features: ['Fast setup', 'Shared context'],
     },
     brand_essence: scenario === 'event'
       ? 'An energetic builder gathering in deep blue and coral.'
-      : 'A precise analytics brand with deep blue geometry and coral accents.',
+      : socialCover
+        ? 'Kinetic editorial artwork with a coral light band, deep black field, and photographic grain.'
+        : 'A precise analytics brand with deep blue geometry and coral accents.',
     poster_spec: scenario === 'event'
       ? {
           title: 'Fixture Summit',
@@ -329,8 +453,14 @@ function createState(
           time_line: '6:30 PM UTC',
           location_line: 'Signal Hall - Seattle',
         }
-      : { qr_label: 'Start now', urls: productUrl },
-    poster_layout: scenario === 'event' ? null : PRODUCT_LAYOUT,
+      : socialCover
+        ? { qr_label: '', urls: '' }
+        : { qr_label: 'Start now', urls: productUrl },
+    poster_layout: scenario === 'event'
+      ? null
+      : socialCover
+        ? SOCIAL_LAYOUT
+        : PRODUCT_LAYOUT,
     brand_assets: { images: [] },
     design_tokens: null,
     design_status: scenario === 'event' ? null : 'ready',
@@ -520,6 +650,15 @@ async function withHarnessGlobals<T>(
           },
         }],
       })
+    }
+    if (url === SOCIAL_REFERENCE_URL) {
+      return new Response(
+        Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        },
+      )
     }
     if (url === state.campaign.product_url) {
       return new Response(sourceHtml(String(state.campaign.scenario)), {

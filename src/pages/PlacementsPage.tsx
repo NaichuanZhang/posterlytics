@@ -1,6 +1,6 @@
 import { Copy, MapPin, Plus, Trash2, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { Navigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { AppShell } from '../components/AppShell'
 import { PosterExportButton } from '../components/PosterExportButton'
@@ -15,6 +15,7 @@ import { overlayGeneration } from '../lib/generations'
 import { getPosterSize, hasPosterQrBand } from '../lib/posterSize'
 import { buildViewUrl } from '../lib/viewUrl'
 import { useI18n } from '../i18n/I18nProvider'
+import { getUseCase } from '../lib/useCases'
 
 export function PlacementsPage() {
   const { formatDate, t } = useI18n()
@@ -22,12 +23,19 @@ export function PlacementsPage() {
   const { user } = useAuth()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
+  const trackingEnabled = campaign
+    ? getUseCase(campaign.use_case).trackingEnabled
+    : false
   const {
     generations,
     loading: generationsLoading,
     error: generationsError,
   } = usePosterGenerations(id)
-  const { placements, addPlacement, removePlacement } = usePlacements(id, user?.id)
+  const { placements, addPlacement, removePlacement } = usePlacements(
+    id,
+    user?.id,
+    trackingEnabled,
+  )
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -88,6 +96,9 @@ export function PlacementsPage() {
         <InlineNotice tone="error">{t('Campaign not found.')}</InlineNotice>
       </AppShell>
     )
+  }
+  if (!trackingEnabled) {
+    return <Navigate to={`/campaigns/${campaign.id}`} replace />
   }
 
   const currentGeneration =

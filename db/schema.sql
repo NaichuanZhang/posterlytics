@@ -5,11 +5,11 @@
 CREATE TABLE public.campaigns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  product_url TEXT NOT NULL,
+  product_url TEXT,
   product_name TEXT NOT NULL,
   tagline TEXT,
   cta_text TEXT NOT NULL DEFAULT 'Learn more',
-  destination_url TEXT NOT NULL,
+  destination_url TEXT,
   style_profile JSONB,
   poster_copy JSONB,
   poster_content JSONB,
@@ -27,6 +27,7 @@ CREATE TABLE public.campaigns (
   design_status TEXT,
   scenario TEXT NOT NULL DEFAULT 'product',
   use_case TEXT NOT NULL DEFAULT 'website_product',
+  platform_hint TEXT,
   event_details JSONB,
   reference_context TEXT,
   reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -45,9 +46,32 @@ CREATE TABLE public.campaigns (
   CONSTRAINT campaigns_scenario_valid
     CHECK (scenario IN ('product', 'event')),
   CONSTRAINT campaigns_use_case_valid
-    CHECK (use_case IN ('website_product', 'amazon_listing', 'event')),
+    CHECK (
+      use_case IN (
+        'website_product',
+        'amazon_listing',
+        'social_cover',
+        'event'
+      )
+    ),
   CONSTRAINT campaigns_scenario_use_case_consistent
     CHECK ((scenario = 'event') = (use_case = 'event')),
+  CONSTRAINT campaigns_source_urls_required
+    CHECK (
+      use_case = 'social_cover'
+      OR (product_url IS NOT NULL AND destination_url IS NOT NULL)
+    ),
+  CONSTRAINT campaigns_platform_hint_valid
+    CHECK (
+      (
+        platform_hint IS NULL
+        OR (
+          platform_hint = BTRIM(platform_hint)
+          AND char_length(platform_hint) BETWEEN 1 AND 80
+        )
+      )
+      AND (use_case = 'social_cover' OR platform_hint IS NULL)
+    ),
   CONSTRAINT campaigns_reference_context_length
     CHECK (reference_context IS NULL OR char_length(reference_context) <= 4000),
   CONSTRAINT campaigns_reference_images_shape
@@ -72,6 +96,7 @@ CREATE TABLE public.poster_generations (
   poster_format TEXT NOT NULL DEFAULT 'a4_2x3',
   scenario TEXT NOT NULL DEFAULT 'product',
   use_case TEXT NOT NULL DEFAULT 'website_product',
+  platform_hint TEXT,
   event_details JSONB,
   style_profile JSONB,
   poster_copy JSONB,
@@ -115,9 +140,27 @@ CREATE TABLE public.poster_generations (
   CONSTRAINT poster_generations_scenario_valid
     CHECK (scenario IN ('product', 'event')),
   CONSTRAINT poster_generations_use_case_valid
-    CHECK (use_case IN ('website_product', 'amazon_listing', 'event')),
+    CHECK (
+      use_case IN (
+        'website_product',
+        'amazon_listing',
+        'social_cover',
+        'event'
+      )
+    ),
   CONSTRAINT poster_generations_scenario_use_case_consistent
     CHECK ((scenario = 'event') = (use_case = 'event')),
+  CONSTRAINT poster_generations_platform_hint_valid
+    CHECK (
+      (
+        platform_hint IS NULL
+        OR (
+          platform_hint = BTRIM(platform_hint)
+          AND char_length(platform_hint) BETWEEN 1 AND 80
+        )
+      )
+      AND (use_case = 'social_cover' OR platform_hint IS NULL)
+    ),
   CONSTRAINT poster_generations_reference_images_shape
     CHECK (
       jsonb_typeof(reference_images) = 'array'
@@ -247,6 +290,7 @@ BEGIN
     NEW.poster_format,
     NEW.scenario,
     NEW.use_case,
+    NEW.platform_hint,
     NEW.trace_schema_version,
     NEW.created_at
   ) IS DISTINCT FROM (
@@ -260,6 +304,7 @@ BEGIN
     OLD.poster_format,
     OLD.scenario,
     OLD.use_case,
+    OLD.platform_hint,
     OLD.trace_schema_version,
     OLD.created_at
   ) THEN
@@ -526,6 +571,69 @@ CREATE TABLE public.placements (
 CREATE INDEX idx_placements_campaign_id ON public.placements(campaign_id);
 CREATE INDEX idx_placements_user_id ON public.placements(user_id);
 
+CREATE FUNCTION public.guard_placement_tracking_policy()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_use_case TEXT;
+BEGIN
+  -- Serialize placement writes with campaign use-case changes.
+  SELECT use_case
+  INTO v_use_case
+  FROM public.campaigns
+  WHERE id = NEW.campaign_id
+    AND user_id = NEW.user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'placement campaign not found or not owned by placement user'
+      USING ERRCODE = '23503';
+  END IF;
+
+  IF v_use_case = 'social_cover' THEN
+    RAISE EXCEPTION 'Social cover campaigns cannot have placements.'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER placements_guard_tracking_policy
+  BEFORE INSERT OR UPDATE OF campaign_id ON public.placements
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_placement_tracking_policy();
+
+CREATE FUNCTION public.guard_campaign_tracking_policy()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF NEW.use_case = 'social_cover'
+    AND NEW.use_case IS DISTINCT FROM OLD.use_case
+    AND EXISTS (
+      SELECT 1
+      FROM public.placements
+      WHERE campaign_id = OLD.id
+    ) THEN
+    RAISE EXCEPTION 'Remove campaign placements before switching to social cover.'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER campaigns_guard_tracking_policy
+  BEFORE UPDATE OF use_case ON public.campaigns
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_campaign_tracking_policy();
+
 CREATE TABLE public.scans (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   placement_id UUID NOT NULL REFERENCES public.placements(id) ON DELETE CASCADE,
@@ -606,6 +714,7 @@ GRANT INSERT (
   status,
   scenario,
   use_case,
+  platform_hint,
   reference_context,
   reference_images,
   poster_format
@@ -619,6 +728,7 @@ GRANT UPDATE (
   status,
   scenario,
   use_case,
+  platform_hint,
   reference_context,
   reference_images,
   poster_format
@@ -691,7 +801,9 @@ BEGIN
   FROM public.campaigns
   WHERE id = v_placement.campaign_id;
 
-  IF v_campaign.status <> 'published' THEN
+  IF v_campaign.status <> 'published'
+    OR v_campaign.use_case = 'social_cover'
+    OR v_campaign.destination_url IS NULL THEN
     RETURN NULL;
   END IF;
 
@@ -941,7 +1053,7 @@ BEGIN
       RAISE EXCEPTION 'current poster generation is invalid'
         USING ERRCODE = '23503';
     END IF;
-  ELSIF NOT p_refresh_website THEN
+  ELSIF NOT p_refresh_website AND v_campaign.use_case <> 'social_cover' THEN
     RAISE EXCEPTION 'the first poster generation must re-read the website'
       USING ERRCODE = '23514';
   END IF;
@@ -956,6 +1068,7 @@ BEGIN
     poster_format,
     scenario,
     use_case,
+    platform_hint,
     event_details,
     style_profile,
     poster_copy,
@@ -973,12 +1086,17 @@ BEGIN
     v_campaign.id,
     v_user_id,
     v_campaign.current_generation_id,
-    CASE WHEN p_refresh_website THEN 'website_refresh' ELSE 'iteration' END,
+    CASE
+      WHEN p_refresh_website OR v_campaign.use_case = 'social_cover'
+        THEN 'website_refresh'
+      ELSE 'iteration'
+    END,
     v_instruction,
     v_reference_images,
     v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.use_case ELSE v_parent.use_case END,
+    v_campaign.platform_hint,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.poster_copy ELSE v_parent.poster_copy END,
@@ -1528,6 +1646,17 @@ BEGIN
     RAISE EXCEPTION 'authentication required' USING ERRCODE = '42501';
   END IF;
 
+  SELECT *
+  INTO v_campaign
+  FROM public.campaigns
+  WHERE id = p_campaign_id
+    AND user_id = v_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'campaign not found' USING ERRCODE = 'P0002';
+  END IF;
+
   IF v_instruction IS NOT NULL AND char_length(v_instruction) > 4000 THEN
     RAISE EXCEPTION 'instruction must be 4000 characters or fewer'
       USING ERRCODE = '22001';
@@ -1539,20 +1668,23 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  IF v_color_scheme NOT IN ('light', 'dark') THEN
-    RAISE EXCEPTION 'color_scheme must be light or dark'
+  IF v_campaign.use_case = 'social_cover'
+    AND (
+      jsonb_array_length(v_reference_images) < 1
+      OR NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_reference_images) AS item(value)
+        WHERE jsonb_typeof(item.value) = 'object'
+          AND NULLIF(BTRIM(item.value ->> 'url'), '') IS NOT NULL
+      )
+    ) THEN
+    RAISE EXCEPTION 'Social cover generation requires at least one reference image.'
       USING ERRCODE = '22023';
   END IF;
 
-  SELECT *
-  INTO v_campaign
-  FROM public.campaigns
-  WHERE id = p_campaign_id
-    AND user_id = v_user_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'campaign not found' USING ERRCODE = 'P0002';
+  IF v_color_scheme NOT IN ('light', 'dark') THEN
+    RAISE EXCEPTION 'color_scheme must be light or dark'
+      USING ERRCODE = '22023';
   END IF;
 
   IF EXISTS (
@@ -1578,7 +1710,7 @@ BEGIN
       RAISE EXCEPTION 'current poster generation is invalid'
         USING ERRCODE = '23503';
     END IF;
-  ELSIF NOT p_refresh_website THEN
+  ELSIF NOT p_refresh_website AND v_campaign.use_case <> 'social_cover' THEN
     RAISE EXCEPTION 'the first poster generation must re-read the website'
       USING ERRCODE = '23514';
   END IF;
@@ -1593,6 +1725,7 @@ BEGIN
     poster_format,
     scenario,
     use_case,
+    platform_hint,
     event_details,
     style_profile,
     poster_copy,
@@ -1610,12 +1743,17 @@ BEGIN
     v_campaign.id,
     v_user_id,
     v_campaign.current_generation_id,
-    CASE WHEN p_refresh_website THEN 'website_refresh' ELSE 'iteration' END,
+    CASE
+      WHEN p_refresh_website OR v_campaign.use_case = 'social_cover'
+        THEN 'website_refresh'
+      ELSE 'iteration'
+    END,
     v_instruction,
     v_reference_images,
     v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.use_case ELSE v_parent.use_case END,
+    v_campaign.platform_hint,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.poster_copy ELSE v_parent.poster_copy END,
@@ -1736,6 +1874,7 @@ BEGIN
     poster_format,
     scenario,
     use_case,
+    platform_hint,
     event_details,
     style_profile,
     poster_copy,
@@ -1759,6 +1898,7 @@ BEGIN
     v_previous_generation.poster_format,
     v_previous_generation.scenario,
     v_previous_generation.use_case,
+    v_previous_generation.platform_hint,
     v_previous_generation.event_details,
     v_previous_generation.style_profile,
     v_previous_generation.poster_copy,
@@ -1879,6 +2019,7 @@ BEGIN
       g.version_number,
       g.generation_mode,
       g.scenario,
+      g.use_case,
       g.instruction,
       g.hero_image_url,
       g.created_at AS generation_created_at,
@@ -1929,6 +2070,7 @@ BEGIN
         'version_number', version_number,
         'generation_mode', generation_mode,
         'scenario', scenario,
+        'use_case', use_case,
         'instruction', instruction,
         'hero_image_url', hero_image_url,
         'generation_created_at', generation_created_at,
@@ -2480,6 +2622,7 @@ BEGIN
     NEW.poster_format,
     NEW.scenario,
     NEW.use_case,
+    NEW.platform_hint,
     NEW.trace_schema_version,
     NEW.asset_selection_mode,
     NEW.created_at
@@ -2494,6 +2637,7 @@ BEGIN
     OLD.poster_format,
     OLD.scenario,
     OLD.use_case,
+    OLD.platform_hint,
     OLD.trace_schema_version,
     OLD.asset_selection_mode,
     OLD.created_at
@@ -3824,6 +3968,17 @@ BEGIN
     RAISE EXCEPTION 'authentication required' USING ERRCODE = '42501';
   END IF;
 
+  SELECT *
+  INTO v_campaign
+  FROM public.campaigns
+  WHERE id = p_campaign_id
+    AND user_id = v_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'campaign not found' USING ERRCODE = 'P0002';
+  END IF;
+
   IF v_instruction IS NOT NULL AND char_length(v_instruction) > 4000 THEN
     RAISE EXCEPTION 'instruction must be 4000 characters or fewer'
       USING ERRCODE = '22001';
@@ -3835,6 +3990,20 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
+  IF v_campaign.use_case = 'social_cover'
+    AND (
+      jsonb_array_length(v_reference_images) < 1
+      OR NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_reference_images) AS item(value)
+        WHERE jsonb_typeof(item.value) = 'object'
+          AND NULLIF(BTRIM(item.value ->> 'url'), '') IS NOT NULL
+      )
+    ) THEN
+    RAISE EXCEPTION 'Social cover generation requires at least one reference image.'
+      USING ERRCODE = '22023';
+  END IF;
+
   IF v_color_scheme NOT IN ('light', 'dark') THEN
     RAISE EXCEPTION 'color_scheme must be light or dark'
       USING ERRCODE = '22023';
@@ -3843,17 +4012,6 @@ BEGIN
   IF v_asset_selection_mode NOT IN ('editor', 'yolo') THEN
     RAISE EXCEPTION 'asset_selection_mode must be editor or yolo'
       USING ERRCODE = '22023';
-  END IF;
-
-  SELECT *
-  INTO v_campaign
-  FROM public.campaigns
-  WHERE id = p_campaign_id
-    AND user_id = v_user_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'campaign not found' USING ERRCODE = 'P0002';
   END IF;
 
   IF EXISTS (
@@ -3879,7 +4037,7 @@ BEGIN
       RAISE EXCEPTION 'current poster generation is invalid'
         USING ERRCODE = '23503';
     END IF;
-  ELSIF NOT p_refresh_website THEN
+  ELSIF NOT p_refresh_website AND v_campaign.use_case <> 'social_cover' THEN
     RAISE EXCEPTION 'the first poster generation must re-read the website'
       USING ERRCODE = '23514';
   END IF;
@@ -3894,6 +4052,7 @@ BEGIN
     poster_format,
     scenario,
     use_case,
+    platform_hint,
     event_details,
     style_profile,
     poster_copy,
@@ -3914,12 +4073,17 @@ BEGIN
     v_campaign.id,
     v_user_id,
     v_campaign.current_generation_id,
-    CASE WHEN p_refresh_website THEN 'website_refresh' ELSE 'iteration' END,
+    CASE
+      WHEN p_refresh_website OR v_campaign.use_case = 'social_cover'
+        THEN 'website_refresh'
+      ELSE 'iteration'
+    END,
     v_instruction,
     v_reference_images,
     v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.use_case ELSE v_parent.use_case END,
+    v_campaign.platform_hint,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.poster_copy ELSE v_parent.poster_copy END,
@@ -4052,6 +4216,7 @@ BEGIN
     poster_format,
     scenario,
     use_case,
+    platform_hint,
     event_details,
     style_profile,
     poster_copy,
@@ -4080,6 +4245,7 @@ BEGIN
     v_previous_generation.poster_format,
     v_previous_generation.scenario,
     v_previous_generation.use_case,
+    v_previous_generation.platform_hint,
     v_previous_generation.event_details,
     v_previous_generation.style_profile,
     v_previous_generation.poster_copy,
@@ -4297,6 +4463,7 @@ BEGIN
       g.version_number,
       g.generation_mode,
       g.scenario,
+      g.use_case,
       g.instruction,
       g.hero_image_url,
       g.poster_format,
@@ -4352,6 +4519,7 @@ BEGIN
         'version_number', version_number,
         'generation_mode', generation_mode,
         'scenario', scenario,
+        'use_case', use_case,
         'instruction', instruction,
         'hero_image_url', hero_image_url,
         'poster_format', poster_format,

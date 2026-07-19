@@ -135,17 +135,30 @@ test('both tables constrain scenario, use_case, and their event equivalence', ()
     ['campaigns', 'campaigns'],
     ['poster_generations', 'poster_generations'],
   ] as const) {
+    assert.match(
+      migration,
+      new RegExp(
+        `CONSTRAINT ${prefix}_use_case_valid\\s+CHECK \\(use_case IN \\('website_product', 'amazon_listing', 'event'\\)\\)`,
+      ),
+    )
+    const baselineConstraint = constraintBody(
+      baseline,
+      `${prefix}_use_case_valid`,
+    )
+    for (const useCase of [
+      'website_product',
+      'amazon_listing',
+      'social_cover',
+      'event',
+    ]) {
+      assert.match(baselineConstraint, new RegExp(`'${useCase}'`))
+    }
+
     for (const sql of [migration, baseline]) {
       assert.match(
         sql,
         new RegExp(
           `CONSTRAINT ${prefix}_scenario_valid\\s+CHECK \\(scenario IN \\('product', 'event'\\)\\)`,
-        ),
-      )
-      assert.match(
-        sql,
-        new RegExp(
-          `CONSTRAINT ${prefix}_use_case_valid\\s+CHECK \\(use_case IN \\('website_product', 'amazon_listing', 'event'\\)\\)`,
         ),
       )
       assert.match(
@@ -165,7 +178,7 @@ test('both tables constrain scenario, use_case, and their event equivalence', ()
   }
 })
 
-test('generation guard is swapped around backfill and freezes thirteen inputs', () => {
+test('generation guard is swapped around backfill and the baseline adds platform_hint', () => {
   const drop = migration.indexOf('DROP TRIGGER poster_generations_guard_update')
   const backfill = migration.indexOf('UPDATE public.campaigns\nSET use_case = CASE')
   const reinstall = migration.indexOf(
@@ -175,29 +188,37 @@ test('generation guard is swapped around backfill and freezes thirteen inputs', 
   assert.ok(drop >= 0 && drop < backfill)
   assert.ok(backfill < reinstall)
 
-  for (const sql of [migration, baseline]) {
-    const guard = lastFunction(sql, 'guard_poster_generation_update')
-    const tuple = guard.match(/IF \(\s*([\s\S]*?)\s*\) IS DISTINCT FROM \(/)
-    assert.ok(tuple)
-    assert.deepEqual(
-      [...tuple[1].matchAll(/NEW\.([a-z_]+)/g)].map((match) => match[1]),
-      [
-        'id',
-        'campaign_id',
-        'user_id',
-        'parent_generation_id',
-        'generation_mode',
-        'instruction',
-        'reference_images',
-        'poster_format',
-        'scenario',
-        'use_case',
-        'trace_schema_version',
-        'asset_selection_mode',
-        'created_at',
-      ],
-    )
-  }
+  assert.deepEqual(frozenTuple(migration), [
+    'id',
+    'campaign_id',
+    'user_id',
+    'parent_generation_id',
+    'generation_mode',
+    'instruction',
+    'reference_images',
+    'poster_format',
+    'scenario',
+    'use_case',
+    'trace_schema_version',
+    'asset_selection_mode',
+    'created_at',
+  ])
+  assert.deepEqual(frozenTuple(baseline), [
+    'id',
+    'campaign_id',
+    'user_id',
+    'parent_generation_id',
+    'generation_mode',
+    'instruction',
+    'reference_images',
+    'poster_format',
+    'scenario',
+    'use_case',
+    'platform_hint',
+    'trace_schema_version',
+    'asset_selection_mode',
+    'created_at',
+  ])
 })
 
 test('campaign source intent is correctable only before the first generation', () => {
@@ -253,10 +274,10 @@ test('retry copies format, scenario, and use_case from the failed generation', (
   }
 })
 
-test('every fresh-baseline generation insert writes an explicit use_case snapshot', () => {
+test('every fresh-baseline generation insert writes explicit use_case and platform snapshots', () => {
   const inserts = baseline.match(/INSERT INTO public\.poster_generations \(/g) ?? []
   const useCaseColumns = baseline.match(
-    /INSERT INTO public\.poster_generations \([\s\S]*?\buse_case,\s+event_details/g,
+    /INSERT INTO public\.poster_generations \([\s\S]*?\buse_case,\s+platform_hint,\s+event_details/g,
   ) ?? []
 
   assert.equal(inserts.length, 5)
@@ -268,6 +289,20 @@ function migrationSlice(startMarker: string, endMarker: string): string {
   const end = migration.indexOf(endMarker, start)
   assert.ok(start >= 0 && end > start)
   return migration.slice(start, end)
+}
+
+function constraintBody(sql: string, name: string): string {
+  const start = sql.indexOf(`CONSTRAINT ${name}`)
+  const end = sql.indexOf('CONSTRAINT', start + 1)
+  assert.ok(start >= 0)
+  return sql.slice(start, end > start ? end : undefined)
+}
+
+function frozenTuple(sql: string): string[] {
+  const guard = lastFunction(sql, 'guard_poster_generation_update')
+  const tuple = guard.match(/IF \(\s*([\s\S]*?)\s*\) IS DISTINCT FROM \(/)
+  assert.ok(tuple)
+  return [...tuple[1].matchAll(/NEW\.([a-z_]+)/g)].map((match) => match[1])
 }
 
 function lastFunction(sql: string, name: string): string {

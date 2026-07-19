@@ -155,14 +155,14 @@ export function deriveGenerationPreflight(args: {
   }
 
   if (refreshWebsite) {
-    if (campaign.use_case !== 'amazon_listing') {
+    if (campaign.use_case === 'website_product') {
       assets.push(
         runtimeAsset('logo', translate(locale, 'Website logo'), locale),
         runtimeAsset('product', translate(locale, 'Website product imagery'), locale),
         runtimeAsset('style-board', translate(locale, 'Website style board'), locale),
       )
     }
-  } else {
+  } else if (campaign.use_case !== 'social_cover') {
     if (snapshot.brand_assets?.logo_url) {
       assets.push({
         id: 'logo',

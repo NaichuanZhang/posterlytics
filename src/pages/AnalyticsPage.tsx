@@ -1,6 +1,6 @@
 import { RefreshCw } from 'lucide-react'
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Navigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { BreakdownCard } from '../components/BreakdownCard'
 import { StatsTable } from '../components/StatsTable'
@@ -11,24 +11,28 @@ import { useCampaign } from '../hooks/useCampaign'
 import { useCampaignBreakdowns } from '../hooks/useCampaignBreakdowns'
 import { usePlacementStats } from '../hooks/usePlacementStats'
 import { useI18n } from '../i18n/I18nProvider'
+import { getUseCase } from '../lib/useCases'
 
 export function AnalyticsPage() {
   const { formatNumber, t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
+  const trackingEnabled = campaign
+    ? getUseCase(campaign.use_case).trackingEnabled
+    : false
   const {
     stats,
     loading: statsLoading,
     error: statsError,
     reload,
-  } = usePlacementStats(id)
+  } = usePlacementStats(id, trackingEnabled)
   const {
     breakdowns,
     loading: breakdownsLoading,
     error: breakdownsError,
     reload: reloadBreakdowns,
-  } = useCampaignBreakdowns(id)
+  } = useCampaignBreakdowns(id, trackingEnabled)
   const [refreshing, setRefreshing] = useState(false)
 
   async function refreshAll() {
@@ -57,6 +61,9 @@ export function AnalyticsPage() {
         <InlineNotice tone="error">{t('Campaign not found.')}</InlineNotice>
       </AppShell>
     )
+  }
+  if (!trackingEnabled) {
+    return <Navigate to={`/campaigns/${campaign.id}`} replace />
   }
 
   const totals = stats.reduce(

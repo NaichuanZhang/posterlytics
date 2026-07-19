@@ -4,19 +4,26 @@ import { mintCode } from '../lib/codes'
 import type { Placement } from '../lib/types'
 import { useI18n } from '../i18n/I18nProvider'
 
-export function usePlacements(campaignId: string | undefined, userId: string | undefined) {
+export function usePlacements(
+  campaignId: string | undefined,
+  userId: string | undefined,
+  enabled = true,
+) {
   const { t } = useI18n()
   const [placements, setPlacements] = useState<Placement[]>([])
 
   const reload = useCallback(async () => {
-    if (!campaignId) return
+    if (!campaignId || !enabled) {
+      setPlacements([])
+      return
+    }
     const { data, error } = await insforge.database
       .from('placements')
       .select('*')
       .eq('campaign_id', campaignId)
       .order('created_at', { ascending: true })
     if (!error) setPlacements((data ?? []) as Placement[])
-  }, [campaignId])
+  }, [campaignId, enabled])
 
   useEffect(() => {
     void reload()
@@ -25,7 +32,7 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
   // Insert a placement, retrying once on the (astronomically unlikely) code collision.
   const addPlacement = useCallback(
     async (label: string): Promise<string | null> => {
-      if (!campaignId || !userId) return t('Missing campaign or user')
+      if (!enabled || !campaignId || !userId) return t('Missing campaign or user')
       for (let attempt = 0; attempt < 2; attempt++) {
         const { error } = await insforge.database
           .from('placements')
@@ -38,7 +45,7 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
       }
       return t('Could not generate a unique code, please retry.')
     },
-    [campaignId, userId, reload, t],
+    [campaignId, enabled, userId, reload, t],
   )
 
   const removePlacement = useCallback(
@@ -56,7 +63,7 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
   // Idempotent: re-reads first and only inserts when truly empty.
   const ensuredFor = useRef<string | null>(null)
   const ensureDefault = useCallback(async () => {
-    if (!campaignId || !userId) return
+    if (!enabled || !campaignId || !userId) return
     if (ensuredFor.current === campaignId) return
     ensuredFor.current = campaignId
     const { data } = await insforge.database
@@ -66,7 +73,7 @@ export function usePlacements(campaignId: string | undefined, userId: string | u
       .limit(1)
     if (data && data.length > 0) return
     await addPlacement(t('Primary'))
-  }, [campaignId, userId, addPlacement, t])
+  }, [campaignId, enabled, userId, addPlacement, t])
 
   return { placements, reload, addPlacement, removePlacement, ensureDefault }
 }

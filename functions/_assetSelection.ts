@@ -92,8 +92,9 @@ export function buildGenerationAssetCandidates(
   parent: ParentSnapshot | null,
 ): GenerationAssetCandidate[] {
   const recipe = resolveProductUseCaseRecipe(generation.use_case);
+  const usesSourceAssets = recipe.acquisitionMode !== 'reference-only';
   const assets = generation.brand_assets ?? {};
-  const productImages = generation.scenario === 'event'
+  const productImages = generation.scenario === 'event' || !usesSourceAssets
     ? []
     : [
         ...(assets.primary_image_url
@@ -131,7 +132,7 @@ export function buildGenerationAssetCandidates(
         storageSource: 'user-upload',
         purpose: recipe.references.assetUserReference(index + 1),
       })),
-    ...(assets.logo_url
+    ...(usesSourceAssets && assets.logo_url
       ? [{
           kind: 'logo' as const,
           url: assets.logo_url,
@@ -149,7 +150,7 @@ export function buildGenerationAssetCandidates(
       storageSource: 'website-asset',
       purpose: recipe.references.assetProduct(index + 1),
     })),
-    ...(generation.screenshot_url
+    ...(usesSourceAssets && generation.screenshot_url
       ? [{
           kind: 'style-board' as const,
           url: generation.screenshot_url,

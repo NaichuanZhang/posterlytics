@@ -13,6 +13,7 @@ import {
   getPosterSize,
   POSTER_SIZES,
 } from '../src/lib/posterSize.ts'
+import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
 
 const PALETTE = { bg: '#0b1020', text: '#e8ecf5', primary: '#3b82f6', accent: '#f97316' }
 
@@ -164,6 +165,17 @@ test('scaled product prompts retain the placement QR footer contract', () => {
   assert.match(instructions.designerRule, /tracked QR footer bar.*IS the call-to-action/i)
   assert.match(instructions.painterRule, /scannable QR footer bar.*IS the call-to-action/i)
   assert.match(instructions.designerRequest, /QR footer is the action/i)
+})
+
+test('social policy suppresses tracking instructions even for a malformed banded format', () => {
+  const instructions = productPosterActionInstructions(
+    getPosterSize('a4_2x3'),
+    resolveProductUseCaseRecipe('social_cover'),
+  )
+
+  assert.match(instructions.designerRule, /no footer or tracking mechanics/i)
+  assert.match(instructions.painterRule, /FULL-BLEED SOCIAL ARTWORK/)
+  assert.doesNotMatch(instructions.painterRule, /scannable QR footer/i)
 })
 
 test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', () => {

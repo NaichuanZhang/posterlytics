@@ -4,6 +4,7 @@ import type { PosterSizeSlug } from './posterSize'
 export const USE_CASE_IDS = [
   'website_product',
   'amazon_listing',
+  'social_cover',
   'event',
 ] as const
 
@@ -22,6 +23,7 @@ export interface UseCaseInputFieldSpec {
   readonly ctaText: UseCaseFieldRequirement
   readonly destinationUrl: UseCaseFieldRequirement
   readonly referenceContext: UseCaseFieldRequirement
+  readonly platformHint: UseCaseFieldRequirement
   readonly referenceImages: {
     readonly requirement: UseCaseFieldRequirement
     readonly minimumCount: number
@@ -64,6 +66,7 @@ export const USE_CASES = [
       ctaText: 'required',
       destinationUrl: 'required',
       referenceContext: 'optional',
+      platformHint: 'hidden',
       referenceImages: { requirement: 'optional', minimumCount: 0 },
     },
     allowedPosterFormats: ALL_POSTER_FORMATS,
@@ -82,11 +85,31 @@ export const USE_CASES = [
       ctaText: 'required',
       destinationUrl: 'required',
       referenceContext: 'optional',
+      platformHint: 'hidden',
       referenceImages: { requirement: 'optional', minimumCount: 0 },
     },
     allowedPosterFormats: ALL_POSTER_FORMATS,
     defaultPosterFormat: 'a4_2x3',
     trackingEnabled: true,
+  },
+  {
+    id: 'social_cover',
+    label: catalogLabel('Social cover'),
+    creationDescription: catalogLabel('Create full-bleed artwork from creative references and direction.'),
+    creationEnabled: true,
+    inputFields: {
+      productUrl: { requirement: 'hidden', sourceKind: 'none' },
+      productName: 'required',
+      tagline: 'optional',
+      ctaText: 'hidden',
+      destinationUrl: 'hidden',
+      referenceContext: 'optional',
+      platformHint: 'optional',
+      referenceImages: { requirement: 'required', minimumCount: 1 },
+    },
+    allowedPosterFormats: ['rednote_cover_3x4'],
+    defaultPosterFormat: 'rednote_cover_3x4',
+    trackingEnabled: false,
   },
   {
     id: 'event',
@@ -100,6 +123,7 @@ export const USE_CASES = [
       ctaText: 'hidden',
       destinationUrl: 'hidden',
       referenceContext: 'hidden',
+      platformHint: 'hidden',
       referenceImages: { requirement: 'hidden', minimumCount: 0 },
     },
     allowedPosterFormats: ALL_POSTER_FORMATS,
@@ -115,11 +139,12 @@ export const CREATABLE_USE_CASES = USE_CASES.filter(
 const USE_CASE_BY_ID = new Map<UseCaseId, UseCaseDescriptor>(
   USE_CASES.map((useCase) => [useCase.id, useCase]),
 )
+const DEFAULT_USE_CASE = USE_CASES[0]
 
 export function isUseCaseId(value: unknown): value is UseCaseId {
   return typeof value === 'string' && USE_CASE_BY_ID.has(value as UseCaseId)
 }
 
-export function getUseCase(id: UseCaseId): UseCaseDescriptor {
-  return USE_CASE_BY_ID.get(id)!
+export function getUseCase(id: unknown): UseCaseDescriptor {
+  return isUseCaseId(id) ? USE_CASE_BY_ID.get(id)! : DEFAULT_USE_CASE
 }

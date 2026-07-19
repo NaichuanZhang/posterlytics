@@ -189,7 +189,20 @@ export function GenerationDetailsSheet({
             aria-labelledby="generation-user-prompt"
           >
             <h3 id="generation-user-prompt">{t('User prompt')}</h3>
-            <p>{generation.instruction || t('Initial website-based poster')}</p>
+            <p>
+              {generation.instruction || t(
+                generation.use_case === 'social_cover'
+                  ? 'Initial reference-based artwork'
+                  : 'Initial website-based poster',
+              )}
+            </p>
+            {generation.platform_hint && (
+              <small className="generation-details-platform">
+                {t('Target platform: {platform}', {
+                  platform: generation.platform_hint,
+                })}
+              </small>
+            )}
           </section>
 
           <ImageSummarySection

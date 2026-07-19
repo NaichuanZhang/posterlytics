@@ -2,13 +2,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { insforge } from '../lib/insforge'
 import type { PlacementStat } from '../lib/types'
 
-export function usePlacementStats(campaignId: string | undefined) {
+export function usePlacementStats(
+  campaignId: string | undefined,
+  enabled = true,
+) {
   const [stats, setStats] = useState<PlacementStat[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
-    if (!campaignId) return
+    if (!campaignId || !enabled) {
+      setStats([])
+      setLoading(false)
+      setError(null)
+      return
+    }
     setLoading(true)
     const { data, error } = await insforge.database.rpc('placement_stats', {
       p_campaign_id: campaignId,
@@ -29,7 +37,7 @@ export function usePlacementStats(campaignId: string | undefined) {
       setError(null)
     }
     setLoading(false)
-  }, [campaignId])
+  }, [campaignId, enabled])
 
   useEffect(() => {
     void reload()

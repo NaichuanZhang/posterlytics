@@ -36,6 +36,7 @@ function activity(
     version_number: null,
     generation_mode: 'website_refresh',
     scenario: 'product',
+    use_case: 'website_product',
     instruction: null,
     hero_image_url: null,
     poster_format: 'a4_2x3',
@@ -116,6 +117,22 @@ test('asset review is active, directly labeled, and never represented as a runni
       ['designer', 'pending'],
       ['hero', 'pending'],
     ],
+  )
+})
+
+test('social activity labels analyze as reference work in both locales', () => {
+  const social = activity({
+    stage: 'analyze',
+    use_case: 'social_cover',
+    generation_status: 'analyzing',
+  })
+
+  assert.equal(generationActivityLabel(social), 'Analyzing references')
+  assert.equal(generationActivityLabel(social, 'zh-CN'), '正在分析参考素材')
+  assert.equal(deriveGenerationStages(social)[0].label, 'Analyze references')
+  assert.equal(
+    deriveGenerationStages({ ...social, status: 'succeeded' })[0].label,
+    'References analyzed',
   )
 })
 

@@ -13,6 +13,7 @@ import type { Campaign } from '../lib/types'
 import type { GenerationActivityItem } from '../lib/types'
 import { activityForCampaign, generationActivityLabel } from '../lib/generationActivity'
 import { useI18n } from '../i18n/I18nProvider'
+import { getUseCase } from '../lib/useCases'
 
 export function CampaignsListPage() {
   const { t } = useI18n()
@@ -29,7 +30,7 @@ export function CampaignsListPage() {
     try {
       const { data, error: queryError } = await insforge.database
         .from('campaigns')
-        .select('id, product_name, product_url, status, created_at, brand_assets, hero_image_url')
+        .select('id, product_name, product_url, use_case, status, created_at, brand_assets, hero_image_url')
         .order('created_at', { ascending: false })
 
       if (queryError) {
@@ -180,6 +181,7 @@ function CampaignFile({
     || campaign.brand_assets?.primary_image_url
     || campaign.brand_assets?.images?.[0]?.url
     || ''
+  const trackingEnabled = getUseCase(campaign.use_case).trackingEnabled
 
   return (
     <Link to={`/campaigns/${campaign.id}`} className="campaign-file">
@@ -194,17 +196,23 @@ function CampaignFile({
             <GalleryVerticalEnd size={26} />
           </span>
         )}
-        <span className={`status-badge status-${activity ? 'generating' : campaign.status}`}>
-          {activity
-            ? generationActivityLabel(activity, locale)
-            : campaign.status === 'published'
-              ? t('Published')
-              : t('Draft')}
-        </span>
+        {(activity || trackingEnabled) && (
+          <span className={`status-badge status-${activity ? 'generating' : campaign.status}`}>
+            {activity
+              ? generationActivityLabel(activity, locale)
+              : campaign.status === 'published'
+                ? t('Published')
+                : t('Draft')}
+          </span>
+        )}
       </div>
       <div className="campaign-file-copy">
         <strong>{campaign.product_name}</strong>
-        <span>{safeHostname(campaign.product_url)}</span>
+        <span>
+          {campaign.use_case === 'social_cover'
+            ? t(getUseCase(campaign.use_case).label)
+            : safeHostname(campaign.product_url)}
+        </span>
         {activity && (
           <span className="campaign-generation-state">
             {generationActivityLabel(activity, locale)}
@@ -240,7 +248,8 @@ function CampaignSkeletons() {
   )
 }
 
-function safeHostname(value: string) {
+function safeHostname(value: string | null) {
+  if (!value) return ''
   try {
     return new URL(value).hostname.replace(/^www\./, '')
   } catch {

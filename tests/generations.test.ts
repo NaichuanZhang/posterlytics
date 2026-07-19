@@ -14,6 +14,7 @@ const CAMPAIGN = {
   status: 'published',
   current_generation_id: 'generation-2',
   use_case: 'website_product',
+  platform_hint: null,
   poster_format: 'luma_1x1',
   hero_image_url: 'https://example.com/current.png',
   hero_image_key: 'poster/current.png',
@@ -33,6 +34,7 @@ const GENERATION = {
   version_number: 1,
   scenario: 'product',
   use_case: 'amazon_listing',
+  platform_hint: 'Instagram',
   event_details: null,
   style_profile: null,
   poster_copy: null,
@@ -59,11 +61,13 @@ test('overlayGeneration previews a snapshot without changing campaign state', ()
   assert.equal(preview.brand_essence, 'Version one')
   assert.equal(preview.reference_context, 'Make the title larger')
   assert.equal(preview.use_case, 'amazon_listing')
+  assert.equal(preview.platform_hint, 'Instagram')
   assert.equal(preview.poster_format, 'a4_2x3')
   assert.equal(preview.status, 'published')
   assert.equal(preview.current_generation_id, 'generation-2')
   assert.equal(CAMPAIGN.poster_format, 'luma_1x1')
   assert.equal(CAMPAIGN.use_case, 'website_product')
+  assert.equal(CAMPAIGN.platform_hint, null)
   assert.equal(CAMPAIGN.hero_image_key, 'poster/current.png')
 })
 

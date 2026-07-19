@@ -2069,12 +2069,28 @@ export function buildParentContextPrompt(args: {
 // proven conventions: registered framing, brand-honoring, "render only these
 // exact quoted strings", and an Avoid list. The artwork fills the complete frame;
 // the descriptor decides whether the SPA adds a QR footer outside it.
-export function productPosterActionInstructions(posterSize: PosterSize): {
+export function productPosterActionInstructions(
+  posterSize: PosterSize,
+  recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
+): {
   designerRule: string;
   designerRequest: string;
   painterRule: string;
   painterAvoid: string;
 } {
+  if (recipe.id === 'social_cover') {
+    return {
+      designerRule:
+        'CRITICAL: this is full-bleed artwork with no footer or tracking mechanics. Do NOT add a QR code, barcode, call-to-action, painted button, pill, badge, or platform interface. Use the "lower" zone for a closing visual or supporting detail instead. ',
+      designerRequest:
+        'Design the full-bleed artwork layout JSON now (no tracking marks, call-to-action, button, pill, badge, or platform interface).',
+      painterRule:
+        'This is FULL-BLEED SOCIAL ARTWORK, not an interface: do NOT draw buttons, pills, tabs, badges, platform chrome, or clickable controls. Do NOT render any QR code, barcode, or call-to-action.',
+      painterAvoid:
+        'any QR code or barcode drawn by you, any call-to-action, and any platform interface',
+    };
+  }
+
   if (hasPosterQrBand(posterSize)) {
     return {
       designerRule:
@@ -2107,7 +2123,7 @@ export function compileLayoutPrompt(
   recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
 ): string {
   const p = layout.palette_roles;
-  const actionInstructions = productPosterActionInstructions(posterSize);
+  const actionInstructions = productPosterActionInstructions(posterSize, recipe);
   const bandLabel: Record<LayoutBand, string> = {
     top: 'TOP strip (0-12% down)',
     upper: 'UPPER area (12-42% down)',
@@ -2127,7 +2143,7 @@ export function compileLayoutPrompt(
 
   const logoLine = ctx.hasLogo
     ? '\nA reference image of the brand LOGO is provided alongside this prompt — reproduce it FAITHFULLY (exact shape, proportions, and colors) in the top brand row. Do not redraw, restyle, or distort it.\n'
-    : '\nNo authentic logo image is attached. If the layout calls for a brand identifier, render only the product name already supplied in its quoted zone, as plain text. Do not invent or render any logo, icon, emblem, monogram, mascot, or brand symbol.\n';
+    : `\nNo authentic logo image is attached. If the layout calls for a brand identifier, render only the ${recipe.stages.heroNoLogoSubject} already supplied in its quoted zone, as plain text. Do not invent or render any logo, icon, emblem, monogram, mascot, or brand symbol.\n`;
   const sourceEvidence = ctx.hasStyleBoard
     ? recipe.stages.heroStyleBoardAttached
     : recipe.stages.heroStyleBoardMissing;
@@ -2146,12 +2162,9 @@ export function compileLayoutPrompt(
   ].filter(Boolean).join('\n');
   const density = layout.density ?? 'balanced';
   const densityInstruction: Record<VisualDensity, string> = {
-    sparse:
-      'Preserve the source page\'s SPARSE rhythm: use only the supplied zones, keep generous intentional negative space, and resist adding filler details.',
-    balanced:
-      'Preserve a BALANCED rhythm: maintain clear hierarchy and measured supporting detail without crowding or artificial emptiness.',
-    dense:
-      'Preserve the source page\'s DENSE rhythm: layer the supplied zones and supporting visual detail while keeping every element legible.',
+    sparse: recipe.stages.heroSparseDensityRule,
+    balanced: recipe.stages.heroBalancedDensityRule,
+    dense: recipe.stages.heroDenseDensityRule,
   };
 
   return `Create a single ${getPosterFrameLabel(posterSize)} ${recipe.stages.heroPosterKind}. Custom art-directed layout (NOT a generic template).
@@ -2164,10 +2177,10 @@ ${actionInstructions.painterRule}
 
 ${densityInstruction[density]}
 ${logoLine}
-Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; accent ${p.accent}; ${p.surface ? `surface ${p.surface}; ` : ''}body text ${p.text}.${supporting ? ` Supporting source colors: ${supporting}.` : ''} Stay within this palette plus source neutrals — no rogue colors.
-${proportions ? `Preserve the source page's approximate COLOR AREA PROPORTIONS across the finished poster: ${proportions}. Dominant source colors must remain dominant; accents must remain restrained when they were restrained in the source.` : ''}
+Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; accent ${p.accent}; ${p.surface ? `surface ${p.surface}; ` : ''}body text ${p.text}.${recipe.stages.heroPaletteBoundary(supporting)}
+${proportions ? recipe.stages.heroColorProportions(proportions) : ''}
 
-Honor this brand — infuse its palette, typography, imagery, observed motifs, and vibe; reproduce a logo only when an authentic logo reference is attached:
+${recipe.stages.heroIdentityRule}
 ${ctx.essence || ctx.product}
 
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings listed below, and they must all be in ENGLISH. Do NOT print any of the layout/section descriptions, role names, position words, or instruction words as visible text — those are directions, not content.
@@ -2176,7 +2189,7 @@ Arrange the poster top to bottom using these zones — together they fill the co
 ${zoneLines || '- TOP strip: plain-text product name.\n- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
-Avoid: garbled or misspelled text, copied navigation or web controls, painted buttons / pills / clickable UI controls, invented logos or symbols when no authentic logo reference is attached, ${actionInstructions.painterAvoid}, more than the quoted strings, non-English text, and watermarks.`;
+Avoid: garbled or misspelled text, ${recipe.stages.heroAvoidControls}, painted buttons / pills / clickable UI controls, invented logos or symbols when no authentic logo reference is attached, ${actionInstructions.painterAvoid}, more than the quoted strings, non-English text, and watermarks.`;
 }
 
 export async function aiImage(

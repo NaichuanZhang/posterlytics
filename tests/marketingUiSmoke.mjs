@@ -90,10 +90,13 @@ async function testAuthenticatedHome(browserInstance) {
   })
   await installBackendMock(context, { authenticated: true })
   const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
 
   await page.goto(`${BASE_URL}/`)
   await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor()
   assert.equal(await page.getByRole('heading', { name: 'Posterlytics', exact: true }).count(), 0)
+  assert.deepEqual(pageErrors, [])
 
   await context.close()
 }
@@ -510,8 +513,11 @@ function createFixtures() {
     reference_context: null,
     reference_images: [],
     scenario: 'product',
+    use_case: 'website_product',
+    platform_hint: null,
     event_details: null,
     current_generation_id: 'sample-generation',
+    poster_format: 'a4_2x3',
     status: 'published',
     created_at: '2026-07-10T17:00:00.000Z',
   }
@@ -526,7 +532,10 @@ function createFixtures() {
     instruction: null,
     reference_images: [],
     scenario: 'product',
+    use_case: 'website_product',
+    platform_hint: null,
     event_details: null,
+    poster_format: 'a4_2x3',
     style_profile: campaign.style_profile,
     poster_copy: null,
     poster_content: null,

@@ -50,3 +50,14 @@ test('filterCampaigns uses durable activity for the Generating filter', () => {
     ['Transit Board'],
   )
 })
+
+test('filterCampaigns accepts URL-less campaigns', () => {
+  const socialCover = {
+    product_name: 'Summer launch cover',
+    product_url: null,
+    status: 'draft' as const,
+  }
+
+  assert.deepEqual(filterCampaigns([socialCover], 'summer', 'all'), [socialCover])
+  assert.deepEqual(filterCampaigns([socialCover], 'example.com', 'all'), [])
+})

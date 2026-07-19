@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Copy,
+  Download,
   EyeOff,
   BadgeCheck,
   MapPin,
@@ -21,6 +22,7 @@ import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { GenerationDetailsSheet } from '../components/GenerationDetailsSheet'
 import { GenerationInputsReview } from '../components/GenerationInputsReview'
 import { GenerationReferences } from '../components/GenerationReferences'
+import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterCanvas } from '../components/PosterCanvas'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
@@ -51,6 +53,7 @@ import {
   hasPosterQrBand,
   type PosterSizeSlug,
 } from '../lib/posterSize'
+import { normalizePlatformHint } from '../lib/platformHints'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -61,7 +64,14 @@ import type { PosterGeneration } from '../lib/types'
 import { getUseCase } from '../lib/useCases'
 import { buildViewUrl } from '../lib/viewUrl'
 
-type BusyAction = 'generate' | 'activate' | 'published' | 'draft' | 'delete' | 'format'
+type BusyAction =
+  | 'generate'
+  | 'activate'
+  | 'published'
+  | 'draft'
+  | 'delete'
+  | 'format'
+  | 'platform'
 type MobileSection = 'versions' | 'create' | 'export'
 
 export function PosterEditorPage() {
@@ -84,7 +94,14 @@ export function PosterEditorPage() {
     error: generationsError,
     reload: reloadGenerations,
   } = usePosterGenerations(id)
-  const { placements, ensureDefault } = usePlacements(id, user?.id)
+  const campaignTrackingEnabled = campaign
+    ? getUseCase(campaign.use_case).trackingEnabled
+    : false
+  const { placements, ensureDefault } = usePlacements(
+    id,
+    user?.id,
+    campaignTrackingEnabled,
+  )
   const { preferences, updatePreferences } = useWorkspacePreferences()
   const isMobileWorkspace = useMediaQuery('(max-width: 899px)')
   const isVersionsDrawer = useMediaQuery('(min-width: 900px) and (max-width: 1199px)')
@@ -93,6 +110,7 @@ export function PosterEditorPage() {
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null)
   const [instruction, setInstruction] = useState('')
+  const [platformHint, setPlatformHint] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
   const [refreshWebsite, setRefreshWebsite] = useState(false)
   const [generationError, setGenerationError] = useState<string | null>(null)
@@ -105,8 +123,12 @@ export function PosterEditorPage() {
   const trackedJobRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (user?.id) void ensureDefault()
-  }, [user?.id, ensureDefault])
+    if (user?.id && campaignTrackingEnabled) void ensureDefault()
+  }, [campaignTrackingEnabled, user?.id, ensureDefault])
+
+  useEffect(() => {
+    setPlatformHint(campaign?.platform_hint ?? '')
+  }, [campaign?.id, campaign?.platform_hint])
 
   useEffect(() => {
     if (placements.length === 0) {
@@ -210,7 +232,10 @@ export function PosterEditorPage() {
     )
   }
   const campaignId = campaign.id
-  const previewCode = selectedPlacement?.code ?? null
+  const campaignPlatformHint = campaign.platform_hint
+  const previewCode = campaignTrackingEnabled
+    ? selectedPlacement?.code ?? null
+    : null
   const previewPosterSize = getPosterSize(
     previewGeneration
       ? previewGeneration.poster_format
@@ -224,7 +249,8 @@ export function PosterEditorPage() {
   const firstVersion = !campaign.current_generation_id
   const campaignUseCase = getUseCase(campaign.use_case)
   const amazonReferenceMode = campaignUseCase.id === 'amazon_listing'
-  const effectiveRefreshWebsite = firstVersion || refreshWebsite
+  const socialReferenceMode = campaignUseCase.id === 'social_cover'
+  const effectiveRefreshWebsite = socialReferenceMode || firstVersion || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
   const generationInputsDisabled = uploadingInputs || generating
@@ -240,6 +266,11 @@ export function PosterEditorPage() {
   const showDesktopVersions = !isMobileWorkspace && (
     isVersionsDrawer ? versionsDrawerOpen : preferences.versionsPanelOpen
   )
+  const minimumReferenceImages = Math.max(
+    campaignUseCase.inputFields.referenceImages.minimumCount,
+    campaignUseCase.inputFields.referenceImages.requirement === 'required' ? 1 : 0,
+  )
+  const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
   const useCaseReferenceProps = amazonReferenceMode
     ? {
         contextLabel: t('Listing copy and creative direction'),
@@ -248,6 +279,14 @@ export function PosterEditorPage() {
         referenceImagesLabel: t('Product and brand images'),
         referenceImagesHint: t('Seller-provided images are the primary visual source.'),
       }
+    : socialReferenceMode
+      ? {
+          contextLabel: t('Creative direction'),
+          contextPlaceholder: t('Describe the mood, visual hook, audience, and what should change.'),
+          contextHint: t('The supplied references are re-analyzed for every new version.'),
+          referenceImagesLabel: t('Creative references'),
+          referenceImagesHint: t('Add at least one fresh reference for this version.'),
+        }
     : {
         contextLabel: t('What should change?'),
         contextPlaceholder: t('Make the headline larger, replace the product image, or adjust the mood.'),
@@ -256,6 +295,12 @@ export function PosterEditorPage() {
 
   async function generateVersion() {
     if (!user || generating || uploadingInputs) return
+    if (!referenceMinimumMet) {
+      setGenerationError(t('Add at least {count} images.', {
+        count: minimumReferenceImages,
+      }))
+      return
+    }
     if (!pendingReferencesReady(pendingReferences)) {
       setGenerationError(t('Remove any image URL that could not load, or wait for its preview to finish.'))
       return
@@ -267,6 +312,10 @@ export function PosterEditorPage() {
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
 
     try {
+      if (campaignUseCase.inputFields.platformHint !== 'hidden') {
+        const platformHintChanged = await persistPlatformHintTarget()
+        if (platformHintChanged) await reload()
+      }
       uploaded = await materializeReferenceImages(
         user.id,
         campaignId,
@@ -339,6 +388,36 @@ export function PosterEditorPage() {
       const message = cause instanceof Error ? cause.message : String(cause)
       setGenerationError(message)
       notify(t('Poster format could not be updated.'), 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function persistPlatformHintTarget(): Promise<boolean> {
+    const normalized = normalizePlatformHint(platformHint)
+    if (normalized === campaignPlatformHint) return false
+
+    const { error } = await insforge.database
+      .from('campaigns')
+      .update({ platform_hint: normalized })
+      .eq('id', campaignId)
+    if (error) throw new Error(error.message)
+    return true
+  }
+
+  async function updatePlatformHint() {
+    if (normalizePlatformHint(platformHint) === campaignPlatformHint) return
+
+    setBusy('platform')
+    setGenerationError(null)
+    try {
+      await persistPlatformHintTarget()
+      await reload()
+      notify(t('Target platform updated for the next version.'), 'success')
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setGenerationError(message)
+      notify(t('Target platform could not be updated.'), 'error')
     } finally {
       setBusy(null)
     }
@@ -446,6 +525,29 @@ export function PosterEditorPage() {
         allowedFormats={campaignUseCase.allowedPosterFormats}
         onChange={(posterFormat) => void updatePosterFormat(posterFormat)}
       />
+      {campaignUseCase.inputFields.platformHint !== 'hidden' && (
+        <>
+          <PlatformHintField
+            key={campaignId}
+            id="next-platform-hint"
+            value={platformHint}
+            disabled={generationInputsDisabled || !!busy}
+            onChange={setPlatformHint}
+          />
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            disabled={
+              generationInputsDisabled
+              || !!busy
+              || normalizePlatformHint(platformHint) === campaign.platform_hint
+            }
+            onClick={() => void updatePlatformHint()}
+          >
+            {t('Save platform hint')}
+          </button>
+        </>
+      )}
       <GenerationReferences
         context={instruction}
         onContextChange={setInstruction}
@@ -473,15 +575,17 @@ export function PosterEditorPage() {
         compact
         onChange={(assetSelectionMode) => updatePreferences({ assetSelectionMode })}
       />
-      <label className="check-control">
-        <input
-          type="checkbox"
-          checked={effectiveRefreshWebsite}
-          disabled={generationInputsDisabled || firstVersion}
-          onChange={(event) => setRefreshWebsite(event.target.checked)}
-        />
-        <span>{t('Re-read website before generating')}</span>
-      </label>
+      {!socialReferenceMode && (
+        <label className="check-control">
+          <input
+            type="checkbox"
+            checked={effectiveRefreshWebsite}
+            disabled={generationInputsDisabled || firstVersion}
+            onChange={(event) => setRefreshWebsite(event.target.checked)}
+          />
+          <span>{t('Re-read website before generating')}</span>
+        </label>
+      )}
       <GenerationInputsReview
         preflight={generationPreflight}
         disabled={generationInputsDisabled}
@@ -489,7 +593,12 @@ export function PosterEditorPage() {
       <button
         type="button"
         className="button button-primary inspector-primary"
-        disabled={generationInputsDisabled || !!busy || !pendingReferencesReady(pendingReferences)}
+        disabled={
+          generationInputsDisabled
+          || !!busy
+          || !referenceMinimumMet
+          || !pendingReferencesReady(pendingReferences)
+        }
         onClick={() => void generateVersion()}
       >
         <Sparkles size={15} aria-hidden="true" />
@@ -507,15 +616,19 @@ export function PosterEditorPage() {
     <section className="inspector-section" aria-labelledby="export-heading">
       <div className="panel-heading">
         <div>
-          <MapPin size={16} aria-hidden="true" />
-          <h2 id="export-heading">{t('Placement & export')}</h2>
+          {campaignTrackingEnabled
+            ? <MapPin size={16} aria-hidden="true" />
+            : <Download size={16} aria-hidden="true" />}
+          <h2 id="export-heading">
+            {campaignTrackingEnabled ? t('Placement & export') : t('Export artwork')}
+          </h2>
         </div>
       </div>
-      {previewIncludesQrBand && placements.length === 0 ? (
+      {campaignTrackingEnabled && previewIncludesQrBand && placements.length === 0 ? (
         <p className="panel-empty">{t('Preparing the primary placement.')}</p>
       ) : (
         <>
-          {previewIncludesQrBand && (
+          {campaignTrackingEnabled && previewIncludesQrBand && (
             <div className="field">
               <label htmlFor="placement-select">{t('Placement')}</label>
               <select
@@ -537,34 +650,42 @@ export function PosterEditorPage() {
               })}
             </p>
           )}
-          {!previewIncludesQrBand && (
+          {(!campaignTrackingEnabled || !previewIncludesQrBand) && (
             <p className="selection-note">
               {t('Artwork-only export. No QR code or placement tracking is included.')}
             </p>
           )}
           <div className="inspector-actions">
-            {(!previewIncludesQrBand || selectedPlacement) && (
+            {(!campaignTrackingEnabled || !previewIncludesQrBand || selectedPlacement) && (
               <PosterExportButton
                 campaign={previewCampaign}
-                placement={previewIncludesQrBand ? selectedPlacement : undefined}
+                placement={
+                  campaignTrackingEnabled && previewIncludesQrBand
+                    ? selectedPlacement
+                    : undefined
+                }
                 versionNumber={selectedGeneration?.version_number ?? undefined}
                 posterSize={previewPosterSize}
               />
             )}
-            {previewIncludesQrBand && selectedPlacement && (
+            {campaignTrackingEnabled && previewIncludesQrBand && selectedPlacement && (
               <button type="button" className="button button-secondary button-small" onClick={copyLink}>
                 <Copy size={15} aria-hidden="true" />
                 {t('Copy tracked link')}
               </button>
             )}
-            <Link to={`/campaigns/${campaign.id}/placements`} className="button button-secondary button-small">
-              <MapPin size={15} aria-hidden="true" />
-              {t('Manage placements')}
-            </Link>
-            <Link to={`/campaigns/${campaign.id}/analytics`} className="button button-secondary button-small">
-              <BarChart3 size={15} aria-hidden="true" />
-              {t('View analytics')}
-            </Link>
+            {campaignTrackingEnabled && (
+              <>
+                <Link to={`/campaigns/${campaign.id}/placements`} className="button button-secondary button-small">
+                  <MapPin size={15} aria-hidden="true" />
+                  {t('Manage placements')}
+                </Link>
+                <Link to={`/campaigns/${campaign.id}/analytics`} className="button button-secondary button-small">
+                  <BarChart3 size={15} aria-hidden="true" />
+                  {t('View analytics')}
+                </Link>
+              </>
+            )}
           </div>
         </>
       )}
@@ -608,16 +729,20 @@ export function PosterEditorPage() {
           >
             <PanelRight size={17} aria-hidden="true" />
           </button>
-          <span className="toolbar-divider" />
-          <button
-            type="button"
-            className={published ? 'toolbar-button' : 'toolbar-button toolbar-button-primary'}
-            disabled={!!busy}
-            onClick={() => void setStatus(published ? 'draft' : 'published')}
-          >
-            {published ? <EyeOff size={15} aria-hidden="true" /> : <Send size={15} aria-hidden="true" />}
-            <span>{published ? t('Unpublish') : t('Publish')}</span>
-          </button>
+          {campaignTrackingEnabled && (
+            <>
+              <span className="toolbar-divider" />
+              <button
+                type="button"
+                className={published ? 'toolbar-button' : 'toolbar-button toolbar-button-primary'}
+                disabled={!!busy}
+                onClick={() => void setStatus(published ? 'draft' : 'published')}
+              >
+                {published ? <EyeOff size={15} aria-hidden="true" /> : <Send size={15} aria-hidden="true" />}
+                <span>{published ? t('Unpublish') : t('Publish')}</span>
+              </button>
+            </>
+          )}
           <div className="toolbar-confirm-wrap">
             <button
               type="button"
@@ -635,7 +760,11 @@ export function PosterEditorPage() {
                 aria-label={t('Confirm campaign deletion')}
               >
                 <strong>{t('Delete this campaign?')}</strong>
-                <span>{t('All versions and placements will be removed.')}</span>
+                <span>
+                  {campaignTrackingEnabled
+                    ? t('All versions and placements will be removed.')
+                    : t('All artwork versions will be removed.')}
+                </span>
                 <div>
                   <button
                     type="button"
@@ -695,7 +824,7 @@ export function PosterEditorPage() {
         )}
 
         <section className="editor-canvas-column">
-          {!published && (
+          {campaignTrackingEnabled && !published && (
             <div className="draft-banner">
               <span>{t('Draft')}</span>
               {t('Scans open an unpublished page until this campaign is published.')}

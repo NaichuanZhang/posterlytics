@@ -716,6 +716,10 @@ img {
   margin: 0;
 }
 
+.platform-hint-field > .input + .input {
+  margin-top: 8px;
+}
+
 .field label,
 .field-label {
   display: block;
@@ -2236,14 +2240,26 @@ img {
   font-size: 12px;
 }
 
-.selected-version p {
-  display: -webkit-box;
+.selected-version-summary {
+  display: grid;
+  gap: 3px;
   margin: 1px 0 7px;
+}
+
+.selected-version-summary p {
+  display: -webkit-box;
+  margin: 0;
   overflow: hidden;
   color: var(--muted);
   font-size: 10px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+
+.selected-version-summary small {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 .selected-version .button {
@@ -3023,6 +3039,14 @@ img {
   color: var(--text);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.generation-details-platform {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 .generation-image-section-heading {

@@ -38,6 +38,7 @@ import {
 } from './_sourceAcquisition.ts';
 import {
   resolveProductUseCaseRecipe,
+  type ProductUseCaseRecipe,
   useCaseSourceMismatch,
 } from './_useCasePolicy.ts';
 
@@ -122,7 +123,7 @@ export async function runAnalyzeStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, generation_mode, instruction, reference_images, scenario, use_case, screenshot_url, screenshot_key')
+    .select('id, campaign_id, status, generation_mode, instruction, reference_images, scenario, use_case, platform_hint, screenshot_url, screenshot_key')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -207,6 +208,9 @@ export async function runAnalyzeStage(
   const productRecipe = resolveProductUseCaseRecipe(
     (generation as Record<string, unknown>).use_case,
   );
+  const platformHint = typeof (generation as Record<string, unknown>).platform_hint === 'string'
+    ? String((generation as Record<string, unknown>).platform_hint).slice(0, 80).trim() || null
+    : null;
 
   // 1. Acquire source evidence. Legacy events retain the strict Luma allowlist.
   // Amazon product pages intentionally use seller-provided references because
@@ -505,32 +509,60 @@ export async function runAnalyzeStage(
   // Every product poster is designed by the layout agent (`designer`) and painted
   // by `hero` — analyze only produces faithful brand context + structured copy.
   // (The fixed cozy/saas template modes were removed; designer is the one path.)
-  const sys =
-    'You are a senior product marketer and visual-evidence analyst. ' +
-    productRecipe.analyze.sourceBrief +
-    'Then produce structured copy and a brand word-portrait. The first attached image, when present, is the PRIMARY brand evidence. Adapt ' +
-    'the evidence for a poster later; do not copy navigation or website controls. Never infer a visual medium from ' +
-    'the product category: for example, do not automatically choose risograph for a game. Output STRICT JSON only ' +
-    '— no prose, no code fences.\n' +
-    'Schema: {' +
-    '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex",' +
-    '"secondary":"#hex optional","supporting":["#hex"],' +
-    '"proportions":[{"color":"#hex","proportion":0.0}]},' +
-    '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words",' +
-    '"layout_hint":"one phrase","imagery":"observed image subject and treatment",' +
-    '"typography_treatment":"observed type character, scale and hierarchy",' +
-    '"lighting":"observed lighting and contrast","texture":"observed surface/finish",' +
-    '"motifs":["observed recurring shapes or symbols"],"composition":"observed hierarchy and spatial rhythm",' +
-    '"density":"sparse|balanced|dense"},' +
-    '"poster_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
-    '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
-    '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
-    'UI vibe, signature colors (name the hex), and overall feel",' +
-    '"qr_label":"<=4 words for the scan caption, e.g. Scan to Start"}\n' +
-    'Keep all copy SHORT and legible. ' +
-    productRecipe.analyze.paletteBrief +
-    'Do not substitute generic SaaS blue or introduce colors absent from the evidence. ' +
-    productRecipe.analyze.densityBrief;
+  const sys = productRecipe.analyze.promptKind === 'social-reference'
+    ? (
+      'You are a senior social-cover art director and visual-reference analyst. ' +
+      productRecipe.analyze.sourceBrief +
+      'Then produce concise artwork copy and a visual word-portrait centered on mood and a strong visual hook. ' +
+      'The attached images are the PRIMARY style evidence. Create direction for original full-bleed artwork; do not ' +
+      'copy reference text or add interface controls, badges, or promotional mechanics that were not requested. ' +
+      'Output STRICT JSON only — no prose, no code fences.\n' +
+      'Schema: {' +
+      '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex",' +
+      '"secondary":"#hex optional","supporting":["#hex"],' +
+      '"proportions":[{"color":"#hex","proportion":0.0}]},' +
+      '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words",' +
+      '"layout_hint":"one phrase","imagery":"reference-led subject and treatment",' +
+      '"typography_treatment":"reference-led type character, scale and hierarchy",' +
+      '"lighting":"reference-led lighting and contrast","texture":"reference-led surface/finish",' +
+      '"motifs":["supported recurring shapes or symbols"],"composition":"visual-hook hierarchy and spatial rhythm",' +
+      '"density":"sparse|balanced|dense"},' +
+      '"poster_content":{"headline":"concise artwork headline","what_it_does":"one short supporting line",' +
+      '"how_it_works":[],"why_use_it":[],"features":["up to 3 concise supporting lines"],"cta":""},' +
+      '"brand_essence":"one vivid sentence describing the artwork direction for an illustrator: mood, visual hook, ' +
+      'signature colors (name the hex), imagery treatment, and overall feel","qr_label":""}\n' +
+      'Keep all copy SHORT and legible. ' +
+      productRecipe.analyze.paletteBrief +
+      'Do not introduce colors absent from the evidence. ' +
+      productRecipe.analyze.densityBrief
+    )
+    : (
+      'You are a senior product marketer and visual-evidence analyst. ' +
+      productRecipe.analyze.sourceBrief +
+      'Then produce structured copy and a brand word-portrait. The first attached image, when present, is the PRIMARY brand evidence. Adapt ' +
+      'the evidence for a poster later; do not copy navigation or website controls. Never infer a visual medium from ' +
+      'the product category: for example, do not automatically choose risograph for a game. Output STRICT JSON only ' +
+      '— no prose, no code fences.\n' +
+      'Schema: {' +
+      '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex",' +
+      '"secondary":"#hex optional","supporting":["#hex"],' +
+      '"proportions":[{"color":"#hex","proportion":0.0}]},' +
+      '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words",' +
+      '"layout_hint":"one phrase","imagery":"observed image subject and treatment",' +
+      '"typography_treatment":"observed type character, scale and hierarchy",' +
+      '"lighting":"observed lighting and contrast","texture":"observed surface/finish",' +
+      '"motifs":["observed recurring shapes or symbols"],"composition":"observed hierarchy and spatial rhythm",' +
+      '"density":"sparse|balanced|dense"},' +
+      '"poster_content":{"headline":"compelling headline","what_it_does":"1-2 sentences","how_it_works":["3-4 short steps"],' +
+      '"why_use_it":["3 short reasons"],"features":["4-6 concise feature lines"],"cta":"button text"},' +
+      '"brand_essence":"one vivid sentence describing the brand\'s visual identity for an illustrator: logo motif/shape, ' +
+      'UI vibe, signature colors (name the hex), and overall feel",' +
+      '"qr_label":"<=4 words for the scan caption, e.g. Scan to Start"}\n' +
+      'Keep all copy SHORT and legible. ' +
+      productRecipe.analyze.paletteBrief +
+      'Do not substitute generic SaaS blue or introduce colors absent from the evidence. ' +
+      productRecipe.analyze.densityBrief
+    );
   const capturedPalette = design_tokens?.colors.visualPalette ?? [];
   const paletteEvidence = capturedPalette.length
     ? capturedPalette
@@ -546,18 +578,28 @@ export async function runAnalyzeStage(
   const referenceInstruction = productRecipe.analyze.referenceInstruction(
     referenceImages.filter((image) => image.kind === 'user-reference').length,
   );
-  const user =
-    `PRODUCT NAME: ${campaign.product_name}\n` +
-    `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
-    `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
-    `PRODUCT URL: ${productUrl}\n` +
-    `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
-    `CAPTURED PAGE THEME: ${design_tokens?.colors.theme ?? '(unclassified)'}\n` +
-    `WEIGHTED COLOR USAGE (preserve these proportions): ${paletteEvidence || '(none found — infer restrained defaults)'}\n` +
-    `VISIBLE DOM COLOR ROLES: bg ${design_tokens?.colors.bg ?? '(unknown)'}, text ${design_tokens?.colors.text ?? '(unknown)'}, primary ${design_tokens?.colors.primary ?? '(unknown)'}, accent ${design_tokens?.colors.accent ?? '(unknown)'}\n\n` +
-    `${sourceText}\n\n` +
-    `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
-    referenceInstruction;
+  const user = productRecipe.analyze.promptKind === 'social-reference'
+    ? (
+      `ARTWORK NAME: ${campaign.product_name}\n` +
+      `SUPPORTING LINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
+      `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
+      `${productRecipe.analyze.platformInstruction(platformHint)}\n\n` +
+      `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
+      referenceInstruction
+    )
+    : (
+      `PRODUCT NAME: ${campaign.product_name}\n` +
+      `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
+      `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
+      `PRODUCT URL: ${productUrl}\n` +
+      `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
+      `CAPTURED PAGE THEME: ${design_tokens?.colors.theme ?? '(unclassified)'}\n` +
+      `WEIGHTED COLOR USAGE (preserve these proportions): ${paletteEvidence || '(none found — infer restrained defaults)'}\n` +
+      `VISIBLE DOM COLOR ROLES: bg ${design_tokens?.colors.bg ?? '(unknown)'}, text ${design_tokens?.colors.text ?? '(unknown)'}, primary ${design_tokens?.colors.primary ?? '(unknown)'}, accent ${design_tokens?.colors.accent ?? '(unknown)'}\n\n` +
+      `${sourceText}\n\n` +
+      `CREATIVE CONTEXT FROM THE USER:\n${referenceContext || '(none provided)'}\n` +
+      referenceInstruction
+    );
   const userContent = userContentWithImageReferences(user, referenceImages, 6);
 
   let parsed: ParsedContent;
@@ -585,6 +627,7 @@ export async function runAnalyzeStage(
           campaign as Record<string, string>,
           siteColors,
           design_tokens,
+          productRecipe,
         );
       },
     );
@@ -614,6 +657,7 @@ export async function runAnalyzeStage(
             campaign as Record<string, string>,
             siteColors,
             design_tokens,
+            productRecipe,
           );
         },
       );
@@ -629,7 +673,12 @@ export async function runAnalyzeStage(
         detail: 'AI chat failed twice — used hardcoded fallback content',
         error: e,
       });
-      parsed = fallbackContent(campaign as Record<string, string>, siteColors, design_tokens);
+      parsed = fallbackContent(
+        campaign as Record<string, string>,
+        siteColors,
+        design_tokens,
+        productRecipe,
+      );
       usedFallback = true;
     }
   }
@@ -884,6 +933,7 @@ function normalize(
   c: Record<string, string>,
   siteColors: string[] = [],
   tokens: DesignTokens | null = null,
+  recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
 ): ParsedContent {
   const recordOf = (value: unknown): Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -953,29 +1003,41 @@ function normalize(
       body: capturedBody ?? capturedHeading ?? 'system-ui, sans-serif',
     },
     tone: 'modern',
-    imagery: 'source-faithful product imagery adapted to a poster composition',
-    typography_treatment: 'source-derived type character with a clear poster-scale hierarchy',
+    imagery: recipe.id === 'social_cover'
+      ? 'reference-led imagery adapted to a full-bleed composition'
+      : 'source-faithful product imagery adapted to a poster composition',
+    typography_treatment: recipe.id === 'social_cover'
+      ? 'reference-led type character with a clear artwork-scale hierarchy'
+      : 'source-derived type character with a clear poster-scale hierarchy',
     lighting: tokens?.colors.theme === 'dark'
       ? 'source-matched dark-field lighting and contrast'
       : tokens?.colors.theme === 'light'
         ? 'source-matched light-field lighting and contrast'
         : 'source-matched lighting and contrast',
-    texture: 'preserve the source page surface finish without adding an unrelated print effect',
+    texture: recipe.id === 'social_cover'
+      ? 'preserve the references\' surface finish without adding an unrelated effect'
+      : 'preserve the source page surface finish without adding an unrelated print effect',
     composition: typeof sp.layout_hint === 'string' && sp.layout_hint
       ? sp.layout_hint
-      : 'poster adaptation of the source page hierarchy',
+      : recipe.id === 'social_cover'
+        ? 'full-bleed adaptation of the reference hierarchy and visual hook'
+        : 'poster adaptation of the source page hierarchy',
     density: 'balanced',
   });
 
   // The layout itself is designed later by the `designer` function; the product
   // poster_spec carries only what the SPA band reads (qr_label) + the urls line.
-  const qrLabel = String((o.qr_label as unknown) ?? '').slice(0, 40) || 'Scan to start';
+  const qrLabel = recipe.id === 'social_cover'
+    ? ''
+    : String((o.qr_label as unknown) ?? '').slice(0, 40) || 'Scan to start';
   const poster_spec = { qr_label: qrLabel, urls: c.product_url || '' };
 
   const contentHeadline = (lc.headline as string) || product;
   const contentWhat = (lc.what_it_does as string) || tagline;
   const contentFeatures = asArray(lc.features).slice(0, 6);
-  const contentCta = (lc.cta as string) || c.cta_text || 'Learn more';
+  const contentCta = recipe.id === 'social_cover'
+    ? String(lc.cta ?? '').slice(0, 80)
+    : (lc.cta as string) || c.cta_text || 'Learn more';
 
   // poster_copy kept for backward-compat (editor fallbacks); derived straight
   // from the structured content now that the template specs are gone.
@@ -998,7 +1060,11 @@ function normalize(
       cta: contentCta,
     },
     brand_essence: String(
-      o.brand_essence ?? `${product}: source-faithful visual identity using its observed palette and type character`,
+      o.brand_essence ?? (
+        recipe.id === 'social_cover'
+          ? `${product}: reference-led visual direction using the supplied mood, palette, and visual hook`
+          : `${product}: source-faithful visual identity using its observed palette and type character`
+      ),
     ).slice(0, 800),
     poster_spec,
   };
@@ -1008,8 +1074,9 @@ function fallbackContent(
   c: Record<string, string>,
   siteColors: string[] = [],
   tokens: DesignTokens | null = null,
+  recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
 ): ParsedContent {
-  return normalize({}, c, siteColors, tokens);
+  return normalize({}, c, siteColors, tokens, recipe);
 }
 
 // =====================================================================

@@ -157,6 +157,7 @@ export interface GenerationActivityItem {
   version_number: number | null
   generation_mode: PosterGenerationMode
   scenario: CampaignScenario
+  use_case: UseCaseId
   instruction: string | null
   hero_image_url: string | null
   // Optional only for responses served before the poster-format migration.
@@ -458,11 +459,11 @@ export type PosterSpec = ProductPosterSpec | EventPosterSpec
 export interface Campaign {
   id: string
   user_id: string
-  product_url: string
+  product_url: string | null
   product_name: string
   tagline: string | null
   cta_text: string
-  destination_url: string
+  destination_url: string | null
   style_profile: StyleProfile | null
   poster_copy: PosterCopy | null
   poster_content: PosterContent | null
@@ -482,6 +483,7 @@ export interface Campaign {
   // repurposed (event URL / title / Luma RSVP target) and event_details is set.
   scenario: CampaignScenario
   use_case: UseCaseId
+  platform_hint: string | null
   event_details: EventDetails | null
   current_generation_id: string | null
   // Optional only for responses served before the poster-format migration.
@@ -504,6 +506,7 @@ export interface PosterGeneration {
   reference_images: ReferenceImage[]
   scenario: CampaignScenario
   use_case: UseCaseId
+  platform_hint: string | null
   event_details: EventDetails | null
   style_profile: StyleProfile | null
   poster_copy: PosterCopy | null

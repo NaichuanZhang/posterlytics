@@ -299,11 +299,16 @@ export async function runDesignerStage(
   const headline = String(content.headline ?? copy.hook ?? product);
   const whatItDoes = String(content.what_it_does ?? copy.what_it_does ?? tagline);
   const fallbackZones = [
-    { band: 'top' as const, role: 'plain-text brand row', content: product, emphasis: 'low' as const },
+    {
+      band: 'top' as const,
+      role: recipe.stages.designerFallbackTopRole,
+      content: product,
+      emphasis: 'low' as const,
+    },
     { band: 'upper' as const, role: 'hero headline', content: headline, emphasis: 'high' as const },
     {
       band: 'mid' as const,
-      role: 'source-derived imagery focal area',
+      role: recipe.stages.designerFallbackMidRole,
       content: whatItDoes,
       emphasis: 'med' as const,
     },
@@ -320,7 +325,7 @@ export async function runDesignerStage(
     parentPosterSize,
     recipe,
   });
-  const actionInstructions = productPosterActionInstructions(posterSize);
+  const actionInstructions = productPosterActionInstructions(posterSize, recipe);
 
   const sys =
     `You are an award-winning poster art director creating the next version of a ${getPosterFrameLabel(posterSize)} ${recipe.stages.designerPosterKind}. ` +
@@ -338,14 +343,12 @@ export async function runDesignerStage(
     '"density":"sparse|balanced|dense",' +
     '"palette_roles":{"bg":"#hex","surface":"#hex optional","text":"#hex","primary":"#hex","accent":"#hex",' +
     '"secondary":"#hex optional","supporting":["#hex"],"proportions":[{"color":"#hex","proportion":0.0}]},' +
-    '"zones":[{"band":"top|upper|mid|lower","role":"what this zone is, e.g. brand row / hero headline / product detail",' +
+    '"zones":[{"band":"top|upper|mid|lower","role":"what this zone is, e.g. ' +
+    recipe.stages.designerZoneRoleExample +
+    '",' +
     '"content":"the EXACT short words to render in this zone (English, concise)","emphasis":"low|med|high","align":"left|center|right"}]}\n' +
-    'RULES: design 3-7 zones ordered top→lower according to the SOURCE density and hierarchy: sparse sources get 3-4, ' +
-    'balanced sources 4-5, and dense sources 5-7. Do not force a feature grid, stats row, icon set, or proof strip. Use ' +
-    'those only when the observed source hierarchy and supplied copy support them. Preserve intentional negative space ' +
-    'for sparse sources. Use the band labels to place the chosen zones across the full artwork. ' +
-    'Keep every content string SHORT and legible. The palette_roles MUST use the real brand colors provided. ' +
-    'Preserve color usage proportions: dominant neutrals remain dominant and small accents remain restrained. ' +
+    recipe.stages.designerRules +
+    recipe.stages.designerPaletteRule +
     `This is a PRINTED POSTER IMAGE, not an app screen. The four bands together fill the COMPLETE ${posterSize.providerAspectRatio} frame. ` +
     actionInstructions.designerRule +
     (hasLogo
@@ -354,26 +357,28 @@ export async function runDesignerStage(
 
   const user =
     `${parentContext}\n\n` +
-    `PRODUCT: ${product}\n` +
-    `TAGLINE: ${tagline || '(none)'}\n` +
-    `BRAND ESSENCE (word-portrait for the art director): ${essence || '(none)'}\n` +
-    `BRAND COLORS (use these for palette_roles): bg ${palHint.bg}, text ${palHint.text}, primary ${palHint.primary}, accent ${palHint.accent}${palHint.secondary ? `, secondary ${palHint.secondary}` : ''}${palHint.supporting?.length ? `, supporting ${palHint.supporting.join(', ')}` : ''}\n` +
+    `${recipe.stages.designerSubjectLabel}: ${product}\n` +
+    `${recipe.stages.designerTaglineLabel}: ${tagline || '(none)'}\n` +
+    `${recipe.stages.designerEssenceLabel}: ${essence || '(none)'}\n` +
+    `${recipe.stages.designerColorsLabel}: bg ${palHint.bg}, text ${palHint.text}, primary ${palHint.primary}, accent ${palHint.accent}${palHint.secondary ? `, secondary ${palHint.secondary}` : ''}${palHint.supporting?.length ? `, supporting ${palHint.supporting.join(', ')}` : ''}\n` +
     `WEIGHTED COLOR USAGE: ${palHint.proportions?.length ? palHint.proportions.map((entry) => `${entry.color} ${(entry.proportion * 100).toFixed(1)}%`).join(', ') : '(not available)'}\n` +
     `${recipe.stages.designerSourceObservationsHeading}\n` +
-    `- Imagery: ${sp.imagery || '(read from the style board)'}\n` +
+    `- Imagery: ${sp.imagery || recipe.stages.designerObservationFallback}\n` +
     `- Typography: ${sp.typography_treatment || `${sp.fonts.heading} headings / ${sp.fonts.body} body`}\n` +
-    `- Lighting: ${sp.lighting || '(read from the style board)'}\n` +
-    `- Texture: ${sp.texture || '(read from the style board)'}\n` +
+    `- Lighting: ${sp.lighting || recipe.stages.designerObservationFallback}\n` +
+    `- Texture: ${sp.texture || recipe.stages.designerObservationFallback}\n` +
     `- Motifs: ${sp.motifs?.join(', ') || '(none observed)'}\n` +
-    `- Composition: ${sp.composition || sp.layout_hint || '(read from the style board)'}\n` +
+    `- Composition: ${sp.composition || sp.layout_hint || recipe.stages.designerObservationFallback}\n` +
     `- Density: ${sp.density || 'balanced'}\n` +
     `TONE: ${sp.tone || 'modern'}\n` +
     `HEADLINE: ${headline}\n` +
     `WHAT IT DOES: ${whatItDoes}\n` +
     (features.length ? `AVAILABLE SUPPORTING COPY (select only what the hierarchy needs): ${features.join(' · ')}\n` : '') +
     `\nASSETS:\n` +
-    (hasLogo ? `LOGO: ${selectedLogo?.url ?? assets.logo_url} (the selected real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (not selected — use the product name as the brand mark)\n') +
-    (heroImg ? `PRODUCT IMAGE: ${heroImg}\n` : '') +
+    (hasLogo
+      ? `LOGO: ${selectedLogo?.url ?? assets.logo_url} (the selected real logo is passed to the painter — plan a brand row for it)\n`
+      : `${recipe.stages.designerLogoMissing}\n`) +
+    (heroImg ? `${recipe.stages.designerImageLabel}: ${heroImg}\n` : '') +
     `ATTACHED VISUAL EVIDENCE: ${visualReferences.length} labeled image(s), including the previous poster when available.\n` +
     `\n${actionInstructions.designerRequest}`;
   const userContent = userContentWithImageReferences(

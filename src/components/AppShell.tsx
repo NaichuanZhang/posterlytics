@@ -11,6 +11,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { useI18n } from '../i18n/I18nProvider'
 import type { Campaign } from '../lib/types'
+import { getUseCase } from '../lib/useCases'
 import { LanguageSelect } from './LanguageSelect'
 
 export type CampaignSection = 'poster' | 'placements' | 'analytics'
@@ -25,7 +26,7 @@ export interface AppShellProps {
   mode?: 'page' | 'workspace'
   breadcrumbs?: BreadcrumbItem[]
   actions?: ReactNode
-  campaign?: Pick<Campaign, 'id' | 'product_name' | 'status'>
+  campaign?: Pick<Campaign, 'id' | 'product_name' | 'status' | 'use_case'>
   activeSection?: CampaignSection
   contentClassName?: string
 }
@@ -143,27 +144,33 @@ export function CampaignTabs({
   campaign,
   activeSection,
 }: {
-  campaign: Pick<Campaign, 'id' | 'product_name' | 'status'>
+  campaign: Pick<Campaign, 'id' | 'product_name' | 'status' | 'use_case'>
   activeSection: CampaignSection
 }) {
   const { t } = useI18n()
-  const tabs: Array<{ section: CampaignSection; label: string; to: string }> = [
+  const useCase = getUseCase(campaign.use_case)
+  const allTabs: Array<{ section: CampaignSection; label: string; to: string }> = [
     { section: 'poster', label: t('Poster'), to: `/campaigns/${campaign.id}` },
     { section: 'placements', label: t('Placements'), to: `/campaigns/${campaign.id}/placements` },
     { section: 'analytics', label: t('Analytics'), to: `/campaigns/${campaign.id}/analytics` },
   ]
+  const tabs = allTabs.filter(
+    (tab) => tab.section === 'poster' || useCase.trackingEnabled,
+  )
 
   return (
     <div className="campaign-bar">
       <div className="campaign-identity">
         <strong>{campaign.product_name}</strong>
-        <span className={`status-badge status-${campaign.status}`}>
-          {campaign.status === 'published'
-            ? t('Published')
-            : campaign.status === 'analyzing'
-              ? t('Generating')
-              : t('Draft')}
-        </span>
+        {useCase.trackingEnabled && (
+          <span className={`status-badge status-${campaign.status}`}>
+            {campaign.status === 'published'
+              ? t('Published')
+              : campaign.status === 'analyzing'
+                ? t('Generating')
+                : t('Draft')}
+          </span>
+        )}
       </div>
       <nav
         className="campaign-tabs"

@@ -50,6 +50,7 @@ export function overlayGeneration(
     ...campaign,
     scenario: generation.scenario,
     use_case: generation.use_case,
+    platform_hint: generation.platform_hint,
     event_details: generation.event_details,
     style_profile: generation.style_profile,
     poster_copy: generation.poster_copy,

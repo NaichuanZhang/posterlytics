@@ -168,6 +168,7 @@ export async function runHeroStage(
   const recipe = resolveProductUseCaseRecipe(
     (generation as Record<string, unknown>).use_case,
   );
+  const usesSourceAssets = recipe.acquisitionMode !== 'reference-only';
   const posterSize = getPosterSize(
     (generation as Record<string, unknown>).poster_format,
   );
@@ -202,7 +203,7 @@ export async function runHeroStage(
   const screenshotUrl = typeof generationSnapshot.screenshot_url === 'string'
     ? String(generationSnapshot.screenshot_url)
     : '';
-  const productImages = isEvent
+  const productImages = isEvent || !usesSourceAssets
     ? []
     : [
         ...(assets.primary_image_url
@@ -238,7 +239,7 @@ export async function runHeroStage(
       storageSource: 'user-upload',
       purpose: recipe.references.heroUserReference(index + 1),
     })),
-    ...(assets.logo_url
+    ...(usesSourceAssets && assets.logo_url
       ? [{
           kind: 'logo' as const,
           url: assets.logo_url,
@@ -256,7 +257,7 @@ export async function runHeroStage(
       storageSource: 'website-asset',
       purpose: recipe.references.heroProduct(index + 1),
     })),
-    ...(!isEvent && screenshotUrl
+    ...(!isEvent && usesSourceAssets && screenshotUrl
       ? [{
           kind: 'style-board' as const,
           url: screenshotUrl,
@@ -546,7 +547,7 @@ function buildPosterPrompt(
   });
   const referenceBlock =
     `\n\n${parentContext}` +
-    `\n${referenceCount} new supporting image(s) accompany this prompt. Use them only for the requested delta.`;
+    `\n${recipe.stages.heroReferenceSummary(referenceCount)}`;
   if (style === 'event') return buildEventPrompt(c, hasLogo, posterSize) + referenceBlock;
   const layout = c.poster_layout as PosterLayout | null;
   const ctx = {
@@ -558,13 +559,16 @@ function buildPosterPrompt(
   if (layout && Array.isArray(layout.zones) && layout.zones.length > 0) {
     return compileLayoutPrompt(layout, ctx, posterSize, recipe) + referenceBlock;
   }
-  return compileLayoutPrompt(fallbackLayout(c), ctx, posterSize, recipe) + referenceBlock;
+  return compileLayoutPrompt(fallbackLayout(c, recipe), ctx, posterSize, recipe) + referenceBlock;
 }
 
 // A safe generic layout for when poster_layout is absent (designer failed or
 // hasn't run). Same compileLayoutPrompt machinery, seeded from poster_content /
 // poster_copy + the style_profile palette, so the poster still ships on-brand.
-function fallbackLayout(c: Record<string, unknown>): PosterLayout {
+function fallbackLayout(
+  c: Record<string, unknown>,
+  recipe = resolveProductUseCaseRecipe(undefined),
+): PosterLayout {
   const product = String(c.product_name ?? 'the product');
   const content = (c.poster_content ?? {}) as Record<string, unknown>;
   const copy = (c.poster_copy ?? {}) as Record<string, unknown>;
@@ -592,7 +596,7 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
   return {
     composition: 'balanced vertical editorial flow, oversized hero headline, clear hierarchy',
     mood: 'modern, clean, professional',
-    art_style: sp.texture || 'source-faithful editorial graphic design',
+    art_style: sp.texture || recipe.stages.heroFallbackArtStyle,
     ...(sp.imagery ? { imagery: sp.imagery } : {}),
     ...(sp.typography_treatment ? { typography_treatment: sp.typography_treatment } : {}),
     ...(sp.lighting ? { lighting: sp.lighting } : {}),
@@ -609,11 +613,28 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
       ...(pal.proportions?.length ? { proportions: pal.proportions } : {}),
     },
     zones: [
-      { band: 'top', role: 'brand row', content: product, emphasis: 'low' },
+      {
+        band: 'top',
+        role: recipe.stages.heroFallbackTopRole,
+        content: product,
+        emphasis: 'low',
+      },
       { band: 'upper', role: 'hero headline', content: headline, emphasis: 'high' },
-      ...(what ? [{ band: 'mid' as const, role: 'supporting product detail', content: what, emphasis: 'med' as const }] : []),
+      ...(what
+        ? [{
+            band: 'mid' as const,
+            role: recipe.stages.heroFallbackDetailRole,
+            content: what,
+            emphasis: 'med' as const,
+          }]
+        : []),
       ...(!what
-        ? [{ band: 'mid' as const, role: 'source-derived imagery focal area', content: '', emphasis: 'med' as const }]
+        ? [{
+            band: 'mid' as const,
+            role: recipe.stages.heroFallbackMidRole,
+            content: '',
+            emphasis: 'med' as const,
+          }]
         : []),
       ...(features.length
         ? [{ band: 'lower' as const, role: 'feature row', content: features.join(' · '), emphasis: 'low' as const }]

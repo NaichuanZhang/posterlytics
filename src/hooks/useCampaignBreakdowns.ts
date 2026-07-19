@@ -12,13 +12,21 @@ const EMPTY: CampaignBreakdowns = {
 // Campaign-wide audience breakdowns (device / OS / country). The
 // campaign_breakdowns RPC returns a single JSONB object — not a row set — so we
 // use `data` directly with an EMPTY fallback.
-export function useCampaignBreakdowns(campaignId: string | undefined) {
+export function useCampaignBreakdowns(
+  campaignId: string | undefined,
+  enabled = true,
+) {
   const [breakdowns, setBreakdowns] = useState<CampaignBreakdowns>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
-    if (!campaignId) return
+    if (!campaignId || !enabled) {
+      setBreakdowns(EMPTY)
+      setLoading(false)
+      setError(null)
+      return
+    }
     setLoading(true)
     const { data, error } = await insforge.database.rpc('campaign_breakdowns', {
       p_campaign_id: campaignId,
@@ -41,7 +49,7 @@ export function useCampaignBreakdowns(campaignId: string | undefined) {
       setError(null)
     }
     setLoading(false)
-  }, [campaignId])
+  }, [campaignId, enabled])
 
   useEffect(() => {
     void reload()

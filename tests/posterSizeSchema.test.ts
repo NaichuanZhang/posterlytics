@@ -125,7 +125,7 @@ test('edge generation stages resolve format from the immutable generation snapsh
       `${name} must not resolve provider geometry from the mutable campaign target`,
     )
   }
-  assert.match(designer, /productPosterActionInstructions\(posterSize\)/)
+  assert.match(designer, /productPosterActionInstructions\(posterSize, recipe\)/)
   assert.match(hero, /buildEventPrompt\(c, hasLogo, posterSize\)/)
 })
 
