@@ -49,6 +49,7 @@ export function overlayGeneration(
   return {
     ...campaign,
     scenario: generation.scenario,
+    use_case: generation.use_case,
     event_details: generation.event_details,
     style_profile: generation.style_profile,
     poster_copy: generation.poster_copy,

@@ -26,6 +26,7 @@ CREATE TABLE public.campaigns (
   poster_layout JSONB,
   design_status TEXT,
   scenario TEXT NOT NULL DEFAULT 'product',
+  use_case TEXT NOT NULL DEFAULT 'website_product',
   event_details JSONB,
   reference_context TEXT,
   reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -41,6 +42,12 @@ CREATE TABLE public.campaigns (
         'luma_1x1'
       )
     ),
+  CONSTRAINT campaigns_scenario_valid
+    CHECK (scenario IN ('product', 'event')),
+  CONSTRAINT campaigns_use_case_valid
+    CHECK (use_case IN ('website_product', 'amazon_listing', 'event')),
+  CONSTRAINT campaigns_scenario_use_case_consistent
+    CHECK ((scenario = 'event') = (use_case = 'event')),
   CONSTRAINT campaigns_reference_context_length
     CHECK (reference_context IS NULL OR char_length(reference_context) <= 4000),
   CONSTRAINT campaigns_reference_images_shape
@@ -64,6 +71,7 @@ CREATE TABLE public.poster_generations (
   reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
   poster_format TEXT NOT NULL DEFAULT 'a4_2x3',
   scenario TEXT NOT NULL DEFAULT 'product',
+  use_case TEXT NOT NULL DEFAULT 'website_product',
   event_details JSONB,
   style_profile JSONB,
   poster_copy JSONB,
@@ -104,6 +112,12 @@ CREATE TABLE public.poster_generations (
         'luma_1x1'
       )
     ),
+  CONSTRAINT poster_generations_scenario_valid
+    CHECK (scenario IN ('product', 'event')),
+  CONSTRAINT poster_generations_use_case_valid
+    CHECK (use_case IN ('website_product', 'amazon_listing', 'event')),
+  CONSTRAINT poster_generations_scenario_use_case_consistent
+    CHECK ((scenario = 'event') = (use_case = 'event')),
   CONSTRAINT poster_generations_reference_images_shape
     CHECK (
       jsonb_typeof(reference_images) = 'array'
@@ -176,6 +190,41 @@ CREATE UNIQUE INDEX idx_poster_generations_one_active
   ON public.poster_generations(campaign_id)
   WHERE status IN ('created', 'analyzing', 'designing', 'painting');
 
+CREATE OR REPLACE FUNCTION public.guard_campaign_source_intent_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF (
+    NEW.product_url,
+    NEW.use_case
+  ) IS NOT DISTINCT FROM (
+    OLD.product_url,
+    OLD.use_case
+  ) THEN
+    RETURN NEW;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.poster_generations
+    WHERE campaign_id = OLD.id
+  ) THEN
+    RAISE EXCEPTION 'campaign source intent is immutable after generation starts'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER campaigns_guard_source_intent_update
+  BEFORE UPDATE OF product_url, use_case ON public.campaigns
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_campaign_source_intent_update();
+
 CREATE OR REPLACE FUNCTION public.guard_poster_generation_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -196,6 +245,8 @@ BEGIN
     NEW.instruction,
     NEW.reference_images,
     NEW.poster_format,
+    NEW.scenario,
+    NEW.use_case,
     NEW.trace_schema_version,
     NEW.created_at
   ) IS DISTINCT FROM (
@@ -207,6 +258,8 @@ BEGIN
     OLD.instruction,
     OLD.reference_images,
     OLD.poster_format,
+    OLD.scenario,
+    OLD.use_case,
     OLD.trace_schema_version,
     OLD.created_at
   ) THEN
@@ -552,6 +605,7 @@ GRANT INSERT (
   destination_url,
   status,
   scenario,
+  use_case,
   reference_context,
   reference_images,
   poster_format
@@ -564,6 +618,7 @@ GRANT UPDATE (
   destination_url,
   status,
   scenario,
+  use_case,
   reference_context,
   reference_images,
   poster_format
@@ -900,6 +955,7 @@ BEGIN
     reference_images,
     poster_format,
     scenario,
+    use_case,
     event_details,
     style_profile,
     poster_copy,
@@ -922,6 +978,7 @@ BEGIN
     v_reference_images,
     v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
+    CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.use_case ELSE v_parent.use_case END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.poster_copy ELSE v_parent.poster_copy END,
@@ -1535,6 +1592,7 @@ BEGIN
     reference_images,
     poster_format,
     scenario,
+    use_case,
     event_details,
     style_profile,
     poster_copy,
@@ -1557,6 +1615,7 @@ BEGIN
     v_reference_images,
     v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
+    CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.use_case ELSE v_parent.use_case END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.poster_copy ELSE v_parent.poster_copy END,
@@ -1676,6 +1735,7 @@ BEGIN
     reference_images,
     poster_format,
     scenario,
+    use_case,
     event_details,
     style_profile,
     poster_copy,
@@ -1698,6 +1758,7 @@ BEGIN
     v_previous_generation.reference_images,
     v_previous_generation.poster_format,
     v_previous_generation.scenario,
+    v_previous_generation.use_case,
     v_previous_generation.event_details,
     v_previous_generation.style_profile,
     v_previous_generation.poster_copy,
@@ -2417,6 +2478,8 @@ BEGIN
     NEW.instruction,
     NEW.reference_images,
     NEW.poster_format,
+    NEW.scenario,
+    NEW.use_case,
     NEW.trace_schema_version,
     NEW.asset_selection_mode,
     NEW.created_at
@@ -2429,6 +2492,8 @@ BEGIN
     OLD.instruction,
     OLD.reference_images,
     OLD.poster_format,
+    OLD.scenario,
+    OLD.use_case,
     OLD.trace_schema_version,
     OLD.asset_selection_mode,
     OLD.created_at
@@ -3828,6 +3893,7 @@ BEGIN
     reference_images,
     poster_format,
     scenario,
+    use_case,
     event_details,
     style_profile,
     poster_copy,
@@ -3853,6 +3919,7 @@ BEGIN
     v_reference_images,
     v_campaign.poster_format,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.scenario ELSE v_parent.scenario END,
+    CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.use_case ELSE v_parent.use_case END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.event_details ELSE v_parent.event_details END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.style_profile ELSE v_parent.style_profile END,
     CASE WHEN v_campaign.current_generation_id IS NULL THEN v_campaign.poster_copy ELSE v_parent.poster_copy END,
@@ -3984,6 +4051,7 @@ BEGIN
     reference_images,
     poster_format,
     scenario,
+    use_case,
     event_details,
     style_profile,
     poster_copy,
@@ -4011,6 +4079,7 @@ BEGIN
     v_previous_generation.reference_images,
     v_previous_generation.poster_format,
     v_previous_generation.scenario,
+    v_previous_generation.use_case,
     v_previous_generation.event_details,
     v_previous_generation.style_profile,
     v_previous_generation.poster_copy,

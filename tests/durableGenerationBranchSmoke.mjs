@@ -50,6 +50,7 @@ async function testDeployedWorkerReconciliation() {
     status: 'ready',
     generation_mode: 'iteration',
     scenario: 'event',
+    use_case: 'event',
     trace_schema_version: 1,
     hero_image_url: 'https://example.com/already-ready.png',
     hero_image_key: 'poster/branch-smoke/already-ready.png',
@@ -465,6 +466,7 @@ async function createCampaign(name, scenario) {
     product_name: name,
     destination_url: 'https://example.com/destination',
     scenario,
+    use_case: scenario === 'event' ? 'event' : 'website_product',
   }]))
   return id
 }

@@ -1,5 +1,6 @@
 // Shared types mirroring the InsForge schema.
 import type { PosterSizeSlug } from './posterSize'
+import type { UseCaseId } from './useCases'
 
 export type CampaignStatus = 'draft' | 'analyzing' | 'published'
 
@@ -480,6 +481,7 @@ export interface Campaign {
   // New rows use product. For historical events, product_url/product_name/destination_url are
   // repurposed (event URL / title / Luma RSVP target) and event_details is set.
   scenario: CampaignScenario
+  use_case: UseCaseId
   event_details: EventDetails | null
   current_generation_id: string | null
   // Optional only for responses served before the poster-format migration.
@@ -501,6 +503,7 @@ export interface PosterGeneration {
   poster_format?: PosterSizeSlug | null
   reference_images: ReferenceImage[]
   scenario: CampaignScenario
+  use_case: UseCaseId
   event_details: EventDetails | null
   style_profile: StyleProfile | null
   poster_copy: PosterCopy | null

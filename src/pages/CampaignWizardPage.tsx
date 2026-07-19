@@ -56,6 +56,9 @@ export function CampaignWizardPage() {
 
     const values = {
       scenario: 'product',
+      use_case: isAmazonSourceUrl(productUrl)
+        ? 'amazon_listing'
+        : 'website_product',
       product_url: productUrl.trim(),
       product_name: productName.trim(),
       tagline: tagline.trim() || null,
