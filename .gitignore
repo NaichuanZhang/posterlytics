@@ -29,3 +29,6 @@ capture-service/fly.toml
 .trae
 .windsurf
 .mcp.json
+
+# Local scratch/drafts moved aside by the backlog loop (never committed)
+untracked_artifact/
