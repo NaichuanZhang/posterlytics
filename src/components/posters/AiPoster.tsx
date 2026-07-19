@@ -1,8 +1,13 @@
-import { forwardRef } from 'react'
+import { forwardRef, useLayoutEffect, useState } from 'react'
 import type { Campaign, EventPosterSpec } from '../../lib/types'
 import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
 import { parseColor, toHex } from '../../lib/colorUtils'
+import {
+  getBottomEdgeStripHeight,
+  sampledFooterPalette,
+  sampleEdgeColor,
+} from '../../lib/posterEdgeColor'
 import {
   DEFAULT_POSTER_SIZE,
   getPosterQrBandGeometry,
@@ -20,7 +25,22 @@ interface Props {
   // pre-fetches the cross-origin hero to a data URL and passes it here so the
   // export canvas is never tainted by CORS. Falls back to hero_image_url.
   imageSrcOverride?: string
+  onRenderReady?: (result: PosterRenderReady) => void
   posterSize?: PosterSize
+}
+
+export type PosterFooterColorSource = 'sampled' | 'fallback' | 'not-applicable'
+
+export interface PosterRenderReady {
+  readonly imageSrc: string | null
+  readonly footerColor: string
+  readonly footerColorSource: PosterFooterColorSource
+}
+
+interface ImageRenderState {
+  readonly imageSrc: string
+  readonly sampledColor: string | null
+  readonly status: Exclude<PosterFooterColorSource, 'not-applicable'>
 }
 
 // Output sheet: the COMPLETE model-generated illustration in the descriptor's
@@ -35,11 +55,18 @@ interface Props {
 // When present, the QR card is always white with dark modules, independent of
 // brand palette, so it stays scannable on any background.
 export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
-  { campaign, code, imageSrcOverride, posterSize = DEFAULT_POSTER_SIZE },
+  {
+    campaign,
+    code,
+    imageSrcOverride,
+    onRenderReady,
+    posterSize = DEFAULT_POSTER_SIZE,
+  },
   ref,
 ) {
   const { t } = useI18n()
   const img = imageSrcOverride ?? campaign.hero_image_url
+  const [imageRender, setImageRender] = useState<ImageRenderState | null>(null)
   const isEvent = campaign.scenario === 'event'
   // For events the poster_spec is an EventPosterSpec; its logistics lines were
   // computed deterministically by analyze (formatEventLines) so they're accurate.
@@ -56,26 +83,79 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
       ].filter((s): s is string => !!s && s.trim().length > 0)
     : []
 
-  // Dark, neutral footer with a vivid brand accent hairline. The accent is
-  // derived by posterColors (handles monochrome brands by falling back to a
-  // tasteful default), so identity shows even when the brand is grayscale.
   const pc = posterColors(campaign.style_profile)
   // Matte = the analyzed brand background when parseable, else the paper color.
   const brandBg = parseColor(campaign.style_profile?.palette?.bg)
   const matte = brandBg ? toHex(brandBg) : pc.paper
-  const footerBg = pc.ink
-  const footerAccent = pc.accent
-  const footerText = '#ffffff'
-  const footerTextDim = 'rgba(255,255,255,0.72)'
   const includesQrBand = hasPosterQrBand(posterSize)
   const qrBand = getPosterQrBandGeometry(posterSize)
   const scaled = (value: number) => scaleQrBandValue(posterSize, value)
+  const shouldSampleFooter = !!img && includesQrBand && !!code
+  const currentImageRender = shouldSampleFooter && imageRender?.imageSrc === img
+    ? imageRender
+    : null
+  const sampledColor = currentImageRender?.status === 'sampled'
+    ? currentImageRender.sampledColor
+    : null
+  const sampledPalette = sampledColor
+    ? sampledFooterPalette(sampledColor, pc.accent)
+    : null
+
+  // The null/pending/error branch is the byte-exact pre-sampling contract.
+  const footerBg = sampledPalette?.background ?? pc.ink
+  const footerAccent = sampledPalette?.accent ?? pc.accent
+  const footerText = sampledPalette?.text ?? '#ffffff'
+  const footerTextDim = sampledPalette?.secondaryText ?? 'rgba(255,255,255,0.72)'
+  const footerColorSource: PosterFooterColorSource = sampledPalette
+    ? 'sampled'
+    : 'fallback'
+  const renderStatus = shouldSampleFooter
+    ? currentImageRender?.status ?? 'pending'
+    : 'not-applicable'
+
+  useLayoutEffect(() => {
+    if (renderStatus === 'pending') return
+    onRenderReady?.({
+      imageSrc: img,
+      footerColor: footerBg,
+      footerColorSource: renderStatus === 'not-applicable'
+        ? 'not-applicable'
+        : footerColorSource,
+    })
+  }, [footerBg, footerColorSource, img, onRenderReady, renderStatus])
+
+  function handleImageLoad(image: HTMLImageElement) {
+    if (!img || !shouldSampleFooter) return
+
+    let color: string | null = null
+    try {
+      color = readBottomEdgeColor(image)
+    } catch {
+      // SecurityError (tainted canvas), decode, and canvas failures all retain
+      // the established palette fallback.
+    }
+    setImageRender({
+      imageSrc: img,
+      sampledColor: color,
+      status: color ? 'sampled' : 'fallback',
+    })
+  }
+
+  function handleImageError() {
+    if (!img || !shouldSampleFooter) return
+    setImageRender({
+      imageSrc: img,
+      sampledColor: null,
+      status: 'fallback',
+    })
+  }
 
   return (
     <div
       ref={ref}
       data-poster-size={posterSize.slug}
       data-qr-band={posterSize.qrBand.mode}
+      data-poster-render-status={renderStatus}
       style={{
         width: posterSize.sheet.width,
         height: posterSize.sheet.height,
@@ -100,9 +180,13 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
       >
         {img ? (
           <img
+            key={`${shouldSampleFooter ? 'sample' : 'display'}:${img}`}
             src={img}
             crossOrigin="anonymous"
+            data-poster-hero
             alt={t('{name} poster', { name: campaign.product_name })}
+            onLoad={(event) => handleImageLoad(event.currentTarget)}
+            onError={handleImageError}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
           />
         ) : (
@@ -128,6 +212,9 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           width), never overlapping art. White QR card left, CTA copy right. */}
       {img && includesQrBand && code && (
         <div
+          data-poster-footer
+          data-footer-color={footerBg}
+          data-footer-color-source={footerColorSource}
           style={{
             width: posterSize.artwork.width,
             height: qrBand.footerHeight,
@@ -145,6 +232,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           {/* White QR card — light quiet-zone frame keeps the code scannable
               regardless of the footer/brand color. */}
           <div
+            data-poster-qr-chip
             style={{
               background: '#ffffff',
               padding: scaled(14),
@@ -161,6 +249,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
               CTA caption + a "point your camera" nudge. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: scaled(isEvent ? 5 : 8), minWidth: 0 }}>
             <span
+              data-poster-footer-primary
               style={{
                 fontSize: scaled(isEvent ? 36 : 44),
                 fontWeight: 800,
@@ -186,7 +275,10 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
                 </span>
               ))
             ) : (
-              <span style={{ fontSize: scaled(26), fontWeight: 500, lineHeight: 1.2, color: footerTextDim }}>
+              <span
+                data-poster-footer-secondary
+                style={{ fontSize: scaled(26), fontWeight: 500, lineHeight: 1.2, color: footerTextDim }}
+              >
                 Point your camera here
               </span>
             )}
@@ -196,3 +288,29 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     </div>
   )
 })
+
+function readBottomEdgeColor(image: HTMLImageElement): string | null {
+  const { naturalWidth, naturalHeight } = image
+  const stripHeight = getBottomEdgeStripHeight(naturalHeight)
+  if (naturalWidth <= 0 || stripHeight <= 0) return null
+
+  const canvas = document.createElement('canvas')
+  canvas.width = naturalWidth
+  canvas.height = stripHeight
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return null
+
+  context.imageSmoothingEnabled = false
+  context.drawImage(
+    image,
+    0,
+    naturalHeight - stripHeight,
+    naturalWidth,
+    stripHeight,
+    0,
+    0,
+    naturalWidth,
+    stripHeight,
+  )
+  return sampleEdgeColor(context.getImageData(0, 0, naturalWidth, stripHeight))
+}

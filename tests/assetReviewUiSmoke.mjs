@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import process from 'node:process'
 import { chromium } from 'playwright'
 
@@ -53,6 +53,8 @@ try {
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
   await testSocialCoverFrozenHint(browser)
+  await testQrBandEdgeSamplingAndExport(browser)
+  await testQrBandSamplingFallback(browser)
   await testRedNoteCoverFormat(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
@@ -735,6 +737,145 @@ async function testSocialCoverFrozenHint(browserInstance) {
   await context.close()
 }
 
+async function testQrBandEdgeSamplingAndExport(browserInstance) {
+  const context = await browserInstance.newContext({
+    acceptDownloads: true,
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  state.campaign.hero_image_url = edgePosterUrl
+  state.currentGeneration.hero_image_url = edgePosterUrl
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  const sheet = page.locator(
+    '.canvas-stage [data-poster-size="a4_2x3"][data-qr-band="scaled"]',
+  ).first()
+  const footer = sheet.locator(
+    '[data-poster-footer][data-footer-color-source="sampled"]',
+  )
+  await footer.waitFor()
+  // Reduced-motion CSS shortens transitions to 0.01ms. The sampled marker and
+  // inline colors commit together, but computed colors can expose the old
+  // fallback for that first style frame.
+  await waitForComputedStyle(
+    footer,
+    'backgroundColor',
+    'rgb(237, 243, 238)',
+  )
+
+  const footerStyles = await footer.evaluate((element) => {
+    const style = getComputedStyle(element)
+    const primary = element.querySelector('[data-poster-footer-primary]')
+    const secondary = element.querySelector('[data-poster-footer-secondary]')
+    const qrChip = element.querySelector('[data-poster-qr-chip]')
+    return {
+      accent: style.borderTopColor,
+      background: style.backgroundColor,
+      color: element.getAttribute('data-footer-color'),
+      primary: primary ? getComputedStyle(primary).color : null,
+      qrChip: qrChip ? getComputedStyle(qrChip).backgroundColor : null,
+      secondary: secondary ? getComputedStyle(secondary).color : null,
+      source: element.getAttribute('data-footer-color-source'),
+    }
+  })
+  assert.equal(footerStyles.source, 'sampled')
+  assert.equal(footerStyles.color, '#edf3ee')
+  assert.equal(footerStyles.background, 'rgb(237, 243, 238)')
+  assert.equal(footerStyles.primary, 'rgb(11, 12, 11)')
+  assert.equal(footerStyles.accent, 'rgb(11, 12, 11)')
+  assert.equal(footerStyles.qrChip, 'rgb(255, 255, 255)')
+  assert.notEqual(footerStyles.secondary, 'rgba(255, 255, 255, 0.72)')
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/qr-band-edge-sampling-desktop.png`,
+    fullPage: true,
+  })
+
+  const exportButton = page.getByRole('button', {
+    name: 'Export A4 poster (2:3 artwork) PNG',
+  })
+  const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
+  await exportButton.click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  assert.ok(downloadPath)
+  assert.match(download.suggestedFilename(), /-A4\.png$/)
+
+  const png = await readFile(downloadPath)
+  const exportPixel = await probePngPixel(
+    page,
+    png,
+    { sheetWidth: 1240, sheetHeight: 1754, x: 132, y: 1728 },
+  )
+  assert.deepEqual(
+    exportPixel,
+    [...cssRgbChannels(footerStyles.background), 255],
+    'export footer pixel must exactly match the sampled preview color',
+  )
+  await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testQrBandSamplingFallback(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 840 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  const missingPosterUrl = `${BASE_URL}/fixture/missing-poster.svg`
+  state.campaign.hero_image_url = missingPosterUrl
+  state.currentGeneration.hero_image_url = missingPosterUrl
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  const sheet = page.locator(
+    '.canvas-stage [data-poster-size="a4_2x3"][data-poster-render-status="fallback"]',
+  ).first()
+  await sheet.waitFor()
+  const footer = sheet.locator(
+    '[data-poster-footer][data-footer-color-source="fallback"]',
+  )
+  await footer.waitFor()
+  assert.deepEqual(
+    await footer.evaluate((element) => {
+      const style = getComputedStyle(element)
+      const primary = element.querySelector('[data-poster-footer-primary]')
+      const secondary = element.querySelector('[data-poster-footer-secondary]')
+      return {
+        accent: style.borderTopColor,
+        background: style.backgroundColor,
+        primary: primary ? getComputedStyle(primary).color : null,
+        secondary: secondary ? getComputedStyle(secondary).color : null,
+      }
+    }),
+    {
+      accent: 'rgb(16, 185, 129)',
+      background: 'rgb(11, 12, 11)',
+      primary: 'rgb(255, 255, 255)',
+      secondary: 'rgba(255, 255, 255, 0.72)',
+    },
+  )
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/qr-band-edge-fallback-desktop.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testRedNoteCoverFormat(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
@@ -777,6 +918,9 @@ async function testRedNoteCoverFormat(browserInstance) {
     '.canvas-stage [data-poster-size="rednote_cover_3x4"][data-qr-band="none"]',
   ).first()
   await sheet.waitFor()
+  await page.locator(
+    '.canvas-stage [data-poster-size="rednote_cover_3x4"][data-poster-render-status="not-applicable"]',
+  ).first().waitFor()
   assert.deepEqual(
     await sheet.evaluate((element) => {
       const artwork = element.firstElementChild
@@ -800,6 +944,7 @@ async function testRedNoteCoverFormat(browserInstance) {
     },
   )
   assert.equal(await sheet.getByRole('img', { name: 'QR code' }).count(), 0)
+  assert.equal(await sheet.locator('[data-poster-footer]').count(), 0)
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/rednote-cover-editor-desktop.png`,
@@ -1079,10 +1224,17 @@ async function installBackendMock(context, state) {
   }])
 
   await context.route('**/fixture/*.svg', async (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname.endsWith('/missing-poster.svg')) {
+      await route.fulfill({ status: 404, body: 'missing' })
+      return
+    }
     await route.fulfill({
       status: 200,
       contentType: 'image/svg+xml',
-      body: posterSvg(),
+      body: pathname.endsWith('/edge-poster.svg')
+        ? edgePosterSvg()
+        : posterSvg(),
     })
   })
 
@@ -1525,6 +1677,41 @@ function reviewUrl() {
   return `${BASE_URL}/campaigns/campaign-asset/generations/generation-review/assets`
 }
 
+async function probePngPixel(page, png, point) {
+  const dataUrl = `data:image/png;base64,${png.toString('base64')}`
+  return page.evaluate(async ({ dataUrl: src, point: sample }) => {
+    const image = new Image()
+    image.src = src
+    await image.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('PNG probe canvas is unavailable.')
+    context.drawImage(image, 0, 0)
+    const x = Math.floor(sample.x * image.naturalWidth / sample.sheetWidth)
+    const y = Math.floor(sample.y * image.naturalHeight / sample.sheetHeight)
+    return Array.from(context.getImageData(x, y, 1, 1).data)
+  }, { dataUrl, point })
+}
+
+function cssRgbChannels(color) {
+  const channels = color.match(/\d+/g)?.slice(0, 3).map(Number)
+  assert.equal(channels?.length, 3, `Expected an RGB color, received ${color}`)
+  return channels
+}
+
+function edgePosterSvg() {
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="600" height="900">
+      <rect width="600" height="900" fill="#174a58"/>
+      <circle cx="420" cy="240" r="150" fill="#e05b3f"/>
+      <path d="M0 620 C180 500 340 760 600 560 L600 873 L0 873 Z" fill="#b9dfce"/>
+      <rect y="873" width="600" height="27" fill="#edf3ee"/>
+    </svg>
+  `.trim()
+}
+
 function posterSvg() {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="#edf3ee"/><circle cx="240" cy="150" r="75" fill="#174a58"/></svg>'
 }
@@ -1558,6 +1745,24 @@ async function waitFor(predicate, timeoutMs = 5000) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   throw new Error('Timed out waiting for mocked backend state.')
+}
+
+async function waitForComputedStyle(locator, property, expected, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  let actual = null
+  while (Date.now() < deadline) {
+    actual = await locator.evaluate(
+      (element, styleProperty) => getComputedStyle(element)[styleProperty],
+      property,
+    )
+    if (actual === expected) return
+    await new Promise((resolve) => setTimeout(resolve, 16))
+  }
+  assert.equal(
+    actual,
+    expected,
+    `Timed out waiting for computed ${property}`,
+  )
 }
 
 async function assertNoOverflow(page) {

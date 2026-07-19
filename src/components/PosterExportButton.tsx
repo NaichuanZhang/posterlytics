@@ -7,7 +7,10 @@ import {
   hasPosterQrBand,
   type PosterSize,
 } from '../lib/posterSize'
-import { AiPoster } from './posters/AiPoster'
+import {
+  AiPoster,
+  type PosterRenderReady,
+} from './posters/AiPoster'
 import { useToast } from './ui/Toast'
 import { useI18n } from '../i18n/I18nProvider'
 
@@ -18,6 +21,23 @@ interface Props {
   variant?: 'button' | 'icon'
   posterSize?: PosterSize
 }
+
+interface ExportRenderAttempt {
+  readonly id: number
+  readonly imageSrcOverride?: string
+}
+
+interface PendingRenderReady {
+  readonly attemptId: number
+  readonly expectedImageSrc: string | null
+  readonly resolve: (result: PosterRenderReady) => void
+  readonly reject: (error: Error) => void
+  readonly timeoutId: number
+}
+
+const RENDER_READY_TIMEOUT_ERROR = 'Poster render readiness timed out.'
+const RENDER_CANCELLED_ERROR = 'Poster render was cancelled.'
+const POSTER_IMAGE_TIMEOUT_ERROR = 'Timed out waiting for a poster image.'
 
 // Exports at the descriptor's native sheet dimensions and pixel ratio. A scaled
 // QR band binds the export to a placement; an artwork-only descriptor does not.
@@ -34,8 +54,10 @@ export function PosterExportButton({
   posterSize = DEFAULT_POSTER_SIZE,
 }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
+  const renderSequence = useRef(0)
+  const pendingRenderReady = useRef<PendingRenderReady | null>(null)
   const [busy, setBusy] = useState(false)
-  const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
+  const [renderAttempt, setRenderAttempt] = useState<ExportRenderAttempt | null>(null)
   const { notify } = useToast()
   const { t } = useI18n()
   const includesQrBand = hasPosterQrBand(posterSize)
@@ -52,31 +74,27 @@ export function PosterExportButton({
     setBusy(true)
     try {
       // Pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
-      if (campaign.hero_image_url) {
-        const data = await fetchAsDataUrl(campaign.hero_image_url)
-        setImgDataUrl(data) // null on failure → AiPoster uses the hosted URL (today's behavior)
-        // Let React commit the new src, then wait for the image to actually DECODE.
-        // A bare rAF/timeout can fire before a multi-MB data URL has painted, which
-        // would capture a blank hero. decode() resolves only once it's render-ready.
-        await new Promise((r) => requestAnimationFrame(() => r(null)))
-        const imgEl = offscreenRef.current?.querySelector('img')
-        if (imgEl) {
-          try {
-            await imgEl.decode()
-          } catch {
-            if (!imgEl.complete) {
-              await new Promise<void>((resolve) => {
-                imgEl.addEventListener('load', () => resolve(), { once: true })
-                imgEl.addEventListener('error', () => resolve(), { once: true })
-              })
-            }
-          }
-        }
+      const imageSrcOverride = campaign.hero_image_url
+        ? await fetchAsDataUrl(campaign.hero_image_url) ?? undefined
+        : undefined
+      const attempt: ExportRenderAttempt = {
+        id: renderSequence.current + 1,
+        imageSrcOverride,
       }
+      renderSequence.current = attempt.id
+      const renderReady = createRenderReadyPromise(
+        attempt.id,
+        imageSrcOverride ?? campaign.hero_image_url,
+      )
+      setRenderAttempt(attempt)
+      await renderReady
+
       if (!offscreenRef.current) return
       if (document.fonts?.ready) await document.fonts.ready
-      // Give any composited QR image a tick to render.
-      await new Promise((r) => setTimeout(r, 150))
+      await waitForPosterImages(
+        offscreenRef.current,
+        includesQrBand && !!placement,
+      )
       const dataUrl = await toPng(offscreenRef.current, {
         width: posterSize.sheet.width,
         height: posterSize.sheet.height,
@@ -97,9 +115,55 @@ export function PosterExportButton({
       console.error('export failed', e)
       notify(t('Poster export failed. Please try again.'), 'error')
     } finally {
+      cancelPendingRenderReady()
       setBusy(false)
-      setImgDataUrl(null) // release the (large) data URL
+      setRenderAttempt(null) // unmount the full-size clone and release its data URL
     }
+  }
+
+  function createRenderReadyPromise(
+    attemptId: number,
+    expectedImageSrc: string | null,
+  ): Promise<PosterRenderReady> {
+    return new Promise((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        if (pendingRenderReady.current?.attemptId !== attemptId) return
+        pendingRenderReady.current = null
+        reject(new Error(RENDER_READY_TIMEOUT_ERROR))
+      }, 15_000)
+      pendingRenderReady.current = {
+        attemptId,
+        expectedImageSrc,
+        resolve,
+        reject,
+        timeoutId,
+      }
+    })
+  }
+
+  function resolveRenderReady(
+    attemptId: number,
+    result: PosterRenderReady,
+  ) {
+    const pending = pendingRenderReady.current
+    if (
+      !pending
+      || pending.attemptId !== attemptId
+      || pending.expectedImageSrc !== result.imageSrc
+    ) {
+      return
+    }
+    window.clearTimeout(pending.timeoutId)
+    pendingRenderReady.current = null
+    pending.resolve(result)
+  }
+
+  function cancelPendingRenderReady() {
+    const pending = pendingRenderReady.current
+    if (!pending) return
+    window.clearTimeout(pending.timeoutId)
+    pendingRenderReady.current = null
+    pending.reject(new Error(RENDER_CANCELLED_ERROR))
   }
 
   return (
@@ -115,16 +179,23 @@ export function PosterExportButton({
         <Download size={15} aria-hidden="true" />
         {variant === 'button' && (busy ? t('Exporting...') : buttonLabel)}
       </button>
-      {/* Offscreen full-size render target; code is ignored by bandless formats. */}
-      <div style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }} aria-hidden>
-        <AiPoster
-          ref={offscreenRef}
-          campaign={campaign}
-          code={placement?.code ?? null}
-          imageSrcOverride={imgDataUrl ?? undefined}
-          posterSize={posterSize}
-        />
-      </div>
+      {renderAttempt && (
+        <div
+          data-poster-export-render={renderAttempt.id}
+          style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }}
+          aria-hidden
+        >
+          <AiPoster
+            key={renderAttempt.id}
+            ref={offscreenRef}
+            campaign={campaign}
+            code={placement?.code ?? null}
+            imageSrcOverride={renderAttempt.imageSrcOverride}
+            onRenderReady={(result) => resolveRenderReady(renderAttempt.id, result)}
+            posterSize={posterSize}
+          />
+        </div>
+      )}
     </>
   )
 }
@@ -144,5 +215,49 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
     })
   } catch {
     return null
+  }
+}
+
+async function waitForPosterImages(
+  poster: HTMLDivElement,
+  requiresQr: boolean,
+) {
+  const hero = poster.querySelector<HTMLImageElement>('[data-poster-hero]')
+  if (hero) await decodeImage(hero)
+
+  if (requiresQr) {
+    const qr = await waitForImage(
+      poster,
+      '[data-poster-qr-chip] img',
+      5_000,
+    )
+    await decodeImage(qr)
+  }
+}
+
+async function waitForImage(
+  root: HTMLElement,
+  selector: string,
+  timeoutMs: number,
+): Promise<HTMLImageElement> {
+  const deadline = performance.now() + timeoutMs
+  while (performance.now() < deadline) {
+    const image = root.querySelector<HTMLImageElement>(selector)
+    if (image) return image
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  }
+  throw new Error(POSTER_IMAGE_TIMEOUT_ERROR)
+}
+
+async function decodeImage(image: HTMLImageElement) {
+  try {
+    await image.decode()
+  } catch {
+    if (!image.complete) {
+      await new Promise<void>((resolve) => {
+        image.addEventListener('load', () => resolve(), { once: true })
+        image.addEventListener('error', () => resolve(), { once: true })
+      })
+    }
   }
 }
