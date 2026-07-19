@@ -36,7 +36,7 @@ const PRESET_EXPECTATIONS = [
     providerAspectRatio: '3:4',
     pixelRatio: 1,
     exportSize: { width: 1242, height: 1656 },
-    filenameSuffix: 'RedNote-3x4',
+    filenameSuffix: 'Portrait-3x4',
     qrBand: {
       mode: 'scaled',
       scale: (1656 - 1280) / (
@@ -53,7 +53,7 @@ const PRESET_EXPECTATIONS = [
     providerAspectRatio: '3:4',
     pixelRatio: 1,
     exportSize: { width: 1242, height: 1656 },
-    filenameSuffix: 'RedNote-Cover-3x4',
+    filenameSuffix: 'FullBleed-3x4',
     qrBand: { mode: 'none' },
   },
   {
@@ -63,7 +63,7 @@ const PRESET_EXPECTATIONS = [
     providerAspectRatio: '16:9',
     pixelRatio: 1,
     exportSize: { width: 1280, height: 720 },
-    filenameSuffix: 'YouTube-16x9',
+    filenameSuffix: 'Landscape-16x9',
     qrBand: {
       mode: 'scaled',
       scale: (720 - 450) / (
@@ -80,7 +80,7 @@ const PRESET_EXPECTATIONS = [
     providerAspectRatio: '1:1',
     pixelRatio: 1,
     exportSize: { width: 1080, height: 1080 },
-    filenameSuffix: 'Luma-1x1',
+    filenameSuffix: 'Square-1x1',
     qrBand: {
       mode: 'scaled',
       scale: (1080 - 800) / (

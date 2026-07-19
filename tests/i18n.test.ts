@@ -98,7 +98,10 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Images provided': '提供的图片',
     'Images used for the poster': '海报使用的图片',
     'Tracked link': '追踪链接',
-    'RedNote cover (3:4)': '小红书首图（3:4）',
+    'Portrait 3:4 with QR footer': '竖版 3:4（带二维码页脚）',
+    'Portrait 3:4 full bleed': '竖版 3:4（全出血）',
+    'Landscape 16:9': '横版 16:9',
+    'Square 1:1': '方形 1:1',
     'Artwork-only export. No QR code or placement tracking is included.':
       '仅导出画面，不包含二维码或投放追踪。',
     'Create an account': '创建新账户',

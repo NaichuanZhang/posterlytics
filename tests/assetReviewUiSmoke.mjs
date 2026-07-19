@@ -431,7 +431,7 @@ async function testRedNoteCoverFormat(browserInstance) {
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
   assert.ok(
     (await page.locator('#poster-format option').allTextContents())
-      .includes('RedNote cover (3:4)'),
+      .includes('Portrait 3:4 full bleed'),
   )
 
   await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
@@ -443,7 +443,7 @@ async function testRedNoteCoverFormat(browserInstance) {
     })
     .waitFor()
   await exportInspector
-    .getByRole('button', { name: 'Export RedNote cover (3:4) PNG' })
+    .getByRole('button', { name: 'Export Portrait 3:4 full bleed PNG' })
     .waitFor()
   assert.equal(await exportInspector.locator('#placement-select').count(), 0)
 
@@ -492,7 +492,7 @@ async function testRedNoteCoverFormat(browserInstance) {
   ).waitFor()
   assert.equal(
     await page.getByRole('button', {
-      name: 'Export RedNote cover (3:4) PNG',
+      name: 'Export Portrait 3:4 full bleed PNG',
     }).count(),
     1,
   )

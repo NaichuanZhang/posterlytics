@@ -64,13 +64,13 @@ export const POSTER_SIZES = [
   },
   {
     slug: 'rednote_3x4',
-    label: catalogLabel('RedNote portrait (3:4)'),
+    label: catalogLabel('Portrait 3:4 with QR footer'),
     artwork: { width: 960, height: 1280 },
     sheet: { width: 1242, height: 1656 },
     providerAspectRatio: '3:4',
     export: {
       pixelRatio: 1,
-      filenameSuffix: 'RedNote-3x4',
+      filenameSuffix: 'Portrait-3x4',
     },
     qrBand: {
       mode: 'scaled',
@@ -79,13 +79,13 @@ export const POSTER_SIZES = [
   },
   {
     slug: 'rednote_cover_3x4',
-    label: catalogLabel('RedNote cover (3:4)'),
+    label: catalogLabel('Portrait 3:4 full bleed'),
     artwork: { width: 1242, height: 1656 },
     sheet: { width: 1242, height: 1656 },
     providerAspectRatio: '3:4',
     export: {
       pixelRatio: 1,
-      filenameSuffix: 'RedNote-Cover-3x4',
+      filenameSuffix: 'FullBleed-3x4',
     },
     qrBand: {
       mode: 'none',
@@ -93,13 +93,13 @@ export const POSTER_SIZES = [
   },
   {
     slug: 'yt_thumb_16x9',
-    label: catalogLabel('YouTube thumbnail (16:9)'),
+    label: catalogLabel('Landscape 16:9'),
     artwork: { width: 800, height: 450 },
     sheet: { width: 1280, height: 720 },
     providerAspectRatio: '16:9',
     export: {
       pixelRatio: 1,
-      filenameSuffix: 'YouTube-16x9',
+      filenameSuffix: 'Landscape-16x9',
     },
     qrBand: {
       mode: 'scaled',
@@ -108,13 +108,13 @@ export const POSTER_SIZES = [
   },
   {
     slug: 'luma_1x1',
-    label: catalogLabel('Luma square (1:1)'),
+    label: catalogLabel('Square 1:1'),
     artwork: { width: 800, height: 800 },
     sheet: { width: 1080, height: 1080 },
     providerAspectRatio: '1:1',
     export: {
       pixelRatio: 1,
-      filenameSuffix: 'Luma-1x1',
+      filenameSuffix: 'Square-1x1',
     },
     qrBand: {
       mode: 'scaled',
