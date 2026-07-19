@@ -6,6 +6,7 @@ import { parseColor, toHex } from '../../lib/colorUtils'
 import {
   DEFAULT_POSTER_SIZE,
   getPosterQrBandGeometry,
+  hasPosterQrBand,
   scaleQrBandValue,
   type PosterSize,
 } from '../../lib/posterSize'
@@ -14,7 +15,7 @@ import { useI18n } from '../../i18n/I18nProvider'
 
 interface Props {
   campaign: Campaign
-  code: string
+  code: string | null
   // Optional same-origin data-URL src for the hero image. PosterExportButton
   // pre-fetches the cross-origin hero to a data URL and passes it here so the
   // export canvas is never tainted by CORS. Falls back to hero_image_url.
@@ -22,19 +23,17 @@ interface Props {
   posterSize?: PosterSize
 }
 
-// Output sheet: the COMPLETE model-generated illustration centered on the
-// descriptor's canvas (matte-framed, object-fit: contain, never cropped,
-// stretched, or covered), with the REAL per-placement QR in a scaled branded
-// footer row BELOW the artwork. The image model can't render a scannable QR, so
-// we composite ours outside the art and never hide a painted pixel.
+// Output sheet: the COMPLETE model-generated illustration in the descriptor's
+// artwork frame (object-fit: contain, never cropped, stretched, or covered).
+// Scaled-band formats add the REAL per-placement QR below the artwork; bandless
+// formats fill the sheet with artwork and render no footer.
 //
 // The matte matches the analyzed brand background so the artwork (which the
 // prompt asks to fill edge-to-edge with that same bg) reads as one surface;
 // monochrome/unparsable palettes fall back to the neutral paper color.
 //
-// The QR card is ALWAYS white with dark modules, independent of brand palette,
-// so it stays scannable on any background. The footer is dark (posterColors.ink)
-// with a thin vivid brand-accent hairline on top for identity.
+// When present, the QR card is always white with dark modules, independent of
+// brand palette, so it stays scannable on any background.
 export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   { campaign, code, imageSrcOverride, posterSize = DEFAULT_POSTER_SIZE },
   ref,
@@ -68,12 +67,15 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   const footerAccent = pc.accent
   const footerText = '#ffffff'
   const footerTextDim = 'rgba(255,255,255,0.72)'
+  const includesQrBand = hasPosterQrBand(posterSize)
   const qrBand = getPosterQrBandGeometry(posterSize)
   const scaled = (value: number) => scaleQrBandValue(posterSize, value)
 
   return (
     <div
       ref={ref}
+      data-poster-size={posterSize.slug}
+      data-qr-band={posterSize.qrBand.mode}
       style={{
         width: posterSize.sheet.width,
         height: posterSize.sheet.height,
@@ -124,7 +126,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
 
       {/* QR footer — its own row BELOW the artwork (aligned to the artwork
           width), never overlapping art. White QR card left, CTA copy right. */}
-      {img && (
+      {img && includesQrBand && code && (
         <div
           style={{
             width: posterSize.artwork.width,
@@ -143,10 +145,10 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           {/* White QR card — light quiet-zone frame keeps the code scannable
               regardless of the footer/brand color. */}
           <div
-              style={{
-                background: '#ffffff',
-                padding: scaled(14),
-                borderRadius: scaled(16),
+            style={{
+              background: '#ffffff',
+              padding: scaled(14),
+              borderRadius: scaled(16),
               flex: '0 0 auto',
               display: 'flex',
             }}

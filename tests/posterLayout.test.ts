@@ -5,6 +5,7 @@ import {
   compileLayoutPrompt,
   ensurePosterLayoutZones,
   buildParentContextPrompt,
+  productPosterActionInstructions,
   type PosterLayout,
 } from '../functions/_shared.ts'
 import {
@@ -137,6 +138,32 @@ test('compileLayoutPrompt forbids a redundant CTA without forcing dense filler',
   assert.ok(/do NOT render any "Get started"/i.test(prompt), 'must forbid a painted CTA line')
   assert.ok(!/INFORMATION-DENSE/i.test(prompt), 'must not impose universal density')
   assert.ok(!/feature grid, a stat or proof row/i.test(prompt), 'must not impose generic filler zones')
+})
+
+test('bandless product prompts never promise a footer and still forbid link artwork', () => {
+  const size = getPosterSize('rednote_cover_3x4')
+  const prompt = compileLayoutPrompt(
+    LAYOUT,
+    { product: 'Acme', essence: '' },
+    size,
+  )
+  const instructions = productPosterActionInstructions(size)
+
+  assert.doesNotMatch(prompt, /printed separately below|footer bar.*call-to-action/i)
+  assert.match(prompt, /artwork-only format has no QR footer/i)
+  assert.match(prompt, /Do NOT render any QR code, barcode, URL, link call-to-action/i)
+  assert.match(instructions.designerRule, /artwork-only export with no footer/i)
+  assert.match(instructions.designerRule, /QR code, barcode, URL, link call-to-action/i)
+  assert.doesNotMatch(instructions.designerRule, /footer bar.*IS the call-to-action/i)
+  assert.match(instructions.designerRequest, /no QR code, URL, link CTA/i)
+})
+
+test('scaled product prompts retain the placement QR footer contract', () => {
+  const instructions = productPosterActionInstructions(getPosterSize('a4_2x3'))
+
+  assert.match(instructions.designerRule, /tracked QR footer bar.*IS the call-to-action/i)
+  assert.match(instructions.painterRule, /scannable QR footer bar.*IS the call-to-action/i)
+  assert.match(instructions.designerRequest, /QR footer is the action/i)
 })
 
 test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', () => {

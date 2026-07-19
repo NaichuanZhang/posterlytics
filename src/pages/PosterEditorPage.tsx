@@ -46,7 +46,11 @@ import {
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
-import { getPosterSize, type PosterSizeSlug } from '../lib/posterSize'
+import {
+  getPosterSize,
+  hasPosterQrBand,
+  type PosterSizeSlug,
+} from '../lib/posterSize'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -214,6 +218,7 @@ export function PosterEditorPage() {
         : campaign.poster_format,
   )
   const targetPosterSize = getPosterSize(campaign.poster_format)
+  const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
   const effectiveRefreshWebsite = firstVersion || refreshWebsite
@@ -480,23 +485,25 @@ export function PosterEditorPage() {
           <h2 id="export-heading">{t('Placement & export')}</h2>
         </div>
       </div>
-      {placements.length === 0 ? (
+      {previewIncludesQrBand && placements.length === 0 ? (
         <p className="panel-empty">{t('Preparing the primary placement.')}</p>
       ) : (
         <>
-          <div className="field">
-            <label htmlFor="placement-select">{t('Placement')}</label>
-            <select
-              id="placement-select"
-              className="input"
-              value={selectedPlacement?.id ?? ''}
-              onChange={(event) => setSelectedPlacementId(event.target.value)}
-            >
-              {placements.map((placement) => (
-                <option key={placement.id} value={placement.id}>{placement.label}</option>
-              ))}
-            </select>
-          </div>
+          {previewIncludesQrBand && (
+            <div className="field">
+              <label htmlFor="placement-select">{t('Placement')}</label>
+              <select
+                id="placement-select"
+                className="input"
+                value={selectedPlacement?.id ?? ''}
+                onChange={(event) => setSelectedPlacementId(event.target.value)}
+              >
+                {placements.map((placement) => (
+                  <option key={placement.id} value={placement.id}>{placement.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {selectedGeneration && (
             <p className="selection-note">
               {t('Exporting version {number}', {
@@ -504,19 +511,26 @@ export function PosterEditorPage() {
               })}
             </p>
           )}
+          {!previewIncludesQrBand && (
+            <p className="selection-note">
+              {t('Artwork-only export. No QR code or placement tracking is included.')}
+            </p>
+          )}
           <div className="inspector-actions">
-            {selectedPlacement && (
+            {(!previewIncludesQrBand || selectedPlacement) && (
               <PosterExportButton
                 campaign={previewCampaign}
-                placement={selectedPlacement}
+                placement={previewIncludesQrBand ? selectedPlacement : undefined}
                 versionNumber={selectedGeneration?.version_number ?? undefined}
                 posterSize={previewPosterSize}
               />
             )}
-            <button type="button" className="button button-secondary button-small" onClick={copyLink}>
-              <Copy size={15} aria-hidden="true" />
-              {t('Copy tracked link')}
-            </button>
+            {previewIncludesQrBand && selectedPlacement && (
+              <button type="button" className="button button-secondary button-small" onClick={copyLink}>
+                <Copy size={15} aria-hidden="true" />
+                {t('Copy tracked link')}
+              </button>
+            )}
             <Link to={`/campaigns/${campaign.id}/placements`} className="button button-secondary button-small">
               <MapPin size={15} aria-hidden="true" />
               {t('Manage placements')}

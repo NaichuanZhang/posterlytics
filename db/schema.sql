@@ -36,6 +36,7 @@ CREATE TABLE public.campaigns (
       poster_format IN (
         'a4_2x3',
         'rednote_3x4',
+        'rednote_cover_3x4',
         'yt_thumb_16x9',
         'luma_1x1'
       )
@@ -98,6 +99,7 @@ CREATE TABLE public.poster_generations (
       poster_format IN (
         'a4_2x3',
         'rednote_3x4',
+        'rednote_cover_3x4',
         'yt_thumb_16x9',
         'luma_1x1'
       )

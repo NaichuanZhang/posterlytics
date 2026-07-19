@@ -4,6 +4,7 @@ import {
   DEFAULT_POSTER_SIZE,
   getPosterFrameLabel,
   getPosterSize,
+  hasPosterQrBand,
   type PosterSize,
 } from '../src/lib/posterSize.ts';
 
@@ -11,6 +12,7 @@ export {
   DEFAULT_POSTER_SIZE,
   getPosterFrameLabel,
   getPosterSize,
+  hasPosterQrBand,
   type PosterSize,
 };
 
@@ -1847,7 +1849,7 @@ export interface PosterLayout {
     supporting?: string[];
     proportions?: WeightedPaletteColor[];
   };
-  zones: PosterLayoutZone[]; // top→lower; artwork fills its frame (QR footer is outside it)
+  zones: PosterLayoutZone[]; // top→lower; artwork fills its registered frame
 }
 
 const LAYOUT_BANDS: LayoutBand[] = ['top', 'upper', 'mid', 'lower'];
@@ -2045,14 +2047,46 @@ export function buildParentContextPrompt(args: {
 // Compile a PosterLayout into a text-to-image prompt. PURE + deterministic — the
 // testable seam between the agentic layout and the image model. Reuses hero.ts's
 // proven conventions: registered framing, brand-honoring, "render only these
-// exact quoted strings", and an Avoid list. The artwork fills the complete frame
-// and the SPA composites the QR footer OUTSIDE it on the output sheet.
+// exact quoted strings", and an Avoid list. The artwork fills the complete frame;
+// the descriptor decides whether the SPA adds a QR footer outside it.
+export function productPosterActionInstructions(posterSize: PosterSize): {
+  designerRule: string;
+  designerRequest: string;
+  painterRule: string;
+  painterAvoid: string;
+} {
+  if (hasPosterQrBand(posterSize)) {
+    return {
+      designerRule:
+        'CRITICAL: do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere — the tracked QR footer bar (printed separately below the artwork) IS the call-to-action, so a CTA zone would be redundant. Use the "lower" zone for a closing value prop or proof point instead. ',
+      designerRequest:
+        'Design the poster layout JSON now (no CTA zone — the QR footer is the action).',
+      painterRule:
+        'This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.',
+      painterAvoid:
+        'any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you',
+    };
+  }
+
+  return {
+    designerRule:
+      'CRITICAL: this is an artwork-only export with no footer. Do NOT add a QR code, barcode, URL, link call-to-action, painted button, or pill anywhere. Do not add a "Get started" / "Sign up" / "Join now" CTA zone. Use the "lower" zone for a closing value prop or proof point instead. ',
+    designerRequest:
+      'Design the poster layout JSON now (artwork-only: no QR code, URL, link CTA, button, or pill).',
+    painterRule:
+      'This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. This artwork-only format has no QR footer. Do NOT render any QR code, barcode, URL, link call-to-action, or "Get started" / "Sign up" / "Join now" CTA line anywhere.',
+    painterAvoid:
+      'any QR code or barcode drawn by you, any URL or link call-to-action, any "Get started"/"Sign up" CTA line or button',
+  };
+}
+
 export function compileLayoutPrompt(
   layout: PosterLayout,
   ctx: { product: string; essence: string; hasLogo?: boolean; hasStyleBoard?: boolean },
   posterSize: PosterSize = DEFAULT_POSTER_SIZE,
 ): string {
   const p = layout.palette_roles;
+  const actionInstructions = productPosterActionInstructions(posterSize);
   const bandLabel: Record<LayoutBand, string> = {
     top: 'TOP strip (0-12% down)',
     upper: 'UPPER area (12-42% down)',
@@ -2105,7 +2139,7 @@ ${visualDirection ? `${visualDirection}\n` : ''}${sourceEvidence}
 
 Translate the observed visual language into a poster-specific composition. Do not copy navigation bars, menus, browser chrome, app screens, cards, buttons, tabs, form controls, or other website UI. Do not impose category stereotypes or substitute a trendy medium that is not evidenced by the source. Any REFERENCE PURPOSE labels attached after this prompt are instructions only and must never appear as poster text.
 
-This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.
+${actionInstructions.painterRule}
 
 ${densityInstruction[density]}
 ${logoLine}
@@ -2121,7 +2155,7 @@ Arrange the poster top to bottom using these zones — together they fill the co
 ${zoneLines || '- TOP strip: plain-text product name.\n- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
-Avoid: garbled or misspelled text, copied navigation or web controls, painted buttons / pills / clickable UI controls, invented logos or symbols when no authentic logo reference is attached, any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you, more than the quoted strings, non-English text, and watermarks.`;
+Avoid: garbled or misspelled text, copied navigation or web controls, painted buttons / pills / clickable UI controls, invented logos or symbols when no authentic logo reference is attached, ${actionInstructions.painterAvoid}, more than the quoted strings, non-English text, and watermarks.`;
 }
 
 export async function aiImage(

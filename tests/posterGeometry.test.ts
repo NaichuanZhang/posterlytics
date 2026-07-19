@@ -9,6 +9,7 @@ import {
   getPosterMatteX,
   getPosterQrBandGeometry,
   getPosterSize,
+  hasPosterQrBand,
   MATTE_GAP,
   MATTE_X,
   POSTER_HEIGHT,
@@ -26,6 +27,7 @@ const PRESET_EXPECTATIONS = [
     pixelRatio: 2,
     exportSize: { width: 2480, height: 3508 },
     filenameSuffix: 'A4',
+    qrBand: { mode: 'scaled', scale: 1 },
   },
   {
     slug: 'rednote_3x4',
@@ -35,6 +37,24 @@ const PRESET_EXPECTATIONS = [
     pixelRatio: 1,
     exportSize: { width: 1242, height: 1656 },
     filenameSuffix: 'RedNote-3x4',
+    qrBand: {
+      mode: 'scaled',
+      scale: (1656 - 1280) / (
+        BASE_QR_BAND_GEOMETRY.sheetMarginY * 2
+        + BASE_QR_BAND_GEOMETRY.gap
+        + BASE_QR_BAND_GEOMETRY.footerHeight
+      ),
+    },
+  },
+  {
+    slug: 'rednote_cover_3x4',
+    artwork: { width: 1242, height: 1656 },
+    sheet: { width: 1242, height: 1656 },
+    providerAspectRatio: '3:4',
+    pixelRatio: 1,
+    exportSize: { width: 1242, height: 1656 },
+    filenameSuffix: 'RedNote-Cover-3x4',
+    qrBand: { mode: 'none' },
   },
   {
     slug: 'yt_thumb_16x9',
@@ -44,6 +64,14 @@ const PRESET_EXPECTATIONS = [
     pixelRatio: 1,
     exportSize: { width: 1280, height: 720 },
     filenameSuffix: 'YouTube-16x9',
+    qrBand: {
+      mode: 'scaled',
+      scale: (720 - 450) / (
+        BASE_QR_BAND_GEOMETRY.sheetMarginY * 2
+        + BASE_QR_BAND_GEOMETRY.gap
+        + BASE_QR_BAND_GEOMETRY.footerHeight
+      ),
+    },
   },
   {
     slug: 'luma_1x1',
@@ -53,10 +81,18 @@ const PRESET_EXPECTATIONS = [
     pixelRatio: 1,
     exportSize: { width: 1080, height: 1080 },
     filenameSuffix: 'Luma-1x1',
+    qrBand: {
+      mode: 'scaled',
+      scale: (1080 - 800) / (
+        BASE_QR_BAND_GEOMETRY.sheetMarginY * 2
+        + BASE_QR_BAND_GEOMETRY.gap
+        + BASE_QR_BAND_GEOMETRY.footerHeight
+      ),
+    },
   },
 ] as const
 
-test('registry contains exactly the approved Phase 2a presets in stable order', () => {
+test('registry contains the approved presets in stable order', () => {
   assert.deepEqual(
     POSTER_SIZES.map((size) => size.slug),
     PRESET_EXPECTATIONS.map((size) => size.slug),
@@ -70,6 +106,7 @@ test('default registry entry preserves the established A4 descriptor exactly', (
   assert.equal(DEFAULT_POSTER_SIZE.providerAspectRatio, '2:3')
   assert.equal(DEFAULT_POSTER_SIZE.export.pixelRatio, 2)
   assert.equal(DEFAULT_POSTER_SIZE.export.filenameSuffix, 'A4')
+  assert.deepEqual(DEFAULT_POSTER_SIZE.qrBand, { mode: 'scaled', scale: 1 })
 })
 
 test('only a missing legacy slug falls back to the default registry entry', () => {
@@ -108,13 +145,25 @@ for (const expected of PRESET_EXPECTATIONS) {
       Math.abs(composedHeight - size.sheet.height) < 1e-9,
       `${expected.slug} composed height ${composedHeight} vs ${size.sheet.height}`,
     )
-    assert.ok(size.qrBand.scale > 0)
-    assert.deepEqual(qrBand, {
-      sheetMarginY: BASE_QR_BAND_GEOMETRY.sheetMarginY * size.qrBand.scale,
-      gap: BASE_QR_BAND_GEOMETRY.gap * size.qrBand.scale,
-      footerHeight: BASE_QR_BAND_GEOMETRY.footerHeight * size.qrBand.scale,
-      qrSize: BASE_QR_BAND_GEOMETRY.qrSize * size.qrBand.scale,
-    })
+    assert.deepEqual(size.qrBand, expected.qrBand)
+    if (hasPosterQrBand(size)) {
+      assert.ok(size.qrBand.scale > 0)
+      assert.deepEqual(qrBand, {
+        sheetMarginY: BASE_QR_BAND_GEOMETRY.sheetMarginY * size.qrBand.scale,
+        gap: BASE_QR_BAND_GEOMETRY.gap * size.qrBand.scale,
+        footerHeight: BASE_QR_BAND_GEOMETRY.footerHeight * size.qrBand.scale,
+        qrSize: BASE_QR_BAND_GEOMETRY.qrSize * size.qrBand.scale,
+      })
+    } else {
+      assert.deepEqual(qrBand, {
+        sheetMarginY: 0,
+        gap: 0,
+        footerHeight: 0,
+        qrSize: 0,
+      })
+      assert.deepEqual(size.artwork, size.sheet)
+      assert.equal(getPosterMatteX(size), 0)
+    }
 
     assert.equal(size.export.pixelRatio, expected.pixelRatio)
     assert.deepEqual(

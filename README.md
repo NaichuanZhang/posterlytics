@@ -17,7 +17,8 @@ Live app: **https://3f9q2998.insforge.site**
    while preserving the source's visual treatment and density.
 5. `hero` paints the poster through OpenRouter at the registered provider aspect
    using ordered visual references.
-6. Add placements, publish, and export a PNG with each placement's QR.
+6. Add placements, publish, and export either a placement-specific QR poster or
+   an artwork-only social cover.
 7. A visit to the QR link is recorded and redirected to the destination URL.
 8. Analytics reports visits, unique visitors, device, OS, and country.
 

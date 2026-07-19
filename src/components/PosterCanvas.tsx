@@ -7,7 +7,11 @@ import {
   stepCanvasZoom,
   type CanvasZoom,
 } from '../lib/workspace'
-import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
+import {
+  DEFAULT_POSTER_SIZE,
+  hasPosterQrBand,
+  type PosterSize,
+} from '../lib/posterSize'
 import type { Campaign } from '../lib/types'
 import { LayoutPreview } from './LayoutPreview'
 import { Poster } from './Poster'
@@ -75,6 +79,7 @@ export function PosterCanvas({
   const previewHeight = scale > 0 ? Math.round(posterSize.sheet.height * scale) : 0
   const stageWidth = Math.max(viewport.width, previewWidth + 96)
   const stageHeight = Math.max(viewport.height, previewHeight + 96)
+  const requiresPlacement = hasPosterQrBand(posterSize)
 
   return (
     <div className="canvas-shell">
@@ -91,7 +96,7 @@ export function PosterCanvas({
         >
           {previewWidth > 0 && (
             campaign.hero_image_url || !campaign.poster_layout ? (
-              code ? (
+              code || !requiresPlacement ? (
                 <Poster
                   campaign={campaign}
                   code={code}

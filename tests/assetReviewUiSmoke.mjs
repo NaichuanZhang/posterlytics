@@ -49,6 +49,7 @@ try {
   await testGenerationDetailsSummary(browser)
   await testFailedGenerationDetails(browser)
   await testCampaignWizardPreference(browser)
+  await testRedNoteCoverFormat(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
   console.log(`asset review UI smoke passed; screenshots: ${OUTPUT_DIR}`)
@@ -411,6 +412,100 @@ async function testCampaignWizardPreference(browserInstance) {
   await context.close()
 }
 
+async function testRedNoteCoverFormat(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  state.campaign.poster_format = 'rednote_cover_3x4'
+  state.currentGeneration.poster_format = 'rednote_cover_3x4'
+  state.placements = []
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/new`)
+  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  assert.ok(
+    (await page.locator('#poster-format option').allTextContents())
+      .includes('RedNote cover (3:4)'),
+  )
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  const exportInspector = page.locator('section[aria-labelledby="export-heading"]')
+  await exportInspector
+    .getByText('Artwork-only export. No QR code or placement tracking is included.', {
+      exact: true,
+    })
+    .waitFor()
+  await exportInspector
+    .getByRole('button', { name: 'Export RedNote cover (3:4) PNG' })
+    .waitFor()
+  assert.equal(await exportInspector.locator('#placement-select').count(), 0)
+
+  const sheet = page.locator(
+    '.canvas-stage [data-poster-size="rednote_cover_3x4"][data-qr-band="none"]',
+  ).first()
+  await sheet.waitFor()
+  assert.deepEqual(
+    await sheet.evaluate((element) => {
+      const artwork = element.firstElementChild
+      const style = getComputedStyle(element)
+      return {
+        artworkHeight: artwork?.clientHeight,
+        artworkWidth: artwork?.clientWidth,
+        paddingBottom: style.paddingBottom,
+        paddingTop: style.paddingTop,
+        sheetHeight: element.clientHeight,
+        sheetWidth: element.clientWidth,
+      }
+    }),
+    {
+      artworkHeight: 1656,
+      artworkWidth: 1242,
+      paddingBottom: '0px',
+      paddingTop: '0px',
+      sheetHeight: 1656,
+      sheetWidth: 1242,
+    },
+  )
+  assert.equal(await sheet.getByRole('img', { name: 'QR code' }).count(), 0)
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/rednote-cover-editor-desktop.png`,
+    fullPage: true,
+  })
+
+  state.placements = [state.placement]
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset/placements`)
+  await page.getByRole('heading', { name: 'Placements' }).waitFor()
+  await page.getByText('Each placement has a distinct tracked link.', {
+    exact: true,
+  }).waitFor()
+  await page.getByText(
+    'Artwork-only export. No QR code or placement tracking is included.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await page.getByRole('button', {
+      name: 'Export RedNote cover (3:4) PNG',
+    }).count(),
+    1,
+  )
+  await page.getByRole('img', { name: 'QR code' }).waitFor()
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/rednote-cover-placements-desktop.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testAssetModeTooltips(browserInstance) {
   const desktopContext = await browserInstance.newContext({
     locale: 'en-US',
@@ -737,7 +832,7 @@ async function installBackendMock(context, state) {
       )
     }
     if (path === '/api/database/records/placements') {
-      return json(route, [state.placement])
+      return json(route, state.placements)
     }
     return json(route, [])
   })
@@ -843,20 +938,22 @@ function createState({
     asset('asset-c', 'logo', 'Brand logo', 3),
     asset('asset-d', 'product', 'Product image', 4),
   ]
+  const placement = {
+    id: 'placement-1',
+    campaign_id: campaign.id,
+    user_id: user.id,
+    label: 'Primary',
+    code: 'asset001',
+    created_at: now,
+  }
   const state = {
     now,
     user,
     campaign,
     reviewGeneration,
     currentGeneration,
-    placement: {
-      id: 'placement-1',
-      campaign_id: campaign.id,
-      user_id: user.id,
-      label: 'Primary',
-      code: 'asset001',
-      created_at: now,
-    },
+    placement,
+    placements: [placement],
     assets,
     awaitingReviewActivity,
     editorReady,

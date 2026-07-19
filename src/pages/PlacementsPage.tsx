@@ -12,7 +12,7 @@ import { useCampaign } from '../hooks/useCampaign'
 import { usePlacements } from '../hooks/usePlacements'
 import { usePosterGenerations } from '../hooks/usePosterGenerations'
 import { overlayGeneration } from '../lib/generations'
-import { getPosterSize } from '../lib/posterSize'
+import { getPosterSize, hasPosterQrBand } from '../lib/posterSize'
 import { buildViewUrl } from '../lib/viewUrl'
 import { useI18n } from '../i18n/I18nProvider'
 
@@ -100,6 +100,9 @@ export function PlacementsPage() {
   const posterSize = exportCampaign
     ? getPosterSize(exportCampaign.poster_format)
     : null
+  const includesQrBand = hasPosterQrBand(
+    posterSize ?? getPosterSize(campaign.poster_format),
+  )
 
   return (
     <AppShell
@@ -114,7 +117,11 @@ export function PlacementsPage() {
       <header className="page-heading page-heading-compact">
         <div>
           <h1>{t('Placements')}</h1>
-          <p>{t('Each placement has a distinct tracked link and export.')}</p>
+          <p>
+            {t(includesQrBand
+              ? 'Each placement has a distinct tracked link and export.'
+              : 'Each placement has a distinct tracked link.')}
+          </p>
         </div>
         <span className="page-count">{t('{count} total', { count: placements.length })}</span>
       </header>
@@ -124,6 +131,19 @@ export function PlacementsPage() {
           <strong>{t('This campaign is still a draft.')}</strong>
           <span>{t('Its links start recording visits after publication.')}</span>
         </InlineNotice>
+      )}
+
+      {exportCampaign && posterSize && !includesQrBand && (
+        <div className="placement-format-export">
+          <InlineNotice>
+            <span>{t('Artwork-only export. No QR code or placement tracking is included.')}</span>
+            <PosterExportButton
+              campaign={exportCampaign}
+              versionNumber={currentGeneration?.version_number ?? undefined}
+              posterSize={posterSize}
+            />
+          </InlineNotice>
+        </div>
       )}
 
       <form className="placement-create" onSubmit={handleAdd}>
@@ -216,7 +236,7 @@ export function PlacementsPage() {
                     >
                       <Copy size={15} aria-hidden="true" />
                     </button>
-                    {exportCampaign && posterSize && (
+                    {exportCampaign && posterSize && includesQrBand && (
                       <PosterExportButton
                         campaign={exportCampaign}
                         placement={placement}

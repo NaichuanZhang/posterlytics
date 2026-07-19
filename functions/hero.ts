@@ -12,6 +12,7 @@ import {
   DEFAULT_POSTER_SIZE,
   getPosterFrameLabel,
   getPosterSize,
+  hasPosterQrBand,
   loadFrozenGenerationImageReferences,
   logPipelineEvent,
   markGenerationFailed,
@@ -32,8 +33,8 @@ import {
 // event prompt.
 // The image model gets a compiled prompt plus bounded visual references. The
 // artwork fills its complete frame; the SPA shows it uncropped on the registered
-// output sheet with the QR footer composited OUTSIDE the artwork. Stored in the
-// public assets bucket.
+// output sheet and adds a QR footer only when the descriptor requests one.
+// Stored in the public assets bucket.
 export default async function (req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return jsonResponse({ error: 'method' }, 405);
@@ -339,8 +340,8 @@ export async function runHeroStage(
     parentPosterSize,
   );
 
-  // Request the registered ratio explicitly, never provider pixel dimensions
-  // (AiPoster shows the full image uncropped above the external QR footer).
+  // Request the registered ratio explicitly, never provider pixel dimensions.
+  // AiPoster shows the full generated frame without cropping.
   let imageSource: string;
   try {
     const messages = [{
@@ -614,28 +615,50 @@ function fallbackLayout(c: Record<string, unknown>): PosterLayout {
   };
 }
 
-// Compose the text-to-image prompt for an EVENT promo poster. The exact
-// date/time/location are rendered as REAL text by the SPA (AiPoster's footer,
-// outside the artwork), NOT by the image model — so this prompt paints only the
-// ATMOSPHERE + event title + host, filling the complete registered frame.
-function buildEventPrompt(
+// Compose the text-to-image prompt for an EVENT promo poster. Scaled-band
+// formats keep authoritative logistics in AiPoster's real-text footer. A
+// bandless format has no external text surface, so its exact logistics become
+// quoted artwork content while QR codes, URLs, and link CTAs remain forbidden.
+export function buildEventPrompt(
   c: Record<string, unknown>,
   hasLogo = false,
   posterSize: PosterSize = DEFAULT_POSTER_SIZE,
 ): string {
   const spec = (c.poster_spec ?? {}) as {
-    title?: string; hook?: string; blurb?: string; host_line?: string;
+    title?: string;
+    hook?: string;
+    blurb?: string;
+    host_line?: string;
+    date_line?: string;
+    time_line?: string;
+    location_line?: string;
   } & Record<string, unknown>;
   const essence = String(c.brand_essence ?? '');
   const title = String((spec.title as string) || c.product_name || 'the event');
   const hook = String((c.poster_spec as { hook?: string })?.hook ?? '');
   const hostLine = String(spec.host_line ?? '');
+  const dateLine = String(spec.date_line ?? '').trim();
+  const timeLine = String(spec.time_line ?? '').trim();
+  const locationLine = String(spec.location_line ?? '').trim();
   const sp = (c.style_profile ?? {}) as { palette?: Record<string, string> };
   const primary = sp.palette?.primary || '#1f2937';
   const accent = sp.palette?.accent || '#e8633a';
   const logoLine = hasLogo
     ? '\nA reference image of the host/brand LOGO is provided — reproduce it faithfully (exact shape and colors) in the top brand area; do not redraw or distort it.\n'
     : '';
+  const includesQrBand = hasPosterQrBand(posterSize);
+  const logisticsLines = [
+    dateLine ? `- Lower information area: a clear date line reading "${dateLine}".` : '',
+    timeLine ? `- Lower information area: a clear time line reading "${timeLine}".` : '',
+    locationLine ? `- Lower information area: a clear location line reading "${locationLine}".` : '',
+  ].filter(Boolean).join('\n');
+  const trackingInstruction = includesQrBand
+    ? `Do NOT paint any date, time, address, QR code, or barcode yourself — the real date/time/location and a scannable QR
+are printed separately below the artwork as crisp real text.`
+    : 'This artwork-only format has no footer. Do NOT paint any QR code, barcode, URL, registration link, link call-to-action, button, or pill anywhere.';
+  const avoidInstruction = includesQrBand
+    ? 'any QR/barcode drawn by you, any painted date/time/address'
+    : 'any QR/barcode drawn by you, any URL, registration link, link call-to-action, or painted button/pill';
 
   return `Create a single ${getPosterFrameLabel(posterSize)} EVENT PROMOTION poster — an inviting, high-energy real-world event flyer
 (the kind pinned to a bulletin board or shared as a story). Bold, editorial, atmospheric. NOT a product/SaaS mockup,
@@ -655,15 +678,14 @@ Arrange it top to bottom:
   visual element, with expressive typography and decorative accents around it.
 ${hook ? `- Just below the title, a short punchy hook line reading "${hook}".` : ''}
 ${hostLine ? `- A small host/presenter line reading "${hostLine}".` : ''}
-- Middle and lower: rich atmospheric illustration evoking the event's theme and energy (people gathering, venue mood,
-  motifs from the brand essence), filling the frame all the way to the bottom edge — make it feel exciting and
+- Middle${includesQrBand || !logisticsLines ? ' and lower' : ''}: rich atmospheric illustration evoking the event's theme and energy (people gathering, venue mood,
+  motifs from the brand essence)${includesQrBand || !logisticsLines ? ', filling the frame all the way to the bottom edge' : ''} — make it feel exciting and
   specific, not generic clip-art.
-
-Do NOT paint any date, time, address, QR code, or barcode yourself — the real date/time/location and a scannable QR
-are printed separately below the artwork as crisp real text.
+${!includesQrBand && logisticsLines ? `${logisticsLines}\n` : ''}
+${trackingInstruction}
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above.
 High quality, sharp, 8k, atmospheric event-poster art direction.
-Avoid: product/app UI mockups, painted buttons/pills, any QR/barcode drawn by you, any painted date/time/address,
+Avoid: product/app UI mockups, painted buttons/pills, ${avoidInstruction},
 garbled or misspelled text, non-English text, and watermarks.`;
 }

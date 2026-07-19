@@ -3052,6 +3052,15 @@ img {
   background: var(--surface);
 }
 
+.placement-format-export {
+  margin: 12px 0 0;
+}
+
+.placement-format-export .inline-notice > div {
+  align-items: center;
+  justify-content: space-between;
+}
+
 .placement-create > label {
   color: var(--text-soft);
   font-size: 12px;

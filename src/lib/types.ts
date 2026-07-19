@@ -435,9 +435,9 @@ export interface EventDetails {
 }
 
 // Event promo-poster zones (poster_spec when Campaign.scenario === 'event').
-// Logistics lines (date/time/location) are authoritative from EventDetails and
-// composited as real text by AiPoster — never AI-painted — so they stay legible
-// and accurate.
+// Logistics lines are authoritative from EventDetails. AiPoster composites them
+// as real footer text for scaled-band formats; bandless generation quotes the
+// same exact strings in the image prompt because there is no external footer.
 export interface EventPosterSpec {
   title: string
   date_line: string

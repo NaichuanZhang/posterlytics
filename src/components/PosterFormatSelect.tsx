@@ -2,6 +2,7 @@ import { useI18n } from '../i18n/I18nProvider'
 import {
   POSTER_SIZES,
   getPosterSize,
+  hasPosterQrBand,
   type PosterSizeSlug,
 } from '../lib/posterSize'
 
@@ -19,6 +20,9 @@ export function PosterFormatSelect({
   onChange,
 }: Props) {
   const { t } = useI18n()
+  const posterSize = getPosterSize(value)
+  const caveatId = `${id}-tracking-caveat`
+  const isArtworkOnly = !hasPosterQrBand(posterSize)
 
   return (
     <div className="field">
@@ -28,6 +32,7 @@ export function PosterFormatSelect({
         className="input"
         value={value}
         disabled={disabled}
+        aria-describedby={isArtworkOnly ? caveatId : undefined}
         onChange={(event) => onChange(getPosterSize(event.target.value).slug)}
       >
         {POSTER_SIZES.map((size) => (
@@ -36,6 +41,11 @@ export function PosterFormatSelect({
           </option>
         ))}
       </select>
+      {isArtworkOnly && (
+        <p className="hint" id={caveatId}>
+          {t('Artwork-only export. No QR code or placement tracking is included.')}
+        </p>
+      )}
     </div>
   )
 }

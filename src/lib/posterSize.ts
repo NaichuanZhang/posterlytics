@@ -5,6 +5,15 @@ export interface PosterDimensions {
   readonly height: number
 }
 
+export type PosterQrBand =
+  | {
+      readonly mode: 'scaled'
+      readonly scale: number
+    }
+  | {
+      readonly mode: 'none'
+    }
+
 export interface PosterSizeDescriptor<Slug extends string = string> {
   readonly slug: Slug
   readonly label: TranslationKey
@@ -15,13 +24,12 @@ export interface PosterSizeDescriptor<Slug extends string = string> {
     readonly pixelRatio: number
     readonly filenameSuffix: string
   }
-  readonly qrBand: {
-    readonly scale: number
-  }
+  readonly qrBand: PosterQrBand
 }
 
-// Every fixed footer measurement is multiplied by the preset's single QR-band
-// scale. The A4 values are the established render and export contract.
+// Every fixed footer measurement is multiplied by a scaled preset's single
+// QR-band scale. Bandless presets resolve every footer measurement to zero.
+// The A4 values are the established render and export contract.
 export const BASE_QR_BAND_GEOMETRY = {
   sheetMarginY: 24,
   gap: 16,
@@ -50,6 +58,7 @@ export const POSTER_SIZES = [
       filenameSuffix: 'A4',
     },
     qrBand: {
+      mode: 'scaled',
       scale: 1,
     },
   },
@@ -64,7 +73,22 @@ export const POSTER_SIZES = [
       filenameSuffix: 'RedNote-3x4',
     },
     qrBand: {
+      mode: 'scaled',
       scale: (1656 - 1280) / BASE_QR_BAND_TOTAL_HEIGHT,
+    },
+  },
+  {
+    slug: 'rednote_cover_3x4',
+    label: catalogLabel('RedNote cover (3:4)'),
+    artwork: { width: 1242, height: 1656 },
+    sheet: { width: 1242, height: 1656 },
+    providerAspectRatio: '3:4',
+    export: {
+      pixelRatio: 1,
+      filenameSuffix: 'RedNote-Cover-3x4',
+    },
+    qrBand: {
+      mode: 'none',
     },
   },
   {
@@ -78,6 +102,7 @@ export const POSTER_SIZES = [
       filenameSuffix: 'YouTube-16x9',
     },
     qrBand: {
+      mode: 'scaled',
       scale: (720 - 450) / BASE_QR_BAND_TOTAL_HEIGHT,
     },
   },
@@ -92,6 +117,7 @@ export const POSTER_SIZES = [
       filenameSuffix: 'Luma-1x1',
     },
     qrBand: {
+      mode: 'scaled',
       scale: (1080 - 800) / BASE_QR_BAND_TOTAL_HEIGHT,
     },
   },
@@ -121,8 +147,14 @@ export function getPosterSize(value: unknown): PosterSize {
   return POSTER_SIZE_BY_SLUG.get(value)!
 }
 
+export function hasPosterQrBand(
+  size: PosterSize,
+): size is PosterSize & { readonly qrBand: Extract<PosterQrBand, { mode: 'scaled' }> } {
+  return size.qrBand.mode === 'scaled'
+}
+
 export function scaleQrBandValue(size: PosterSize, value: number): number {
-  return value * size.qrBand.scale
+  return hasPosterQrBand(size) ? value * size.qrBand.scale : 0
 }
 
 export function getPosterQrBandGeometry(size: PosterSize) {

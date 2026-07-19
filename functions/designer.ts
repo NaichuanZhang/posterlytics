@@ -16,6 +16,7 @@ import {
   normalizeStyleProfile,
   logPipelineEvent,
   prepareImageReferences,
+  productPosterActionInstructions,
   recordGenerationAssetProviderSkips,
   resolvedChatModelId,
   stageAlreadySucceeded,
@@ -314,6 +315,7 @@ export async function runDesignerStage(
     posterSize,
     parentPosterSize,
   });
+  const actionInstructions = productPosterActionInstructions(posterSize);
 
   const sys =
     `You are an award-winning poster art director creating the next version of a ${getPosterFrameLabel(posterSize)} product poster. ` +
@@ -340,9 +342,7 @@ export async function runDesignerStage(
     'Keep every content string SHORT and legible. The palette_roles MUST use the real brand colors provided. ' +
     'Preserve color usage proportions: dominant neutrals remain dominant and small accents remain restrained. ' +
     `This is a PRINTED POSTER IMAGE, not an app screen. The four bands together fill the COMPLETE ${posterSize.providerAspectRatio} frame. ` +
-    'CRITICAL: do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere — the tracked QR ' +
-    'footer bar (printed separately below the artwork) IS the call-to-action, so a CTA zone would be redundant. ' +
-    'Use the "lower" zone for a closing value prop or proof point instead. ' +
+    actionInstructions.designerRule +
     (hasLogo
       ? 'The brand has a real LOGO (a reference image is passed to the painter) — include a "top" brand-row zone whose role mentions the logo. '
       : '');
@@ -370,7 +370,7 @@ export async function runDesignerStage(
     (hasLogo ? `LOGO: ${selectedLogo?.url ?? assets.logo_url} (the selected real logo is passed to the painter — plan a brand row for it)\n` : 'LOGO: (not selected — use the product name as the brand mark)\n') +
     (heroImg ? `PRODUCT IMAGE: ${heroImg}\n` : '') +
     `ATTACHED VISUAL EVIDENCE: ${visualReferences.length} labeled image(s), including the previous poster when available.\n` +
-    `\nDesign the poster layout JSON now (no CTA zone — the QR footer is the action).`;
+    `\n${actionInstructions.designerRequest}`;
   const userContent = userContentWithImageReferences(
     user,
     visualReferences,

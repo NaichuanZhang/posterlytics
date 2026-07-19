@@ -2,23 +2,26 @@ import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import { Download } from 'lucide-react'
 import type { Campaign, Placement } from '../lib/types'
-import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
+import {
+  DEFAULT_POSTER_SIZE,
+  hasPosterQrBand,
+  type PosterSize,
+} from '../lib/posterSize'
 import { AiPoster } from './posters/AiPoster'
 import { useToast } from './ui/Toast'
 import { useI18n } from '../i18n/I18nProvider'
 
 interface Props {
   campaign: Campaign
-  placement: Placement
+  placement?: Placement | null
   versionNumber?: number
   variant?: 'button' | 'icon'
   posterSize?: PosterSize
 }
 
-// Exports the poster with this placement's QR embedded at the descriptor's
-// native sheet dimensions and pixel ratio. AiPoster renders off-screen at full
-// size and html-to-image captures it (the QR is a same-origin data-URL <img>, so
-// no canvas taint).
+// Exports at the descriptor's native sheet dimensions and pixel ratio. A scaled
+// QR band binds the export to a placement; an artwork-only descriptor does not.
+// AiPoster renders off-screen at full size and html-to-image captures it.
 //
 // The AI hero lives on cross-origin Storage, which would taint the export canvas;
 // we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
@@ -35,8 +38,9 @@ export function PosterExportButton({
   const [imgDataUrl, setImgDataUrl] = useState<string | null>(null)
   const { notify } = useToast()
   const { t } = useI18n()
+  const includesQrBand = hasPosterQrBand(posterSize)
   const formatLabel = t(posterSize.label)
-  const buttonLabel = variant === 'icon'
+  const buttonLabel = variant === 'icon' && includesQrBand && placement
     ? t('Download {name} poster as {format} PNG', {
         name: placement.label,
         format: formatLabel,
@@ -44,7 +48,7 @@ export function PosterExportButton({
     : t('Export {format} PNG', { format: formatLabel })
 
   async function handleExport() {
-    if (busy) return
+    if (busy || (includesQrBand && !placement)) return
     setBusy(true)
     try {
       // Pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
@@ -71,7 +75,7 @@ export function PosterExportButton({
       }
       if (!offscreenRef.current) return
       if (document.fonts?.ready) await document.fonts.ready
-      // Give the QR image a tick to render.
+      // Give any composited QR image a tick to render.
       await new Promise((r) => setTimeout(r, 150))
       const dataUrl = await toPng(offscreenRef.current, {
         width: posterSize.sheet.width,
@@ -83,7 +87,10 @@ export function PosterExportButton({
       const a = document.createElement('a')
       a.href = dataUrl
       const version = versionNumber ? `-v${versionNumber}` : ''
-      a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}-${placement.label.replace(/\W+/g, '-')}-${posterSize.export.filenameSuffix}.png`
+      const placementSuffix = includesQrBand && placement
+        ? `-${placement.label.replace(/\W+/g, '-')}`
+        : ''
+      a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}${placementSuffix}-${posterSize.export.filenameSuffix}.png`
       a.click()
       notify(t('Poster export is ready.'), 'success')
     } catch (e) {
@@ -101,19 +108,19 @@ export function PosterExportButton({
         type="button"
         className={variant === 'icon' ? 'icon-button' : 'button button-secondary button-small'}
         onClick={handleExport}
-        disabled={busy}
+        disabled={busy || (includesQrBand && !placement)}
         aria-label={variant === 'icon' ? buttonLabel : undefined}
         data-tooltip={variant === 'icon' ? buttonLabel : undefined}
       >
         <Download size={15} aria-hidden="true" />
         {variant === 'button' && (busy ? t('Exporting...') : buttonLabel)}
       </button>
-      {/* Offscreen full-size render target bound to this placement's QR. */}
+      {/* Offscreen full-size render target; code is ignored by bandless formats. */}
       <div style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }} aria-hidden>
         <AiPoster
           ref={offscreenRef}
           campaign={campaign}
-          code={placement.code}
+          code={placement?.code ?? null}
           imageSrcOverride={imgDataUrl ?? undefined}
           posterSize={posterSize}
         />

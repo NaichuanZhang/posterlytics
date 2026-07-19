@@ -5,16 +5,16 @@ import { AiPoster } from './posters/AiPoster'
 
 interface Props {
   campaign: Campaign
-  code: string // the placement code whose QR is embedded
+  code: string | null // required only when the descriptor includes a QR band
   width?: number // rendered preview width in px (defaults to fit the editor column)
   posterSize?: PosterSize
 }
 
 // The poster is the AI-painted hero artwork on its descriptor-native output
 // sheet, scaled down to the requested preview width. AiPoster shows the complete
-// artwork uncropped and composites a real QR <img> into a scaled branded footer
-// BELOW the artwork, so it stays crisp regardless of what the model drew. Use
-// `forwardRef` so PosterExportButton can capture the full-res node.
+// artwork uncropped and, when registered, composites a real QR <img> into a
+// scaled branded footer below it. Use `forwardRef` so PosterExportButton can
+// capture the full-res node.
 const DEFAULT_PREVIEW_W = 440
 
 export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(

@@ -6,6 +6,7 @@ import { BAND_GEOMETRY, getBandHeight, groupZonesByBand } from '../lib/layoutPre
 import {
   DEFAULT_POSTER_SIZE,
   getPosterQrBandGeometry,
+  hasPosterQrBand,
   scaleQrBandValue,
   type PosterSize,
 } from '../lib/posterSize'
@@ -19,12 +20,10 @@ interface Props {
 // A deterministic WIREFRAME of a designer-mode poster layout, rendered straight
 // from the `poster_layout` JSON the `designer` agent produced — shown while the AI
 // image is still painting (or in the editor before/if the paint is missing). It is
-// explicitly NOT the final poster: the same registered sheet as AiPoster
-// (matte, centered full artwork frame, QR footer placeholder OUTSIDE the art), with
+// explicitly NOT the final poster: the same registered sheet as AiPoster, with
 // palette-tinted blocks per zone showing the role + exact content text, sized by
-// emphasis, in the correct band. Same native-size + transform:scale idiom as
-// Poster/AiPoster so the proportions match what compileLayoutPrompt tells the
-// model to paint.
+// emphasis, in the correct band. Scaled-band formats include the footer
+// placeholder; bandless formats use the complete sheet for artwork.
 const DEFAULT_PREVIEW_W = 440
 const BAND_LABEL_KEYS: Record<LayoutBand, TranslationKey> = {
   top: 'TOP',
@@ -116,8 +115,10 @@ export function LayoutPreview({
           ))}
         </div>
 
-        {/* QR footer placeholder — composited by AiPoster OUTSIDE the artwork. */}
-        <FooterPlaceholder accent={p.accent} posterSize={posterSize} />
+        {/* QR footer placeholder — composited by AiPoster outside the artwork. */}
+        {hasPosterQrBand(posterSize) && (
+          <FooterPlaceholder accent={p.accent} posterSize={posterSize} />
+        )}
       </div>
     </div>
   )
