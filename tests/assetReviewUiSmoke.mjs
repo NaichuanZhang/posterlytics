@@ -744,6 +744,7 @@ async function testQrBandEdgeSamplingAndExport(browserInstance) {
     viewport: { width: 1360, height: 900 },
     reducedMotion: 'reduce',
   })
+  await installPosterSamplingCounter(context)
   const state = createState({ editorReady: true })
   const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
   state.campaign.hero_image_url = edgePosterUrl
@@ -793,6 +794,31 @@ async function testQrBandEdgeSamplingAndExport(browserInstance) {
   assert.equal(footerStyles.accent, 'rgb(11, 12, 11)')
   assert.equal(footerStyles.qrChip, 'rgb(255, 255, 255)')
   assert.notEqual(footerStyles.secondary, 'rgba(255, 255, 255, 0.72)')
+  assert.equal(
+    await posterSamplingCount(page),
+    1,
+    'the preview must sample its hero once after the initial load',
+  )
+
+  const hero = sheet.locator('[data-poster-hero]')
+  for (let index = 0; index < 8; index += 1) {
+    await hero.dispatchEvent('load')
+  }
+  await hero.dispatchEvent('error')
+  await page.setViewportSize({ width: 1359, height: 900 })
+  await page.setViewportSize({ width: 1360, height: 900 })
+  await waitForAnimationFrames(page, 2)
+
+  assert.equal(
+    await posterSamplingCount(page),
+    1,
+    'duplicate load events and a parent resize must not re-sample a settled preview source',
+  )
+  assert.equal(
+    await footer.getAttribute('data-footer-color-source'),
+    'sampled',
+    'a late duplicate error must not replace an already sampled result',
+  )
   await page.screenshot({
     path: `${OUTPUT_DIR}/qr-band-edge-sampling-desktop.png`,
     fullPage: true,
@@ -818,6 +844,11 @@ async function testQrBandEdgeSamplingAndExport(browserInstance) {
     exportPixel,
     [...cssRgbChannels(footerStyles.background), 255],
     'export footer pixel must exactly match the sampled preview color',
+  )
+  assert.equal(
+    await posterSamplingCount(page),
+    2,
+    'the export clone must add exactly one sample for its own hero source',
   )
   await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
   await assertNoOverflow(page)
@@ -882,7 +913,11 @@ async function testRedNoteCoverFormat(browserInstance) {
     viewport: { width: 1360, height: 900 },
     reducedMotion: 'reduce',
   })
+  await installPosterSamplingCounter(context)
   const state = createState({ editorReady: true })
+  const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  state.campaign.hero_image_url = edgePosterUrl
+  state.currentGeneration.hero_image_url = edgePosterUrl
   state.campaign.poster_format = 'rednote_cover_3x4'
   state.currentGeneration.poster_format = 'rednote_cover_3x4'
   state.placements = []
@@ -945,6 +980,12 @@ async function testRedNoteCoverFormat(browserInstance) {
   )
   assert.equal(await sheet.getByRole('img', { name: 'QR code' }).count(), 0)
   assert.equal(await sheet.locator('[data-poster-footer]').count(), 0)
+  await sheet.locator('[data-poster-hero]').evaluate((image) => image.decode())
+  assert.equal(
+    await posterSamplingCount(page),
+    0,
+    'a bandless poster must not sample its hero',
+  )
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/rednote-cover-editor-desktop.png`,
@@ -1675,6 +1716,32 @@ function activityFixture(state) {
 
 function reviewUrl() {
   return `${BASE_URL}/campaigns/campaign-asset/generations/generation-review/assets`
+}
+
+async function installPosterSamplingCounter(context) {
+  await context.addInitScript(() => {
+    window.__posterEdgeSampleCount = 0
+    const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData
+    CanvasRenderingContext2D.prototype.getImageData = function (...args) {
+      const [x, y, width, height] = args
+      if (x === 0 && y === 0 && width === 600 && height === 27) {
+        window.__posterEdgeSampleCount += 1
+      }
+      return originalGetImageData.apply(this, args)
+    }
+  })
+}
+
+async function posterSamplingCount(page) {
+  return page.evaluate(() => window.__posterEdgeSampleCount)
+}
+
+async function waitForAnimationFrames(page, count) {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    }
+  }, count)
 }
 
 async function probePngPixel(page, png, point) {

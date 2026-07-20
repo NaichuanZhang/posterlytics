@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import { Download } from 'lucide-react'
 import type { Campaign, Placement } from '../lib/types'
@@ -68,6 +68,27 @@ export function PosterExportButton({
         format: formatLabel,
       })
     : t('Export {format} PNG', { format: formatLabel })
+  const resolveRenderReady = useCallback((
+    attemptId: number,
+    result: PosterRenderReady,
+  ) => {
+    const pending = pendingRenderReady.current
+    if (
+      !pending
+      || pending.attemptId !== attemptId
+      || pending.expectedImageSrc !== result.imageSrc
+    ) {
+      return
+    }
+    window.clearTimeout(pending.timeoutId)
+    pendingRenderReady.current = null
+    pending.resolve(result)
+  }, [])
+  const renderAttemptId = renderAttempt?.id ?? null
+  const handleRenderReady = useCallback((result: PosterRenderReady) => {
+    if (renderAttemptId === null) return
+    resolveRenderReady(renderAttemptId, result)
+  }, [renderAttemptId, resolveRenderReady])
 
   async function handleExport() {
     if (busy || (includesQrBand && !placement)) return
@@ -141,23 +162,6 @@ export function PosterExportButton({
     })
   }
 
-  function resolveRenderReady(
-    attemptId: number,
-    result: PosterRenderReady,
-  ) {
-    const pending = pendingRenderReady.current
-    if (
-      !pending
-      || pending.attemptId !== attemptId
-      || pending.expectedImageSrc !== result.imageSrc
-    ) {
-      return
-    }
-    window.clearTimeout(pending.timeoutId)
-    pendingRenderReady.current = null
-    pending.resolve(result)
-  }
-
   function cancelPendingRenderReady() {
     const pending = pendingRenderReady.current
     if (!pending) return
@@ -191,7 +195,7 @@ export function PosterExportButton({
             campaign={campaign}
             code={placement?.code ?? null}
             imageSrcOverride={renderAttempt.imageSrcOverride}
-            onRenderReady={(result) => resolveRenderReady(renderAttempt.id, result)}
+            onRenderReady={handleRenderReady}
             posterSize={posterSize}
           />
         </div>

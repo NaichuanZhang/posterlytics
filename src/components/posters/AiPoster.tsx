@@ -1,4 +1,4 @@
-import { forwardRef, useLayoutEffect, useState } from 'react'
+import { forwardRef, useLayoutEffect, useRef, useState } from 'react'
 import type { Campaign, EventPosterSpec } from '../../lib/types'
 import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
@@ -67,6 +67,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   const { t } = useI18n()
   const img = imageSrcOverride ?? campaign.hero_image_url
   const [imageRender, setImageRender] = useState<ImageRenderState | null>(null)
+  const settledImageSrc = useRef<string | null>(null)
   const isEvent = campaign.scenario === 'event'
   // For events the poster_spec is an EventPosterSpec; its logistics lines were
   // computed deterministically by analyze (formatEventLines) so they're accurate.
@@ -114,6 +115,12 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     : 'not-applicable'
 
   useLayoutEffect(() => {
+    if (settledImageSrc.current !== img) {
+      settledImageSrc.current = null
+    }
+  }, [img])
+
+  useLayoutEffect(() => {
     if (renderStatus === 'pending') return
     onRenderReady?.({
       imageSrc: img,
@@ -125,7 +132,8 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   }, [footerBg, footerColorSource, img, onRenderReady, renderStatus])
 
   function handleImageLoad(image: HTMLImageElement) {
-    if (!img || !shouldSampleFooter) return
+    const imageSrc = claimImageSource()
+    if (!imageSrc) return
 
     let color: string | null = null
     try {
@@ -134,20 +142,39 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
       // SecurityError (tainted canvas), decode, and canvas failures all retain
       // the established palette fallback.
     }
-    setImageRender({
-      imageSrc: img,
+    settleImageRender({
+      imageSrc,
       sampledColor: color,
       status: color ? 'sampled' : 'fallback',
     })
   }
 
   function handleImageError() {
-    if (!img || !shouldSampleFooter) return
-    setImageRender({
-      imageSrc: img,
+    const imageSrc = claimImageSource()
+    if (!imageSrc) return
+    settleImageRender({
+      imageSrc,
       sampledColor: null,
       status: 'fallback',
     })
+  }
+
+  function claimImageSource(): string | null {
+    if (!img || !shouldSampleFooter || settledImageSrc.current === img) {
+      return null
+    }
+    settledImageSrc.current = img
+    return img
+  }
+
+  function settleImageRender(next: ImageRenderState) {
+    setImageRender((current) => (
+      current?.imageSrc === next.imageSrc
+      && current.sampledColor === next.sampledColor
+      && current.status === next.status
+        ? current
+        : next
+    ))
   }
 
   return (
