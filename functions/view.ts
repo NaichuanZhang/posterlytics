@@ -11,7 +11,7 @@ import {
 } from './_shared.ts';
 
 export type ViewLocale = 'en-US' | 'zh-CN';
-export type LinkKind = 'missing' | 'unpublished';
+export type LinkKind = 'invalid' | 'missing' | 'unpublished';
 
 interface StatusPageCopy {
   title: string;
@@ -21,6 +21,8 @@ interface StatusPageCopy {
 
 interface ViewMessages {
   byline: string;
+  recovery: string;
+  invalid: StatusPageCopy;
   missing: StatusPageCopy;
   unpublished: StatusPageCopy;
 }
@@ -29,6 +31,12 @@ const DEFAULT_VIEW_LOCALE: ViewLocale = 'en-US';
 const VIEW_MESSAGES: Record<ViewLocale, ViewMessages> = {
   'en-US': {
     byline: 'via Posterlytics',
+    recovery: 'Visit Posterlytics',
+    invalid: {
+      title: 'Invalid tracked link',
+      heading: '400',
+      message: 'This tracked link is missing its code.',
+    },
     missing: {
       title: 'Link not found',
       heading: '404',
@@ -43,6 +51,12 @@ const VIEW_MESSAGES: Record<ViewLocale, ViewMessages> = {
   },
   'zh-CN': {
     byline: '由 Posterlytics 提供',
+    recovery: '前往 Posterlytics',
+    invalid: {
+      title: '追踪链接无效',
+      heading: '400',
+      message: '此追踪链接缺少识别码。',
+    },
     missing: {
       title: '链接不存在',
       heading: '404',
@@ -130,15 +144,36 @@ function parseLanguageQuality(value: string): number | null {
 //   4. adds non-destructive UTM attribution and 302s to the real destination
 // A null result means the code is unknown OR the campaign isn't published;
 // distinguish the two via link_status so we can explain rather than 404 blindly.
-export default async function (req: Request): Promise<Response> {
+interface ViewRuntime {
+  createClient: typeof createAnonClient;
+  getVisitorSalt: () => string;
+  hashVisitor: typeof visitorHash;
+  resolveGeo: typeof resolveRequestGeo;
+}
+
+const VIEW_RUNTIME: ViewRuntime = {
+  createClient: createAnonClient,
+  getVisitorSalt: () => env('VISITOR_SALT'),
+  hashVisitor: visitorHash,
+  resolveGeo: resolveRequestGeo,
+};
+
+export default function (req: Request): Promise<Response> {
+  return handleViewRequest(req, VIEW_RUNTIME);
+}
+
+export async function handleViewRequest(
+  req: Request,
+  runtime: ViewRuntime,
+): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
   const url = new URL(req.url);
   const locale = resolveViewLocale(req.headers.get('accept-language'));
   const code = url.searchParams.get('code');
-  if (!code) return statusPageResponse('missing', locale, 400);
+  if (!code) return statusPageResponse('invalid', locale, 400);
 
-  const client = createAnonClient();
+  const client = runtime.createClient();
 
   // First-party visitor identity (cookie). New cookie => set it on the response.
   let visitorId = readCookie(req, 'plv');
@@ -149,8 +184,8 @@ export default async function (req: Request): Promise<Response> {
   }
   const { device, os } = parseUA(req.headers.get('user-agent') ?? '');
   const [vhash, geo] = await Promise.all([
-    visitorHash(env('VISITOR_SALT'), visitorId),
-    resolveRequestGeo(req.headers),
+    runtime.hashVisitor(runtime.getVisitorSalt(), visitorId),
+    runtime.resolveGeo(req.headers),
   ]);
 
   // Log the visit and get the destination plus attribution in one round-trip.
@@ -265,5 +300,5 @@ async function statusResponse(
 export function statusHtml(kind: LinkKind, locale: ViewLocale): string {
   const messages = VIEW_MESSAGES[locale];
   const copy = messages[kind];
-  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${copy.title}</title></head><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#444;background:#faf7f1"><div style="text-align:center;max-width:340px;padding:24px"><h1 style="font-size:2.4rem;margin:0 0 8px">${copy.heading}</h1><p style="line-height:1.5">${copy.message}</p><p style="font-size:.78rem;opacity:.4;margin-top:18px">${messages.byline}</p></div></body></html>`;
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${copy.title}</title></head><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#444;background:#faf7f1"><div style="text-align:center;max-width:340px;padding:24px"><h1 style="font-size:2.4rem;margin:0 0 8px">${copy.heading}</h1><p style="line-height:1.5">${copy.message}</p><a href="https://3f9q2998.insforge.site/" style="display:inline-block;margin-top:12px;color:#3d5f56;font-weight:650">${messages.recovery}</a><p style="font-size:.78rem;opacity:.4;margin-top:18px">${messages.byline}</p></div></body></html>`;
 }

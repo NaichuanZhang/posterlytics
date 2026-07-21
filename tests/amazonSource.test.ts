@@ -6,6 +6,7 @@ import {
 } from '../functions/_sourceAcquisition.ts'
 import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
 import {
+  AMAZON_SOURCE_HOSTS,
   classifyProductSourceUrl,
   getSourceUseCaseSwitchTarget,
   isAmazonSourceUrl,
@@ -37,6 +38,15 @@ test('source mismatch helper offers only the safe opposite-use-case switches', (
 })
 
 test('Amazon source classifier accepts only the supported exact hosts', () => {
+  assert.deepEqual(AMAZON_SOURCE_HOSTS, [
+    'amazon.com',
+    'www.amazon.com',
+    'a.co',
+    'amzn.to',
+    'amzn.asia',
+    'amzn.eu',
+  ])
+
   const accepted = [
     'https://amazon.com/dp/B0EXAMPLE1',
     'https://www.amazon.com/gp/product/B0EXAMPLE2',

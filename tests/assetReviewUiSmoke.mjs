@@ -384,7 +384,10 @@ async function testFailedGenerationDetails(browserInstance) {
   await versions.locator('.failed-generation-row').click()
 
   const dialog = page.getByRole('dialog', { name: 'Generation details' })
-  await dialog.getByText('The generation did not complete.', { exact: true }).waitFor()
+  await dialog.getByText(
+    'The generation did not complete. Retry this attempt from Incomplete attempts, or start a new version.',
+    { exact: true },
+  ).waitFor()
   const dialogText = await dialog.innerText()
   assert.equal(dialogText.includes('PRIVATE_FAILURE_CODE'), false)
   assert.equal(dialogText.includes('PRIVATE_FAILURE_MESSAGE'), false)

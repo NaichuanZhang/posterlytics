@@ -8,6 +8,10 @@ import { useI18n } from '../i18n/I18nProvider'
 import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
 import { parseAuthMode, safeNextPath } from '../lib/authRouting'
+import {
+  classifySignInError,
+  type SignInErrorKind,
+} from '../lib/signInErrors'
 import { SamplePoster } from '../marketing/SamplePoster'
 import '../marketing/public.css'
 
@@ -15,7 +19,7 @@ export function SignInPage() {
   const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [errorKind, setErrorKind] = useState<SignInErrorKind | null>(null)
   const [busy, setBusy] = useState(false)
   const [recoveringPassword, setRecoveringPassword] = useState(false)
   const navigate = useNavigate()
@@ -34,7 +38,7 @@ export function SignInPage() {
     if (searchParams.has('next')) params.set('next', nextPath)
     setSearchParams(params, { replace: true })
     setRecoveringPassword(false)
-    setError(null)
+    setErrorKind(null)
   }
 
   function returnToSignIn(recoveryEmail: string) {
@@ -43,30 +47,44 @@ export function SignInPage() {
     changeMode('signin')
   }
 
+  function startPasswordRecovery() {
+    setErrorKind(null)
+    setRecoveringPassword(true)
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    setError(null)
+    setErrorKind(null)
     setBusy(true)
     try {
       if (mode === 'signup') {
         const { data, error: signUpError } = await insforge.auth.signUp({ email, password })
-        if (signUpError) throw new Error(signUpError.message)
+        if (signUpError) throw signUpError
         if (!data?.accessToken) {
           const signIn = await insforge.auth.signInWithPassword({ email, password })
-          if (signIn.error) throw new Error(signIn.error.message)
+          if (signIn.error) throw signIn.error
         }
       } else {
         const { error: signInError } = await insforge.auth.signInWithPassword({ email, password })
-        if (signInError) throw new Error(signInError.message)
+        if (signInError) throw signInError
       }
       await refresh()
       navigate(nextPath, { replace: true })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('Authentication failed.'))
+      console.error('Authentication request failed', cause)
+      setErrorKind(classifySignInError(cause))
     } finally {
       setBusy(false)
     }
   }
+
+  const errorMessage = errorKind === 'credentials'
+    ? t('Invalid email or password.')
+    : errorKind === 'offline'
+      ? t('Posterlytics could not connect. Check your internet connection and try again.')
+      : errorKind === 'unknown'
+        ? t('Authentication failed.')
+        : null
 
   return (
     <div className="public-auth">
@@ -172,10 +190,7 @@ export function SignInPage() {
                         <button
                           type="button"
                           className="public-auth-inline-button"
-                          onClick={() => {
-                            setError(null)
-                            setRecoveringPassword(true)
-                          }}
+                          onClick={startPasswordRecovery}
                         >
                           {t('Forgot password?')}
                         </button>
@@ -193,7 +208,20 @@ export function SignInPage() {
                     />
                   </div>
 
-                  {error && <InlineNotice tone="error">{error}</InlineNotice>}
+                  {errorMessage && (
+                    <InlineNotice tone="error">
+                      <span>{errorMessage}</span>
+                      {mode === 'signin' && errorKind === 'credentials' && (
+                        <button
+                          type="button"
+                          className="public-auth-inline-button"
+                          onClick={startPasswordRecovery}
+                        >
+                          {t('Forgot password?')}
+                        </button>
+                      )}
+                    </InlineNotice>
+                  )}
 
                   <button
                     className="public-button public-button-primary public-auth-submit"

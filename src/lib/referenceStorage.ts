@@ -45,7 +45,7 @@ export async function materializeReferenceImages(
       if (!image) {
         throw new Error(translate(
           locale,
-          'The imported image metadata for {name} was invalid.',
+          'Posterlytics could not read {name}. Remove it and add the image again.',
           { name: reference.name },
         ))
       }
@@ -68,7 +68,11 @@ async function uploadReferenceImage(
   const key = `references/${userId}/${campaignId}/${crypto.randomUUID()}-${safeReferenceFilename(file.name)}`
   const { data, error } = await insforge.storage.from(BUCKET).upload(key, file)
   if (error || !data) {
-    throw new Error(error?.message ?? translate(locale, 'Could not upload {name}', {
+    console.error('Reference image upload failed', {
+      error,
+      hasData: Boolean(data),
+    })
+    throw new Error(translate(locale, 'Could not upload {name}. Check your connection and try again.', {
       name: file.name,
     }))
   }

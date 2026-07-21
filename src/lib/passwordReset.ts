@@ -39,7 +39,11 @@ export function resetEmailErrorMessage(
 ): string {
   const { statusCode } = authErrorDetails(error)
   if (statusCode === 429) {
-    return translate(locale, 'Too many reset requests. Wait a moment before trying again.')
+    return translate(
+      locale,
+      'Too many reset requests. Wait {count} seconds before trying again.',
+      { count: PASSWORD_RESET_RESEND_DELAY_SECONDS },
+    )
   }
   return translate(locale, 'We could not send a reset code right now. Check your connection and try again.')
 }
@@ -53,7 +57,11 @@ export function resetCodeErrorMessage(
     return translate(locale, 'That code is invalid or has expired. Check the email or request a new code.')
   }
   if (statusCode === 429) {
-    return translate(locale, 'Too many verification attempts. Wait a moment before trying again.')
+    return translate(
+      locale,
+      'Too many verification attempts. Wait {count} seconds before trying again.',
+      { count: PASSWORD_RESET_RESEND_DELAY_SECONDS },
+    )
   }
   return translate(locale, 'We could not verify that code. Try again or request a new one.')
 }
@@ -75,7 +83,11 @@ export function resetPasswordErrorMessage(
     return translate(locale, 'Your reset session has expired. Request a new code and try again.')
   }
   if (statusCode === 429) {
-    return translate(locale, 'Too many reset attempts. Wait a moment before trying again.')
+    return translate(
+      locale,
+      'Too many reset attempts. Wait {count} seconds before trying again.',
+      { count: PASSWORD_RESET_RESEND_DELAY_SECONDS },
+    )
   }
   return translate(locale, 'We could not reset your password right now. Try again.')
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  PASSWORD_RESET_RESEND_DELAY_SECONDS,
   resetCodeErrorMessage,
   resetEmailErrorMessage,
   resetPasswordErrorMessage,
@@ -34,8 +35,9 @@ test('reset email account errors are masked without hiding rate limits', () => {
   assert.equal(shouldMaskResetEmailError({ statusCode: 500 }), false)
   assert.equal(
     resetEmailErrorMessage({ statusCode: 429 }),
-    'Too many reset requests. Wait a moment before trying again.',
+    'Too many reset requests. Wait 30 seconds before trying again.',
   )
+  assert.equal(PASSWORD_RESET_RESEND_DELAY_SECONDS, 30)
 })
 
 test('reset code and password errors use actionable messages', () => {
@@ -54,6 +56,14 @@ test('reset code and password errors use actionable messages', () => {
     resetPasswordErrorMessage({ statusCode: 400, message: 'Invalid reset token' }),
     'Your reset session has expired. Request a new code and try again.',
   )
+  assert.equal(
+    resetCodeErrorMessage({ statusCode: 429 }),
+    'Too many verification attempts. Wait 30 seconds before trying again.',
+  )
+  assert.equal(
+    resetPasswordErrorMessage({ statusCode: 429 }),
+    'Too many reset attempts. Wait 30 seconds before trying again.',
+  )
 })
 
 test('password reset helpers return Chinese validation and operational copy', () => {
@@ -71,6 +81,14 @@ test('password reset helpers return Chinese validation and operational copy', ()
   )
   assert.equal(
     resetEmailErrorMessage({ statusCode: 429 }, 'zh-CN'),
-    '重置请求过于频繁，请稍后再试。',
+    '重置请求过于频繁。请等待 30 秒后再试。',
+  )
+  assert.equal(
+    resetCodeErrorMessage({ statusCode: 429 }, 'zh-CN'),
+    '验证尝试过于频繁。请等待 30 秒后再试。',
+  )
+  assert.equal(
+    resetPasswordErrorMessage({ statusCode: 429 }, 'zh-CN'),
+    '密码重置尝试过于频繁。请等待 30 秒后再试。',
   )
 })

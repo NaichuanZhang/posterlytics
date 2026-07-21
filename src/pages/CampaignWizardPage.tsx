@@ -34,6 +34,7 @@ import {
   retryPosterGeneration,
 } from '../lib/generationApi'
 import {
+  AMAZON_SOURCE_HOSTS,
   classifyProductSourceUrl,
   getSourceUseCaseSwitchTarget,
   isAmazonSourceUrl,
@@ -52,6 +53,8 @@ import {
 } from '../lib/useCases'
 
 type Phase = 'form' | 'uploading' | 'started' | 'error'
+
+const AMAZON_SOURCE_HOST_LIST = AMAZON_SOURCE_HOSTS.join(', ')
 
 export function CampaignWizardPage() {
   const { locale, t } = useI18n()
@@ -170,7 +173,11 @@ export function CampaignWizardPage() {
         .select('id')
         .single()
       if (createError || !data) {
-        throw new Error(createError?.message ?? t('Could not create campaign'))
+        console.error('Campaign creation failed', {
+          error: createError,
+          hasData: Boolean(data),
+        })
+        throw new Error(t('Could not create campaign. Check your connection and try again.'))
       }
       campaignId = (data as { id: string }).id
       setDraftId(campaignId)
@@ -608,10 +615,14 @@ export function CampaignWizardPage() {
                         </strong>
                         <span>
                           {invalidAmazonSource
-                            ? t('Use a complete HTTP or HTTPS URL on an exact supported Amazon host.')
+                            ? t('Use a complete HTTP or HTTPS URL on one of these hosts: {hosts}.', {
+                              hosts: AMAZON_SOURCE_HOST_LIST,
+                            })
                             : mismatchTarget === 'amazon_listing'
                               ? t('Amazon sources use seller-provided copy and images instead of website capture.')
-                              : t('Amazon listing accepts only the exact Amazon hosts supported by Posterlytics.')}
+                              : t('Use a complete HTTP or HTTPS URL on one of these hosts: {hosts}.', {
+                                hosts: AMAZON_SOURCE_HOST_LIST,
+                              })}
                         </span>
                       </span>
                       {mismatchTarget && (
@@ -685,8 +696,11 @@ export function CampaignWizardPage() {
 
             {error && (
               <InlineNotice tone="error">
-                <strong>{t('Campaign draft saved.')}</strong>
-                <span>{error} {t('Correct the issue and retry this draft.')}</span>
+                {draftId && <strong>{t('Campaign draft saved.')}</strong>}
+                <span>
+                  {error}
+                  {draftId && <> {t('Correct the issue and retry this draft.')}</>}
+                </span>
               </InlineNotice>
             )}
 

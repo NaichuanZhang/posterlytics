@@ -50,6 +50,8 @@ try {
   await testAuthenticatedNotFound(browser)
   await testSignupMode(browser)
   await testPasswordRecovery(browser)
+  await testSignInErrorRecovery(browser)
+  await testCampaignCreationFailure(browser)
   await testPublicResponsiveAccessibility(browser)
   await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
@@ -218,6 +220,99 @@ async function testPasswordRecovery(browserInstance) {
   assert.equal(
     await page.getByLabel('Email').inputValue(),
     'locked-out@posterlytics.test',
+  )
+  assert.deepEqual(pageErrors, [])
+
+  await context.close()
+}
+
+async function testSignInErrorRecovery(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+  })
+  const authState = {
+    authenticated: false,
+    signInFailure: 'credentials',
+  }
+  await installBackendMock(context, authState)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/signin`)
+  await page.getByLabel('Email').fill('locked-out@posterlytics.test')
+  await page.getByLabel('Password').fill('wrong-password')
+  await page.locator('.public-auth-submit').click()
+
+  const credentialNotice = page.getByRole('alert')
+  await credentialNotice.getByText('Invalid email or password.', { exact: true }).waitFor()
+  await credentialNotice.getByRole('button', { name: 'Forgot password?' }).click()
+  await page.getByRole('heading', { name: 'Reset your password' }).waitFor()
+  assert.equal(
+    await page.getByLabel('Email').inputValue(),
+    'locked-out@posterlytics.test',
+  )
+
+  await page.getByRole('button', { name: 'Back to sign in' }).click()
+  authState.signInFailure = 'network'
+  await page.getByLabel('Password').fill('still-wrong')
+  await page.locator('.public-auth-submit').click()
+  await page.getByText(
+    'Posterlytics could not connect. Check your internet connection and try again.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await page.getByText('Network request failed: Failed to fetch', {
+      exact: true,
+    }).count(),
+    0,
+  )
+  assert.equal(await page.locator('.public-auth-submit').isEnabled(), true)
+  assert.deepEqual(pageErrors, [])
+
+  await context.close()
+}
+
+async function testCampaignCreationFailure(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, {
+    authenticated: true,
+    campaignCreateFailure: true,
+  })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/campaigns/new`)
+  await page.getByRole('button', { name: /Website product/ }).click()
+  await page.getByLabel('Website URL').fill('https://example.test/product')
+  await page.getByLabel('Product name').fill('Failed campaign')
+  await page.getByLabel('Destination URL').fill('https://example.test/buy')
+  await page.getByRole('button', { name: 'Generate poster' }).click()
+
+  await page.getByText(
+    'Could not create campaign. Check your connection and try again.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await page.getByText('Campaign draft saved.', { exact: true }).count(),
+    0,
+  )
+  assert.equal(
+    await page.getByText('Backend campaign insert failed', {
+      exact: true,
+    }).count(),
+    0,
+  )
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
+    true,
   )
   assert.deepEqual(pageErrors, [])
 
@@ -497,6 +592,15 @@ async function installBackendMock(context, authState) {
     }
 
     if (path === '/api/auth/sessions' && request.method() === 'POST') {
+      if (authState.signInFailure === 'credentials') {
+        return json(route, {
+          error: 'AUTH_INVALID_CREDENTIALS',
+          message: 'Invalid credentials',
+        }, 401)
+      }
+      if (authState.signInFailure === 'network') {
+        return route.abort('internetdisconnected')
+      }
       authState.authenticated = true
       return json(route, {
         accessToken: 'marketing-ui-access-token',
@@ -554,6 +658,17 @@ async function installBackendMock(context, authState) {
     }
 
     if (path === '/api/database/records/campaigns') {
+      if (
+        request.method() === 'POST'
+        && authState.campaignCreateFailure
+      ) {
+        return json(route, {
+          code: 'PGRST000',
+          details: null,
+          hint: null,
+          message: 'Backend campaign insert failed',
+        }, 503)
+      }
       return json(route, [fixtures.campaign])
     }
 
@@ -948,9 +1063,9 @@ async function assertSamplePosterGeometry(page, label) {
   assert.deepEqual(issues, [], `${label} sample poster geometry: ${issues.join('; ')}`)
 }
 
-async function json(route, value) {
+async function json(route, value, status = 200) {
   await route.fulfill({
-    status: 200,
+    status,
     contentType: 'application/json',
     headers: {
       'access-control-allow-origin': BASE_URL,

@@ -253,7 +253,9 @@ function GenerationStatus({
         <AlertCircle size={17} aria-hidden="true" />
         <div>
           <strong>{t('Generation failed')}</strong>
-          <span>{t('The generation did not complete.')}</span>
+          <span>
+            {t('The generation did not complete. Retry this attempt from Incomplete attempts, or start a new version.')}
+          </span>
         </div>
       </div>
     )
