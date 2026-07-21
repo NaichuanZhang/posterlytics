@@ -17,6 +17,16 @@ interface HarnessState {
   generation: Record<string, unknown>
   parent: Record<string, unknown> | null
   traces: Record<PipelineStage, HarnessTrace>
+  captureServiceResponse: {
+    status: number
+    body: Record<string, unknown>
+  } | null
+  captureRequests: Array<Record<string, unknown>>
+  captureLogs: string[]
+  storageUploads: string[]
+  storageRemovals: string[]
+  sourceHtmlOverride: string | null
+  imageUrls: Set<string>
 }
 
 export interface PipelinePromptGoldens {
@@ -43,6 +53,7 @@ const USER_ID = 'user-fixture'
 const CAMPAIGN_ID = 'campaign-fixture'
 const GENERATION_ID = 'generation-fixture'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const CAPTURE_SERVICE_URL = 'https://capture.fixture'
 const SOCIAL_REFERENCE_URL = 'https://assets.example/social-reference.png'
 
 const PRODUCT_LAYOUT = {
@@ -228,6 +239,115 @@ export async function captureAnalyzeSourceMode(
   return artifact?.metadata?.source_mode
 }
 
+export async function runAnalyzeEagerCaptureHarness(
+  scenario: 'reuse' | 'stale' | 'no-preview',
+): Promise<{
+  status: number
+  captureRequests: Array<Record<string, unknown>>
+  captureLogs: string[]
+  storageUploads: string[]
+  generation: Record<string, unknown>
+  traceMetadata: Record<string, unknown>
+}> {
+  const productUrl = 'https://example.com/products/northstar'
+  const state = createState('website_product', productUrl, 'product')
+  const captureId = '10000000-0000-4000-8000-000000000001'
+  const boardKey = `style-board/${CAMPAIGN_ID}/eager/${captureId}.jpg`
+  const boardUrl = `https://assets.example/${boardKey}`
+  const sourceBrandAssets = {
+    logo_url: 'https://source.example/eager-logo.png',
+    images: [{ url: 'https://source.example/eager-product.jpg' }],
+    primary_image_url: 'https://source.example/eager-product.jpg',
+  }
+  const tokens = captureDesignTokens()
+
+  state.sourceHtmlOverride = `<!doctype html>
+    <html>
+      <head>
+        <meta property="og:logo" content="https://source.example/fresh-logo.png">
+        <meta property="og:image" content="https://source.example/fresh-product.jpg">
+      </head>
+      <body>Northstar turns operational data into decisions without delay.</body>
+    </html>`
+  for (const url of [
+    boardUrl,
+    'https://source.example/eager-logo.png',
+    'https://source.example/eager-product.jpg',
+    'https://source.example/fresh-product.jpg',
+  ]) {
+    state.imageUrls.add(url)
+  }
+  state.captureServiceResponse = scenario === 'stale'
+    ? {
+        status: 503,
+        body: {
+          error: {
+            code: 'capture_failed',
+            message: 'fixture capture failed',
+            retryable: true,
+          },
+        },
+      }
+    : {
+        status: 200,
+        body: {
+          tokens,
+          screenshot_b64: 'YWJj',
+        },
+      }
+
+  if (scenario !== 'no-preview') {
+    const capturedAt = new Date(
+      Date.now() - (scenario === 'stale' ? 31 * 60 * 1000 : 60 * 1000),
+    ).toISOString()
+    state.campaign = {
+      ...state.campaign,
+      design_tokens: structuredClone(tokens),
+      brand_assets: structuredClone(sourceBrandAssets),
+      screenshot_url: boardUrl,
+      screenshot_key: boardKey,
+      eager_capture_url: productUrl,
+      eager_capture_color_scheme: 'light',
+      eager_captured_at: capturedAt,
+    }
+    state.generation = {
+      ...state.generation,
+      parent_generation_id: null,
+      design_tokens: structuredClone(tokens),
+      brand_assets: structuredClone(sourceBrandAssets),
+      screenshot_url: boardUrl,
+      screenshot_key: boardKey,
+    }
+  }
+
+  const response = await withHarnessGlobals(
+    state,
+    productAnalyzeResponse(),
+    () => runAnalyzeStage({
+      client: createHarnessClient(state) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      colorScheme: 'light',
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+  const artifact = (state.traces.analyze.artifacts as Array<{
+    kind?: unknown
+    metadata?: Record<string, unknown>
+  }>).find((candidate) => candidate.kind === 'analysis')
+
+  return {
+    status: response.status,
+    captureRequests: structuredClone(state.captureRequests),
+    captureLogs: [...state.captureLogs],
+    storageUploads: [...state.storageUploads],
+    generation: structuredClone(state.generation),
+    traceMetadata: structuredClone(artifact?.metadata ?? {}),
+  }
+}
+
 async function captureAnalyzePrompt(
   useCase: UseCaseId,
   productUrl: string | null,
@@ -345,6 +465,9 @@ function createState(
     scenario,
     use_case: useCase,
     platform_hint: socialCover ? 'Instagram' : null,
+    eager_capture_url: null,
+    eager_capture_color_scheme: null,
+    eager_captured_at: null,
   }
   const generation = {
     id: GENERATION_ID,
@@ -484,6 +607,13 @@ function createState(
       designer: trace(),
       hero: trace(),
     },
+    captureServiceResponse: null,
+    captureRequests: [],
+    captureLogs: [],
+    storageUploads: [],
+    storageRemovals: [],
+    sourceHtmlOverride: null,
+    imageUrls: new Set(),
   }
 }
 
@@ -508,13 +638,17 @@ function createHarnessClient(state: HarnessState) {
     storage: {
       from() {
         return {
-          async remove() {
+          async remove(key: string) {
+            state.storageRemovals.push(key)
             return { data: null, error: null }
           },
           async upload(key: string) {
+            state.storageUploads.push(key)
+            const url = `https://assets.example/${key}`
+            state.imageUrls.add(url)
             return {
               data: {
-                url: 'https://assets.example/poster.png',
+                url,
                 key,
               },
               error: null,
@@ -614,18 +748,36 @@ async function withHarnessGlobals<T>(
 ): Promise<T> {
   const originalFetch = globalThis.fetch
   const originalWarn = console.warn
+  const originalInfo = console.info
   const originalDeno = (globalThis as Record<string, unknown>).Deno
   ;(globalThis as Record<string, unknown>).Deno = {
     env: {
       get(key: string) {
         if (key === 'OPENROUTER_API_KEY') return 'fixture-openrouter-key'
+        if (state.captureServiceResponse && key === 'CAPTURE_SERVICE_URL') {
+          return CAPTURE_SERVICE_URL
+        }
+        if (state.captureServiceResponse && key === 'CAPTURE_TOKEN') {
+          return 'fixture-capture-token'
+        }
         return undefined
       },
     },
   }
   console.warn = () => {}
+  console.info = (...values: unknown[]) => {
+    state.captureLogs.push(values.map(String).join(' '))
+  }
   globalThis.fetch = async (input, init) => {
     const url = String(input)
+    if (url === `${CAPTURE_SERVICE_URL}/capture`) {
+      state.captureRequests.push(
+        JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      )
+      const fixture = state.captureServiceResponse
+      if (!fixture) throw new Error('Capture service was not configured.')
+      return Response.json(fixture.body, { status: fixture.status })
+    }
     if (url === OPENROUTER_URL) {
       const request = JSON.parse(String(init?.body ?? '{}')) as {
         modalities?: unknown
@@ -660,11 +812,27 @@ async function withHarnessGlobals<T>(
         },
       )
     }
+    if (url === 'https://source.example/fresh-logo.png') {
+      return new Response(null, { status: 404 })
+    }
+    if (state.imageUrls.has(url)) {
+      return new Response(
+        Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        },
+      )
+    }
     if (url === state.campaign.product_url) {
-      return new Response(sourceHtml(String(state.campaign.scenario)), {
+      return new Response(
+        state.sourceHtmlOverride
+          ?? sourceHtml(String(state.campaign.scenario)),
+        {
         status: 200,
         headers: { 'Content-Type': 'text/html' },
-      })
+        },
+      )
     }
     throw new Error(`Unexpected fixture fetch: ${url}`)
   }
@@ -674,6 +842,7 @@ async function withHarnessGlobals<T>(
   } finally {
     globalThis.fetch = originalFetch
     console.warn = originalWarn
+    console.info = originalInfo
     if (originalDeno === undefined) {
       delete (globalThis as Record<string, unknown>).Deno
     } else {
@@ -751,6 +920,34 @@ function productAnalyzeResponse(): Record<string, unknown> {
     },
     brand_essence: 'A precise analytics brand with deep blue geometry and coral accents.',
     qr_label: 'Start now',
+  }
+}
+
+function captureDesignTokens() {
+  return {
+    typography: {
+      headingFamily: 'Space Grotesk',
+      bodyFamily: 'Inter',
+      scale: [16, 24, 48],
+      weights: [400, 700],
+    },
+    colors: {
+      bg: '#f7f4ed',
+      text: '#152238',
+      primary: '#235789',
+      accent: '#f45b69',
+      palette: ['#235789', '#f45b69'],
+      visualPalette: [
+        { color: '#f7f4ed', proportion: 0.68 },
+        { color: '#235789', proportion: 0.2 },
+      ],
+      theme: 'light',
+    },
+    radii: [4, 8],
+    shadows: [],
+    spacing: [8, 16, 24],
+    button: null,
+    fontLinks: [],
   }
 }
 

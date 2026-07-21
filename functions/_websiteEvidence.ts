@@ -7,6 +7,7 @@ import {
   resolveInheritedStyleBoard,
   type ProductSourceMode,
 } from './_sourceAcquisition.ts';
+import type { EagerSourceAssets } from './_eagerCapture.ts';
 
 function abs(url: string, base: string): string | null {
   try {
@@ -76,6 +77,22 @@ export function extractAssets(htmlText: string, base: string): {
     /<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i.exec(htmlText)?.[1] || null;
 
   return { logo: logoCandidates[0] ?? null, logoCandidates, images, themeColor };
+}
+
+export function mergeEagerSourceAssets(
+  extracted: ReturnType<typeof extractAssets>,
+  eager: EagerSourceAssets,
+): ReturnType<typeof extractAssets> {
+  const logoCandidates = dedupeUrls([
+    ...extracted.logoCandidates,
+    ...eager.logoCandidates,
+  ]);
+  return {
+    ...extracted,
+    logo: logoCandidates[0] ?? null,
+    logoCandidates,
+    images: dedupeUrls([...extracted.images, ...eager.images]),
+  };
 }
 
 // Mine the most-used VIVID (non-grayscale, mid-luminance) hex colors from the raw
@@ -253,4 +270,8 @@ export async function discardUploadedAnalysisAssets(
     ...brandAssets.images.map((image) => image.key),
   ].filter((key): key is string => !!key);
   await Promise.allSettled(keys.map((key) => client.storage.from('assets').remove(key)));
+}
+
+function dedupeUrls(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }

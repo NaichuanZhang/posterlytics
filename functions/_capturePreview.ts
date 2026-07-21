@@ -50,6 +50,10 @@ export interface ValidatedCapturePreviewRequest
 
 export interface CapturePreview {
   sourceUrl: string;
+  captureId: string | null;
+  capturedAt: string | null;
+  colorScheme: CaptureColorScheme;
+  designTokens: DesignTokens | null;
   styleBoardDataUrl: string | null;
   logoUrl: string | null;
   imageUrls: string[];
@@ -165,8 +169,14 @@ export function validateCapturePreviewRequest(
 export function mapCapturePreview(
   sourceUrl: string,
   acquisition: ProductSourceAcquisition,
+  metadata: {
+    captureId: string;
+    capturedAt: string;
+    colorScheme: CaptureColorScheme;
+  },
 ): CapturePreviewResponse {
   const capture = acquisition.capture;
+  const captureSucceeded = capture?.error === null;
   const assets = extractAssets(acquisition.html, sourceUrl);
   const logoUrl = firstSourceImageUrl(assets.logoCandidates);
   const imageUrls = uniqueSourceImageUrls(assets.images)
@@ -185,6 +195,10 @@ export function mapCapturePreview(
   return {
     preview: {
       sourceUrl,
+      captureId: captureSucceeded ? metadata.captureId : null,
+      capturedAt: captureSucceeded ? metadata.capturedAt : null,
+      colorScheme: metadata.colorScheme,
+      designTokens: captureSucceeded ? capture.tokens : null,
       styleBoardDataUrl: inlineStyleBoard(capture?.styleBoardDataUrl),
       logoUrl,
       imageUrls,

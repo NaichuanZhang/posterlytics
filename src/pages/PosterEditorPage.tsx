@@ -54,6 +54,7 @@ import {
   type PosterSizeSlug,
 } from '../lib/posterSize'
 import { normalizePlatformHint } from '../lib/platformHints'
+import { getDeviceColorScheme } from '../lib/colorScheme'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -308,6 +309,7 @@ export function PosterEditorPage() {
 
     setBusy('generate')
     setGenerationError(null)
+    const colorScheme = getDeviceColorScheme()
 
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
 
@@ -328,6 +330,7 @@ export function PosterEditorPage() {
         referenceImages: uploaded,
         refreshWebsite: effectiveRefreshWebsite,
         assetSelectionMode: preferences.assetSelectionMode,
+        colorScheme,
         locale,
       })
       deliberateSelectionRef.current = false

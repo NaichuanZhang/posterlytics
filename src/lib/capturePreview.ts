@@ -1,4 +1,6 @@
 import { FUNCTIONS_HOST, insforge } from './insforge'
+import type { DeviceColorScheme } from './colorScheme'
+import type { DesignTokens } from './types'
 
 export interface CapturePreviewError {
   code: string
@@ -8,6 +10,10 @@ export interface CapturePreviewError {
 
 export interface CapturePreview {
   sourceUrl: string
+  captureId: string | null
+  capturedAt: string | null
+  colorScheme: DeviceColorScheme
+  designTokens: DesignTokens | null
   styleBoardDataUrl: string | null
   logoUrl: string | null
   imageUrls: string[]
@@ -85,13 +91,20 @@ function normalizeCapturePreviewResponse(value: unknown): CapturePreviewResponse
     throw invalidResponseError()
   }
   const preview = record.preview as Record<string, unknown>
-  if (typeof preview.sourceUrl !== 'string') {
+  if (
+    typeof preview.sourceUrl !== 'string'
+    || (preview.colorScheme !== 'light' && preview.colorScheme !== 'dark')
+  ) {
     throw invalidResponseError()
   }
 
   return {
     preview: {
       sourceUrl: preview.sourceUrl,
+      captureId: optionalString(preview.captureId),
+      capturedAt: optionalString(preview.capturedAt),
+      colorScheme: preview.colorScheme,
+      designTokens: optionalRecord(preview.designTokens) as DesignTokens | null,
       styleBoardDataUrl: optionalString(preview.styleBoardDataUrl),
       logoUrl: optionalString(preview.logoUrl),
       imageUrls: stringArray(preview.imageUrls),
@@ -127,6 +140,12 @@ function normalizeError(value: unknown): CapturePreviewError | null {
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function stringArray(value: unknown): string[] {

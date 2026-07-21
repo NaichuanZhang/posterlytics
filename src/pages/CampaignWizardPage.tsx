@@ -47,6 +47,12 @@ import {
 } from '../lib/posterSize'
 import { normalizePlatformHint } from '../lib/platformHints'
 import {
+  EagerCaptureSyncError,
+  syncEagerCaptureEvidence,
+} from '../lib/eagerCapturePersistence'
+import { getDeviceColorScheme } from '../lib/colorScheme'
+import type { CapturePreview } from '../lib/capturePreview'
+import {
   CREATABLE_USE_CASES,
   getUseCase,
   type CreatableUseCaseId,
@@ -69,6 +75,7 @@ export function CampaignWizardPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [selectedUseCaseId, setSelectedUseCaseId] = useState<CreatableUseCaseId | null>(null)
   const [sourceMismatchAttempted, setSourceMismatchAttempted] = useState(false)
+  const [eagerCapturePreview, setEagerCapturePreview] = useState<CapturePreview | null>(null)
 
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
@@ -108,6 +115,7 @@ export function CampaignWizardPage() {
     const nextUseCase = getUseCase(useCaseId)
     setSelectedUseCaseId(useCaseId)
     setSourceMismatchAttempted(false)
+    setEagerCapturePreview(null)
     setPosterFormat((current) =>
       nextUseCase.allowedPosterFormats.includes(current)
         ? current
@@ -194,7 +202,7 @@ export function CampaignWizardPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    if (!user || !selectedUseCase || !inputFields) return
+    if (!user || !selectedUseCaseId || !selectedUseCase || !inputFields) return
     if (mismatchTarget || invalidAmazonSource) {
       setSourceMismatchAttempted(true)
       productUrlInputRef.current?.focus()
@@ -208,6 +216,10 @@ export function CampaignWizardPage() {
       setError(t('Remove any image URL that could not load, or wait for its preview to finish.'))
       return
     }
+    const submittedColorScheme = getDeviceColorScheme()
+    const submittedProductUrl = productUrl
+    const submittedUseCase = selectedUseCaseId
+    const submittedEagerCapture = eagerCapturePreview
     setError(null)
     setPhase('uploading')
 
@@ -218,6 +230,20 @@ export function CampaignWizardPage() {
       setError(cause instanceof Error ? cause.message : String(cause))
       setPhase('error')
       return
+    }
+
+    try {
+      await syncEagerCaptureEvidence({
+        campaignId,
+        productUrl: submittedProductUrl,
+        useCase: submittedUseCase,
+        colorScheme: submittedColorScheme,
+        preview: submittedEagerCapture,
+      })
+    } catch (cause) {
+      console.warn('Eager capture evidence was not persisted; generation will recapture.', {
+        code: cause instanceof EagerCaptureSyncError ? cause.code : 'unknown',
+      })
     }
 
     let uploaded = [] as Awaited<ReturnType<typeof materializeReferenceImages>>
@@ -234,6 +260,7 @@ export function CampaignWizardPage() {
         referenceImages: uploaded,
         refreshWebsite: true,
         assetSelectionMode: preferences.assetSelectionMode,
+        colorScheme: submittedColorScheme,
         locale,
       })
       setJobId(result.job.id)
@@ -541,6 +568,7 @@ export function CampaignWizardPage() {
                 onClick={() => {
                   setSelectedUseCaseId(null)
                   setSourceMismatchAttempted(false)
+                  setEagerCapturePreview(null)
                 }}
               >
                 <ArrowRightLeft size={14} aria-hidden="true" />
@@ -595,6 +623,7 @@ export function CampaignWizardPage() {
                       onChange={(event) => {
                         setProductUrl(event.target.value)
                         setSourceMismatchAttempted(false)
+                        setEagerCapturePreview(null)
                       }}
                       onBlur={prefillAmazonDestination}
                     />
@@ -645,6 +674,7 @@ export function CampaignWizardPage() {
                   <WebsiteCapturePreview
                     url={productUrl}
                     disabled={Boolean(mismatchTarget)}
+                    onPreviewChange={setEagerCapturePreview}
                   />
                 )}
                 {inputFields.productName !== 'hidden' && (

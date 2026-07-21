@@ -26,9 +26,11 @@ const CAPTURE_COOLDOWN_MS = 5_000
 export function WebsiteCapturePreview({
   url,
   disabled = false,
+  onPreviewChange,
 }: {
   url: string
   disabled?: boolean
+  onPreviewChange?: (preview: CapturePreview | null) => void
 }) {
   const { t } = useI18n()
   const [status, setStatus] = useState<CaptureStatus>('idle')
@@ -53,7 +55,8 @@ export function WebsiteCapturePreview({
     setStatus('idle')
     setPreview(null)
     setError(null)
-  }, [url])
+    onPreviewChange?.(null)
+  }, [url, onPreviewChange])
 
   useEffect(() => () => {
     requestToken.current += 1
@@ -84,6 +87,7 @@ export function WebsiteCapturePreview({
     setStatus('capturing')
     setPreview(null)
     setError(null)
+    onPreviewChange?.(null)
 
     try {
       const response = await captureWebsitePreview({
@@ -100,6 +104,7 @@ export function WebsiteCapturePreview({
       setPreview(response.preview)
       setError(response.error)
       setStatus(response.error ? 'error' : 'ready')
+      onPreviewChange?.(response.error ? null : response.preview)
       startCooldown()
     } catch (cause) {
       if (
@@ -111,6 +116,7 @@ export function WebsiteCapturePreview({
       }
       setError(toCapturePreviewError(cause))
       setStatus('error')
+      onPreviewChange?.(null)
       startCooldown()
     } finally {
       if (token === requestToken.current) {

@@ -5,6 +5,7 @@ import {
   discardUploadedAnalysisAssets,
   extractAssets,
   extractColors,
+  mergeEagerSourceAssets,
   rehost,
   rehostBrandAssets,
   uploadStyleBoard,
@@ -84,6 +85,38 @@ test('HTML color fallback deduplicates colors and orders them by frequency', () 
 
   assert.deepEqual(extractColors(html), ['#ff5500', '#0066cc', '#22aa77'])
   assert.deepEqual(extractColors(''), [])
+})
+
+test('eager source assets extend fresh HTML evidence without changing fresh priority', () => {
+  const extracted = extractAssets(`
+    <meta property="og:logo" content="https://source.example/fresh-logo.png">
+    <meta property="og:image" content="https://source.example/fresh-product.jpg">
+  `, 'https://source.example/product')
+
+  assert.deepEqual(
+    mergeEagerSourceAssets(extracted, {
+      logoCandidates: [
+        'https://source.example/eager-logo.png',
+        'https://source.example/fresh-logo.png',
+      ],
+      images: [
+        'https://source.example/eager-product.jpg',
+        'https://source.example/fresh-product.jpg',
+      ],
+    }),
+    {
+      ...extracted,
+      logo: 'https://source.example/fresh-logo.png',
+      logoCandidates: [
+        'https://source.example/fresh-logo.png',
+        'https://source.example/eager-logo.png',
+      ],
+      images: [
+        'https://source.example/fresh-product.jpg',
+        'https://source.example/eager-product.jpg',
+      ],
+    },
+  )
 })
 
 test('brand rehosting skips an SVG logo and preserves generation-scoped key order', async () => {

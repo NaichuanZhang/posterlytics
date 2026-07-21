@@ -10,6 +10,8 @@ const BASE_URL = `http://${HOST}:${PORT}`
 const OUTPUT_DIR = 'test-results/asset-review'
 const EDITOR_MODE_DESCRIPTION = 'Review, include, exclude, and reorder images before generation.'
 const YOLO_MODE_DESCRIPTION = 'Let AI select and order images automatically, with no manual review step.'
+const EAGER_STYLE_BOARD_DATA_URL =
+  'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAAIAAgDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAVAQEBAAAAAAAAAAAAAAAAAAAGB//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/ACUVpu//2Q=='
 
 await mkdir(OUTPUT_DIR, { recursive: true })
 
@@ -50,6 +52,7 @@ try {
   await testFailedGenerationDetails(browser)
   await testCampaignWizardUseCases(browser)
   await testWebsiteCapturePreview(browser)
+  await testSinglePaidEagerCapture(browser)
   await testCampaignWizardDraftSwitch(browser)
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
@@ -694,6 +697,146 @@ async function testWebsiteCapturePreview(browserInstance) {
   await mobileContext.close()
 }
 
+async function testSinglePaidEagerCapture(browserInstance) {
+  const successContext = await browserInstance.newContext({
+    colorScheme: 'dark',
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const successState = createState()
+  await installBackendMock(successContext, successState)
+  const successPage = await successContext.newPage()
+  const successErrors = []
+  successPage.on('pageerror', (error) => successErrors.push(error))
+
+  await openWizardForm(successPage, 'Website product')
+  await fillWizardRequiredFields(successPage, {
+    sourceUrl: 'https://example.com/product',
+    productName: 'Signal Studio',
+    destinationUrl: 'https://example.com/start',
+  })
+  await successPage.getByRole('button', { name: 'Capture website' }).click()
+  await successPage.locator('.website-evidence-panel').waitFor()
+  await submitWizardAndWaitForEnqueue(successPage, successState, 1)
+
+  assert.equal(successState.capturePreviewRequests[0].body.color_scheme, 'dark')
+  assert.equal(successState.storageUploads.length, 1)
+  assert.match(
+    successState.storageUploads[0].key,
+    /^style-board\/campaign-asset\/eager\/[0-9a-f-]+\.jpg$/,
+  )
+  const adopted = successState.campaignWrites.find((write) =>
+    write.method === 'PATCH' && write.body.eager_capture_url
+  )
+  assert.ok(adopted)
+  assert.equal(adopted.body.eager_capture_url, 'https://example.com/product')
+  assert.equal(adopted.body.eager_capture_color_scheme, 'dark')
+  assert.equal(adopted.body.screenshot_key, successState.storageUploads[0].key)
+  assert.equal(successState.enqueueRequests[0].p_color_scheme, 'dark')
+  assertOperationOrder(successState, [
+    'capture-preview',
+    'storage-upload',
+    'campaign-eager-update',
+    'enqueue',
+  ])
+  assert.deepEqual(successErrors, [])
+  await successContext.close()
+
+  const invalidationContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const invalidationState = createState()
+  await installBackendMock(invalidationContext, invalidationState)
+  const invalidationPage = await invalidationContext.newPage()
+  const invalidationErrors = []
+  invalidationPage.on('pageerror', (error) => invalidationErrors.push(error))
+
+  await openWizardForm(invalidationPage, 'Website product')
+  await fillWizardRequiredFields(invalidationPage, {
+    sourceUrl: 'https://old.example/product',
+    productName: 'Signal Studio',
+    destinationUrl: 'https://example.com/start',
+  })
+  await invalidationPage.getByRole('button', { name: 'Capture website' }).click()
+  await invalidationPage.locator('.website-evidence-panel').waitFor()
+  await invalidationPage.locator('#product-url').fill('https://new.example/product')
+  await submitWizardAndWaitForEnqueue(
+    invalidationPage,
+    invalidationState,
+    1,
+  )
+
+  assert.deepEqual(invalidationState.storageUploads, [])
+  const cleared = invalidationState.campaignWrites.find((write) =>
+    write.method === 'PATCH'
+    && Object.hasOwn(write.body, 'eager_capture_url')
+  )
+  assert.ok(cleared)
+  assert.deepEqual(cleared.body, {
+    design_tokens: null,
+    brand_assets: null,
+    screenshot_url: null,
+    screenshot_key: null,
+    eager_capture_url: null,
+    eager_capture_color_scheme: null,
+    eager_captured_at: null,
+  })
+  assertOperationOrder(invalidationState, [
+    'capture-preview',
+    'campaign-eager-clear',
+    'enqueue',
+  ])
+  assert.deepEqual(invalidationErrors, [])
+  await invalidationContext.close()
+
+  await testEagerAdoptionFailure(browserInstance, 'upload')
+  await testEagerAdoptionFailure(browserInstance, 'campaign-update')
+}
+
+async function testEagerAdoptionFailure(browserInstance, failure) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({
+    eagerCampaignUpdateFailuresRemaining: failure === 'campaign-update' ? 1 : 0,
+    storageUploadFailuresRemaining: failure === 'upload' ? 1 : 0,
+  })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await openWizardForm(page, 'Website product')
+  await fillWizardRequiredFields(page, {
+    sourceUrl: `https://${failure}.example/product`,
+    productName: 'Signal Studio',
+    destinationUrl: 'https://example.com/start',
+  })
+  await page.getByRole('button', { name: 'Capture website' }).click()
+  await page.locator('.website-evidence-panel').waitFor()
+  await submitWizardAndWaitForEnqueue(page, state, 1)
+
+  assert.equal(state.enqueueRequests.length, 1)
+  assert.equal(state.enqueueRequests[0].p_color_scheme, 'light')
+  assert.ok(
+    state.operationLog.findIndex((entry) => entry.type === 'enqueue')
+      > state.operationLog.findIndex((entry) =>
+        entry.type === (
+          failure === 'upload'
+            ? 'storage-upload-strategy'
+            : 'campaign-eager-update'
+        )
+      ),
+  )
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testCampaignWizardDraftSwitch(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
@@ -717,7 +860,7 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
   await page.getByText('Mock enqueue failed.', { exact: false }).waitFor()
   assert.deepEqual(
     state.campaignWrites.map((write) => write.method),
-    ['POST', 'PATCH'],
+    ['POST', 'PATCH', 'PATCH'],
   )
   assert.equal(state.campaignWrites[0].body[0].use_case, 'website_product')
 
@@ -731,13 +874,17 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
 
   assert.deepEqual(
     state.campaignWrites.map((write) => write.method),
-    ['POST', 'PATCH', 'PATCH'],
+    ['POST', 'PATCH', 'PATCH', 'PATCH', 'PATCH'],
   )
-  const correction = state.campaignWrites.at(-1)
+  const correction = state.campaignWrites.find((write) =>
+    write.method === 'PATCH' && write.body.product_url === amazonUrl
+  )
+  assert.ok(correction)
   assert.equal(correction.method, 'PATCH')
   assert.equal(correction.body.product_url, amazonUrl)
   assert.equal(correction.body.use_case, 'amazon_listing')
   assert.equal(correction.body.destination_url, amazonUrl)
+  assert.equal(state.campaignWrites.at(-1).body.eager_capture_url, null)
   assert.equal(state.enqueueModes.length, 1)
   assert.deepEqual(pageErrors, [])
   await context.close()
@@ -1411,6 +1558,21 @@ function rectanglesIntersect(a, b) {
     && a.bottom > b.y
 }
 
+function assertOperationOrder(state, expectedTypes) {
+  let previousIndex = -1
+  for (const type of expectedTypes) {
+    const index = state.operationLog.findIndex(
+      (entry, candidateIndex) =>
+        candidateIndex > previousIndex && entry.type === type,
+    )
+    assert.ok(
+      index > previousIndex,
+      `Missing ordered operation ${type}: ${JSON.stringify(state.operationLog)}`,
+    )
+    previousIndex = index
+  }
+}
+
 async function installBackendMock(context, state) {
   await context.addCookies([{
     name: 'insforge_csrf_token',
@@ -1450,10 +1612,14 @@ async function installBackendMock(context, state) {
       authorization: request.headers().authorization ?? null,
       body,
     })
+    state.operationLog.push({ type: 'capture-preview' })
     const queued = state.capturePreviewResponses.shift() ?? {
       body: capturePreviewFixture(
         body.url ?? 'https://example.com',
         `request-${state.capturePreviewRequests.length}`,
+        {
+          colorScheme: body.color_scheme === 'dark' ? 'dark' : 'light',
+        },
       ),
     }
     if (queued.delayMs) {
@@ -1466,8 +1632,10 @@ async function installBackendMock(context, state) {
     const request = route.request()
     const requestUrl = new URL(request.url())
     const path = requestUrl.pathname
-    const body = request.postData()
-      ? JSON.parse(request.postData())
+    const postData = request.postData()
+    const body = postData
+      && request.headers()['content-type']?.includes('application/json')
+      ? JSON.parse(postData)
       : {}
 
     if (path === '/api/auth/refresh') {
@@ -1520,6 +1688,7 @@ async function installBackendMock(context, state) {
     }
     if (path === '/api/database/rpc/enqueue_poster_generation') {
       state.enqueueRequests.push(body)
+      state.operationLog.push({ type: 'enqueue' })
       if (state.enqueueFailuresRemaining > 0) {
         state.enqueueFailuresRemaining -= 1
         return json(route, {
@@ -1548,15 +1717,61 @@ async function installBackendMock(context, state) {
         },
       })
     }
+    if (path === '/api/storage/buckets/assets/upload-strategy') {
+      state.storageUploadStrategies.push(body)
+      state.operationLog.push({ type: 'storage-upload-strategy' })
+      if (state.storageUploadFailuresRemaining > 0) {
+        state.storageUploadFailuresRemaining -= 1
+        return json(route, {
+          error: 'STORAGE_ERROR',
+          message: 'Mock storage upload failed.',
+          statusCode: 500,
+        }, 500)
+      }
+      return json(route, { method: 'direct' })
+    }
+    const storageObjectPrefix = '/api/storage/buckets/assets/objects/'
+    if (path.startsWith(storageObjectPrefix)) {
+      const key = decodeURIComponent(path.slice(storageObjectPrefix.length))
+      if (request.method() === 'DELETE') {
+        state.storageRemovals.push(key)
+        state.operationLog.push({ type: 'storage-remove', key })
+        return json(route, { key })
+      }
+      if (request.method() === 'PUT') {
+        state.storageUploads.push({ key })
+        state.operationLog.push({ type: 'storage-upload', key })
+        return json(route, {
+          key,
+          url: `${BASE_URL}${storageObjectPrefix}${encodeURIComponent(key)}`,
+        })
+      }
+    }
     if (path === '/api/database/records/campaigns') {
       const method = request.method()
       if (method === 'POST') {
         state.campaignWrites.push({ method, body })
+        state.operationLog.push({ type: 'campaign-create' })
         Object.assign(state.campaign, body[0])
         return json(route, { id: state.campaign.id })
       }
       if (method === 'PATCH') {
         state.campaignWrites.push({ method, body })
+        if (Object.hasOwn(body, 'eager_capture_url')) {
+          state.operationLog.push({
+            type: body.eager_capture_url
+              ? 'campaign-eager-update'
+              : 'campaign-eager-clear',
+          })
+          if (state.eagerCampaignUpdateFailuresRemaining > 0) {
+            state.eagerCampaignUpdateFailuresRemaining -= 1
+            return json(route, {
+              error: 'DATABASE_ERROR',
+              message: 'Mock eager campaign update failed.',
+              statusCode: 500,
+            }, 500)
+          }
+        }
         Object.assign(state.campaign, body)
         return json(route, [])
       }
@@ -1595,8 +1810,10 @@ function createState({
   selectedIds = ['asset-a', 'asset-b'],
   awaitingReviewActivity = false,
   editorReady = false,
+  eagerCampaignUpdateFailuresRemaining = 0,
   enqueueFailuresRemaining = 0,
   saveFailuresRemaining = 0,
+  storageUploadFailuresRemaining = 0,
 } = {}) {
   const now = new Date().toISOString()
   const user = { id: 'user-asset', email: 'editor@example.com' }
@@ -1723,10 +1940,16 @@ function createState({
     campaignWrites: [],
     capturePreviewRequests: [],
     capturePreviewResponses: [],
+    eagerCampaignUpdateFailuresRemaining,
     enqueueFailuresRemaining,
     enqueueModes: [],
     enqueueRequests: [],
     failedGenerations: [],
+    operationLog: [],
+    storageRemovals: [],
+    storageUploads: [],
+    storageUploadFailuresRemaining,
+    storageUploadStrategies: [],
     traceRequests: [],
     traces: [],
   }
@@ -1971,20 +2194,19 @@ function posterSvg() {
 function capturePreviewFixture(
   sourceUrl,
   marker,
-  { includeMissingImage = false } = {},
+  {
+    colorScheme = 'light',
+    includeMissingImage = false,
+  } = {},
 ) {
-  const styleBoard = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480">
-      <rect width="640" height="480" fill="#f2f3f0"/>
-      <rect x="32" y="32" width="576" height="120" fill="#174a58"/>
-      <circle cx="180" cy="310" r="90" fill="#e05b3f"/>
-      <text x="320" y="330" text-anchor="middle" font-size="28">${marker}</text>
-    </svg>
-  `.trim()
   return {
     preview: {
       sourceUrl,
-      styleBoardDataUrl: `data:image/svg+xml,${encodeURIComponent(styleBoard)}`,
+      captureId: '10000000-0000-4000-8000-000000000001',
+      capturedAt: new Date().toISOString(),
+      colorScheme,
+      designTokens: capturePreviewDesignTokens(),
+      styleBoardDataUrl: EAGER_STYLE_BOARD_DATA_URL,
       logoUrl: `${BASE_URL}/fixture/logo-${marker}.svg`,
       imageUrls: [
         `${BASE_URL}/fixture/product-${marker}.svg`,
@@ -2002,11 +2224,39 @@ function capturePreviewFixture(
 function emptyCapturePreview(sourceUrl) {
   return {
     sourceUrl,
+    captureId: null,
+    capturedAt: null,
+    colorScheme: 'light',
+    designTokens: null,
     styleBoardDataUrl: null,
     logoUrl: null,
     imageUrls: [],
     colors: [],
     fonts: [],
+  }
+}
+
+function capturePreviewDesignTokens() {
+  return {
+    typography: {
+      headingFamily: 'Space Grotesk',
+      bodyFamily: 'Archivo',
+      scale: [16, 24, 48],
+      weights: [400, 700],
+    },
+    colors: {
+      bg: '#f2f3f0',
+      text: '#17222b',
+      primary: '#174a58',
+      accent: '#e05b3f',
+      palette: ['#174a58', '#e05b3f', '#b9dfce'],
+      theme: 'light',
+    },
+    radii: [4, 8],
+    shadows: [],
+    spacing: [8, 16, 24],
+    button: null,
+    fontLinks: [],
   }
 }
 

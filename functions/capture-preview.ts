@@ -74,5 +74,9 @@ export default async function (req: Request): Promise<Response> {
 
   // Capture-service failures, including its private-network rejection, are
   // preview degradation rather than request validation failures.
-  return jsonResponse(mapCapturePreview(validated.value.url, acquisition));
+  return jsonResponse(mapCapturePreview(validated.value.url, acquisition, {
+    captureId: crypto.randomUUID(),
+    capturedAt: new Date().toISOString(),
+    colorScheme: validated.value.colorScheme,
+  }));
 }

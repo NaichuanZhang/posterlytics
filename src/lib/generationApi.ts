@@ -1,5 +1,8 @@
 import { insforge } from './insforge'
-import { getDeviceColorScheme } from './colorScheme'
+import {
+  getDeviceColorScheme,
+  type DeviceColorScheme,
+} from './colorScheme'
 import type { TranslationKey } from '../i18n/messages'
 import type {
   AssetSelectionMode,
@@ -39,6 +42,7 @@ export async function enqueuePosterGeneration(args: {
   referenceImages: ReferenceImage[]
   refreshWebsite: boolean
   assetSelectionMode: AssetSelectionMode
+  colorScheme: DeviceColorScheme
   locale?: SupportedLocale
 }): Promise<EnqueuedPosterGeneration> {
   const { data, error } = await insforge.database.rpc('enqueue_poster_generation', {
@@ -46,7 +50,7 @@ export async function enqueuePosterGeneration(args: {
     p_instruction: args.instruction,
     p_reference_images: args.referenceImages,
     p_refresh_website: args.refreshWebsite,
-    p_color_scheme: getDeviceColorScheme(),
+    p_color_scheme: args.colorScheme,
     p_asset_selection_mode: args.assetSelectionMode,
   })
   if (error) {
@@ -74,6 +78,7 @@ export async function createPosterGeneration(args: {
   referenceImages: ReferenceImage[]
   refreshWebsite: boolean
   assetSelectionMode?: AssetSelectionMode
+  colorScheme: DeviceColorScheme
 }): Promise<PosterGeneration> {
   return (await enqueuePosterGeneration({
     ...args,

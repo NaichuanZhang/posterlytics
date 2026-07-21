@@ -23,6 +23,9 @@ CREATE TABLE public.campaigns (
   design_tokens JSONB,
   screenshot_url TEXT,
   screenshot_key TEXT,
+  eager_capture_url TEXT,
+  eager_capture_color_scheme TEXT,
+  eager_captured_at TIMESTAMPTZ,
   poster_layout JSONB,
   design_status TEXT,
   scenario TEXT NOT NULL DEFAULT 'product',
@@ -732,6 +735,15 @@ GRANT UPDATE (
   reference_context,
   reference_images,
   poster_format
+) ON public.campaigns TO authenticated;
+GRANT UPDATE (
+  design_tokens,
+  brand_assets,
+  screenshot_url,
+  screenshot_key,
+  eager_capture_url,
+  eager_capture_color_scheme,
+  eager_captured_at
 ) ON public.campaigns TO authenticated;
 GRANT SELECT ON public.poster_generations TO authenticated;
 GRANT UPDATE (

@@ -2747,6 +2747,19 @@ export async function captureSite(
   const ctl = new AbortController();
   const timeout = setTimeout(() => ctl.abort(), 15_000);
   try {
+    let targetHost = 'invalid';
+    try {
+      targetHost = new URL(url).hostname.toLowerCase();
+    } catch {
+      // The capture service remains the authoritative URL-validation boundary.
+    }
+    console.info(JSON.stringify({
+      event: 'capture_site_request',
+      timestamp: new Date().toISOString(),
+      request_id: crypto.randomUUID(),
+      target_host: targetHost,
+      color_scheme: colorScheme,
+    }));
     const response = await fetch(`${serviceUrl.replace(/\/$/, '')}/capture`, {
       method: 'POST',
       signal: ctl.signal,

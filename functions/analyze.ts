@@ -31,12 +31,18 @@ import {
 } from './_shared.ts';
 import {
   acquireProductSource,
+  acquireProductSourceWithoutCapture,
+  resolveProductSourceMode,
   type ProductSourceMode,
 } from './_sourceAcquisition.ts';
+import {
+  evaluateEagerCaptureReuse,
+} from './_eagerCapture.ts';
 import {
   discardUploadedAnalysisAssets,
   extractAssets,
   extractColors,
+  mergeEagerSourceAssets,
   rehostBrandAssets,
   uploadStyleBoard,
 } from './_websiteEvidence.ts';
@@ -119,7 +125,7 @@ export async function runAnalyzeStage(
   // defense in depth in addition to owner RLS.
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario')
+    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario, use_case, design_tokens, brand_assets, screenshot_url, screenshot_key, eager_capture_url, eager_capture_color_scheme, eager_captured_at')
     .eq('id', campaignId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -127,7 +133,7 @@ export async function runAnalyzeStage(
 
   const { data: generation, error: generationError } = await client.database
     .from('poster_generations')
-    .select('id, campaign_id, status, generation_mode, instruction, reference_images, scenario, use_case, platform_hint, screenshot_url, screenshot_key')
+    .select('id, campaign_id, status, parent_generation_id, generation_mode, instruction, reference_images, scenario, use_case, platform_hint, brand_assets, design_tokens, screenshot_url, screenshot_key')
     .eq('id', generationId)
     .eq('campaign_id', campaign.id)
     .eq('user_id', userId)
@@ -215,6 +221,16 @@ export async function runAnalyzeStage(
   const platformHint = typeof (generation as Record<string, unknown>).platform_hint === 'string'
     ? String((generation as Record<string, unknown>).platform_hint).slice(0, 80).trim() || null
     : null;
+  const eagerCaptureDecision = evaluateEagerCaptureReuse({
+    campaign: campaign as Record<string, unknown> & Parameters<
+      typeof evaluateEagerCaptureReuse
+    >[0]['campaign'],
+    generation: generation as Record<string, unknown> & Parameters<
+      typeof evaluateEagerCaptureReuse
+    >[0]['generation'],
+    colorScheme,
+    productSourceMode: resolveProductSourceMode(productUrl, productRecipe),
+  });
 
   // 1. Acquire source evidence. Legacy events retain the strict Luma allowlist.
   // Amazon product pages intentionally use seller-provided references because
@@ -231,6 +247,18 @@ export async function runAnalyzeStage(
     } catch {
       scrapeHtml = '';
     }
+  } else if (eagerCaptureDecision.reused) {
+    const acquisition = await acquireProductSourceWithoutCapture(
+      productUrl,
+      productRecipe,
+    );
+    productSourceMode = acquisition.mode;
+    scrapeHtml = acquisition.html;
+    productCapture = {
+      tokens: eagerCaptureDecision.designTokens,
+      styleBoardDataUrl: null,
+      error: null,
+    };
   } else {
     const acquisition = await acquireProductSource(
       productUrl,
@@ -249,7 +277,13 @@ export async function runAnalyzeStage(
     scenario === 'event' ? extractEventDetails(scrapeHtml) : null;
 
   // 2. Extract real assets + meta from the HTML.
-  const assets = extractAssets(scrapeHtml, productUrl);
+  const extractedAssets = extractAssets(scrapeHtml, productUrl);
+  const assets = eagerCaptureDecision.reused
+    ? mergeEagerSourceAssets(
+        extractedAssets,
+        eagerCaptureDecision.sourceAssets,
+      )
+    : extractedAssets;
 
   // 2b. Programmatic style capture via the headless-browser service: real
   // computed fonts/colors/radii/shadows/spacing + a style board. Best-effort —
@@ -300,8 +334,16 @@ export async function runAnalyzeStage(
     client,
     capture?.styleBoardDataUrl,
     productSourceMode,
-    (generation as Record<string, unknown>).screenshot_url,
-    (generation as Record<string, unknown>).screenshot_key,
+    !eagerCaptureDecision.reused
+        && eagerCaptureDecision.candidatePresent
+        && (generation as Record<string, unknown>).parent_generation_id === null
+      ? null
+      : (generation as Record<string, unknown>).screenshot_url,
+    !eagerCaptureDecision.reused
+        && eagerCaptureDecision.candidatePresent
+        && (generation as Record<string, unknown>).parent_generation_id === null
+      ? null
+      : (generation as Record<string, unknown>).screenshot_key,
     campaign.id,
     generation.id,
   );
@@ -653,6 +695,12 @@ export async function runAnalyzeStage(
       scenario: 'product',
       source_mode: productSourceMode,
       used_fallback: usedFallback,
+      ...(eagerCaptureDecision.candidatePresent
+        ? {
+            eager_capture_reused: eagerCaptureDecision.reused,
+            eager_capture_reason: eagerCaptureDecision.reason,
+          }
+        : {}),
     },
   });
   await trace.succeed();

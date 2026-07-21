@@ -268,7 +268,7 @@ export function reconstructLegacyImageAssets(
       source: 'product',
       purpose: translate(locale, 'Product image snapshot.'),
       url: image.url,
-      key: image.key,
+      key: image.key ?? null,
       filename: filenameFromUrl(image.url, locale),
       mime_type: null,
       size_bytes: null,

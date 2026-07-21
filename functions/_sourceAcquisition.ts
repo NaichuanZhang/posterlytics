@@ -127,6 +127,27 @@ export async function acquireProductPreviewSource(
   };
 }
 
+export async function acquireProductSourceWithoutCapture(
+  productUrl: string,
+  recipe: ProductUseCaseRecipe,
+  dependencies: SourceAcquisitionDependencies = DEFAULT_DEPENDENCIES,
+): Promise<ProductSourceAcquisition> {
+  const mode = resolveProductSourceMode(productUrl, recipe);
+  if (mode !== 'website') {
+    return {
+      mode,
+      html: '',
+      capture: null,
+    };
+  }
+
+  return {
+    mode,
+    html: await dependencies.fetchHtml(productUrl),
+    capture: null,
+  };
+}
+
 export function resolveInheritedStyleBoard(
   mode: ProductSourceMode,
   inherited: StyleBoardPointers,

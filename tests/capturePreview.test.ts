@@ -11,6 +11,7 @@ import {
 } from '../functions/_capturePreview.ts'
 import {
   acquireProductPreviewSource,
+  acquireProductSourceWithoutCapture,
   resolveProductSourceMode,
   type ProductSourceAcquisition,
 } from '../functions/_sourceAcquisition.ts'
@@ -141,8 +142,13 @@ test('capture preview filters source image URLs and bounds immutable evidence', 
   const response = mapCapturePreview(
     'https://example.com/products/widget',
     acquisition,
+    previewMetadata('dark'),
   )
 
+  assert.equal(response.preview.captureId, '10000000-0000-4000-8000-000000000001')
+  assert.equal(response.preview.capturedAt, '2026-07-21T06:00:00.000Z')
+  assert.equal(response.preview.colorScheme, 'dark')
+  assert.deepEqual(response.preview.designTokens, capture.tokens)
   assert.equal(
     response.preview.styleBoardDataUrl,
     'data:image/jpeg;base64,c3R5bGUtYm9hcmQ=',
@@ -180,6 +186,7 @@ test('capture preview color preference is tokens, then theme color, then HTML co
         error: null,
       },
     }),
+    previewMetadata(),
   )
   assert.equal(tokenResponse.preview.colors[0], '#101010')
   assert.equal(tokenResponse.preview.colors.includes('#abcdef'), false)
@@ -189,6 +196,7 @@ test('capture preview color preference is tokens, then theme color, then HTML co
     acquisition({
       html: '<meta name="theme-color" content="#AbCdEf"> #ff5500 #ff5500',
     }),
+    previewMetadata(),
   )
   assert.deepEqual(themeResponse.preview.colors, ['#abcdef'])
 
@@ -197,6 +205,7 @@ test('capture preview color preference is tokens, then theme color, then HTML co
     acquisition({
       html: '#FF5500 #ff5500 #ff5500 #0066CC #0066cc #22AA77',
     }),
+    previewMetadata(),
   )
   assert.deepEqual(
     htmlResponse.preview.colors,
@@ -219,6 +228,7 @@ test('capture preview preserves partial evidence and maps capture failures', () 
         },
       },
     }),
+    previewMetadata(),
   )
 
   assert.deepEqual(response.preview.imageUrls, [
@@ -247,6 +257,7 @@ test('capture preview preserves partial evidence and maps capture failures', () 
         },
       },
     }),
+    previewMetadata(),
   )
   assert.deepEqual(networkFailure.error, {
     code: 'capture_network_error',
@@ -264,8 +275,12 @@ test('capture preview preserves partial evidence and maps capture failures', () 
       html: '',
       capture: null,
     },
+    previewMetadata(),
   )
   assert.equal(missingCapture.error?.code, 'capture_unavailable')
+  assert.equal(missingCapture.preview.captureId, null)
+  assert.equal(missingCapture.preview.capturedAt, null)
+  assert.equal(missingCapture.preview.designTokens, null)
 })
 
 test('preview acquisition captures before HTML fetch', async () => {
@@ -329,6 +344,31 @@ test('preview acquisition skips HTML fetch after a capture failure', async () =>
   })
 })
 
+test('eager source acquisition fetches HTML without calling capture', async () => {
+  const calls: string[] = []
+  const result = await acquireProductSourceWithoutCapture(
+    'https://example.com/product',
+    resolveProductUseCaseRecipe('website_product'),
+    {
+      capture: async () => {
+        calls.push('capture')
+        return successfulCapture()
+      },
+      fetchHtml: async (url) => {
+        calls.push(`fetch:${url}`)
+        return '<html>fresh copy</html>'
+      },
+    },
+  )
+
+  assert.deepEqual(calls, ['fetch:https://example.com/product'])
+  assert.deepEqual(result, {
+    mode: 'website',
+    html: '<html>fresh copy</html>',
+    capture: null,
+  })
+})
+
 test('shared source-mode resolution preserves reference-only and Amazon guards', () => {
   assert.equal(
     resolveProductSourceMode(
@@ -383,6 +423,14 @@ function successfulCapture(): CaptureResult {
     styleBoardDataUrl: null,
     error: null,
   }
+}
+
+function previewMetadata(colorScheme: 'light' | 'dark' = 'light') {
+  return {
+    captureId: '10000000-0000-4000-8000-000000000001',
+    capturedAt: '2026-07-21T06:00:00.000Z',
+    colorScheme,
+  } as const
 }
 
 function designTokens(): DesignTokens {

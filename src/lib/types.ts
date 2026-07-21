@@ -56,7 +56,8 @@ export interface PosterContent {
 export interface BrandAssets {
   logo_url?: string
   logo_key?: string
-  images: Array<{ url: string; key: string }>
+  // Eager campaign snapshots retain source URLs until analyze rehosts them.
+  images: Array<{ url: string; key?: string }>
   primary_image_url?: string
 }
 
@@ -475,6 +476,9 @@ export interface Campaign {
   design_tokens: DesignTokens | null
   screenshot_url: string | null
   screenshot_key: string | null
+  eager_capture_url: string | null
+  eager_capture_color_scheme: 'light' | 'dark' | null
+  eager_captured_at: string | null
   poster_layout: PosterLayout | null
   design_status: DesignStatus | null
   reference_context: string | null
