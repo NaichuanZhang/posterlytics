@@ -1,0 +1,62 @@
+[
+  {
+    "name": "trims and defaults to HTTPS",
+    "input": "  Example.COM/Products/One?Ref=ABC#details  ",
+    "expected": "https://example.com/Products/One?Ref=ABC"
+  },
+  {
+    "name": "preserves explicit HTTP path and query",
+    "input": "HTTP://Example.COM:8080/a/b?x=1&Y=Two#section",
+    "expected": "http://example.com:8080/a/b?x=1&Y=Two"
+  },
+  {
+    "name": "preserves a non-default port without a scheme",
+    "input": "example.com:8443/path?x=1#fragment",
+    "expected": "https://example.com:8443/path?x=1"
+  },
+  {
+    "name": "strips a root fragment",
+    "input": "https://Example.com#fragment",
+    "expected": "https://example.com/"
+  },
+  {
+    "name": "rejects an empty value",
+    "input": "   ",
+    "expected": null
+  },
+  {
+    "name": "rejects malformed URLs",
+    "input": "https://exa mple.com/path",
+    "expected": null
+  },
+  {
+    "name": "rejects relative paths",
+    "input": "/products/one?ref=abc",
+    "expected": null
+  },
+  {
+    "name": "rejects credentials",
+    "input": "https://user:password@example.com/path",
+    "expected": null
+  },
+  {
+    "name": "rejects username-only credentials",
+    "input": "https://user@example.com/path",
+    "expected": null
+  },
+  {
+    "name": "rejects non-HTTP protocols",
+    "input": "ftp://example.com/file",
+    "expected": null
+  },
+  {
+    "name": "rejects scheme-like script input",
+    "input": "javascript:alert(1)",
+    "expected": null
+  },
+  {
+    "name": "rejects an incomplete HTTP URL",
+    "input": "http://",
+    "expected": null
+  }
+]
