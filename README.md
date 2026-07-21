@@ -93,6 +93,7 @@ Edge functions:
 
 ```bash
 node functions/build.mjs
+npx @insforge/cli functions deploy capture-preview --file functions/dist/capture-preview.ts
 npx @insforge/cli functions deploy analyze --file functions/dist/analyze.ts
 npx @insforge/cli functions deploy designer --file functions/dist/designer.ts
 npx @insforge/cli functions deploy hero --file functions/dist/hero.ts

@@ -26,19 +26,16 @@ avoids coupling the Deno pipeline to the Node capture service. Duplicating the
 small pure normalizer at each runtime boundary keeps their build systems
 independent, while one fixture prevents their contracts from drifting.
 
-Wiring preview behavior now would combine a behavior-preserving refactor with
-new persistence, deployment, freshness, and user-interface semantics. Those
-changes need their own contracts and rollout validation.
+The first preview slice now uses these pure boundaries without persistence.
+That keeps freshness and invalidation out of the request path while preserving
+the option to add durable reuse later.
 
 ## Follow-ups
 
-1. Add the `capture_previews` schema and RPCs after ownership, expiry, and
-   concurrency semantics are defined.
-2. Add the `capture-preview` edge function after the preview persistence
-   contract exists.
-3. Deploy a separate preview Fly service and secrets after its trust boundary,
-   limits, and operational ownership are agreed.
-4. Add the analyze freshness fast path after preview provenance and invalidation
-   rules are durable.
-5. Add wizard preview UI after the backend can expose stable preview status,
-   evidence, retry, and failure states.
+1. Consider a `capture_previews` schema only if later reuse justifies ownership,
+   expiry, cleanup, and concurrency semantics; persistence is not a preview
+   prerequisite.
+2. Keep the existing capture service as the shared browser boundary; a separate
+   preview Fly service is not required.
+3. Add the analyze freshness fast path only after preview provenance and
+   invalidation rules are durable.

@@ -49,6 +49,7 @@ try {
   await testGenerationDetailsSummary(browser)
   await testFailedGenerationDetails(browser)
   await testCampaignWizardUseCases(browser)
+  await testWebsiteCapturePreview(browser)
   await testCampaignWizardDraftSwitch(browser)
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
@@ -541,6 +542,156 @@ async function testCampaignWizardUseCases(browserInstance) {
   await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
   await context.close()
+}
+
+async function testWebsiteCapturePreview(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState()
+  state.capturePreviewResponses.push({
+    delayMs: 140,
+    body: capturePreviewFixture('https://example.com/product', 'initial', {
+      includeMissingImage: true,
+    }),
+  })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await openWizardForm(page, 'Amazon listing')
+  assert.equal(
+    await page.getByRole('button', { name: 'Capture website' }).count(),
+    0,
+  )
+  await page.getByRole('button', { name: 'Change campaign type' }).click()
+  await selectWizardUseCase(page, 'Social cover')
+  assert.equal(
+    await page.getByRole('button', { name: 'Capture website' }).count(),
+    0,
+  )
+  await page.getByRole('button', { name: 'Change campaign type' }).click()
+  await selectWizardUseCase(page, 'Website product')
+
+  await page.locator('#product-url').fill('https://example.com/product')
+  const captureButton = page.getByRole('button', { name: 'Capture website' })
+  await captureButton.evaluate((element) => {
+    element.click()
+    element.click()
+    element.click()
+  })
+  await page.getByRole('button', { name: 'Capturing your site…' }).waitFor()
+  await waitFor(() => state.capturePreviewRequests.length === 1)
+  assert.deepEqual(state.capturePreviewRequests[0].body, {
+    url: 'https://example.com/product',
+    use_case: 'website_product',
+    color_scheme: 'light',
+  })
+  assert.equal(
+    state.capturePreviewRequests[0].authorization,
+    'Bearer asset-review-token',
+  )
+
+  const evidence = page.locator('.website-evidence-panel')
+  await evidence.waitFor()
+  await evidence.getByText('Website style board', { exact: true }).waitFor()
+  await evidence.getByText('Website logo', { exact: true }).waitFor()
+  await evidence.getByText('Product image 1', { exact: true }).waitFor()
+  await evidence.getByText('Website colors', { exact: true }).waitFor()
+  await evidence.getByText('Website typefaces', { exact: true }).waitFor()
+  await evidence.getByText('Preview unavailable', { exact: true }).waitFor()
+  assert.equal(await evidence.locator('.website-color-list span').count(), 3)
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
+    true,
+  )
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/capture-preview-desktop.png`,
+    fullPage: true,
+  })
+
+  assert.equal(
+    await page.getByRole('button', { name: 'Capture again' }).isDisabled(),
+    true,
+  )
+  const retryUrl = 'https://example.com/product?retry=1'
+  state.capturePreviewResponses.push({
+    body: {
+      preview: emptyCapturePreview(retryUrl),
+      error: {
+        code: 'capture_timeout',
+        message: 'Capture request timed out.',
+        retryable: true,
+      },
+    },
+  })
+  await page.locator('#product-url').fill(retryUrl)
+  const resetCaptureButton = page.getByRole('button', { name: 'Capture website' })
+  await resetCaptureButton.waitFor()
+  assert.equal(await resetCaptureButton.isEnabled(), true)
+  await resetCaptureButton.click()
+  await waitFor(() => state.capturePreviewRequests.length === 2)
+  assert.equal(state.capturePreviewRequests[1].body.url, retryUrl)
+  await page.getByText('Website preview unavailable.', { exact: true }).waitFor()
+  await page.getByText('You can still generate the poster.', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
+    true,
+  )
+
+  state.capturePreviewResponses.push(
+    {
+      delayMs: 260,
+      body: capturePreviewFixture('https://old.example/product', 'stale'),
+    },
+    {
+      delayMs: 20,
+      body: capturePreviewFixture('https://new.example/product', 'fresh'),
+    },
+  )
+  await page.locator('#product-url').fill('https://old.example/product')
+  await page.getByRole('button', { name: 'Capture website' }).click()
+  await waitFor(() => state.capturePreviewRequests.length === 3)
+  await page.locator('#product-url').fill('https://new.example/product')
+  await page.getByRole('button', { name: 'Capture website' }).click()
+  await waitFor(() => state.capturePreviewRequests.length === 4)
+  await page.locator('img[src*="logo-fresh.svg"]').waitFor()
+  await new Promise((resolve) => setTimeout(resolve, 320))
+  assert.equal(await page.locator('img[src*="stale"]').count(), 0)
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
+    true,
+  )
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+
+  const mobileContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+  })
+  const mobileState = createState()
+  await installBackendMock(mobileContext, mobileState)
+  const mobilePage = await mobileContext.newPage()
+  const mobileErrors = []
+  mobilePage.on('pageerror', (error) => mobileErrors.push(error))
+
+  await openWizardForm(mobilePage, 'Website product')
+  await mobilePage.locator('#product-url').fill('https://mobile.example/product')
+  await mobilePage.getByRole('button', { name: 'Capture website' }).click()
+  await mobilePage.locator('.website-evidence-panel').waitFor()
+  await assertNoOverflow(mobilePage)
+  await mobilePage.screenshot({
+    path: `${OUTPUT_DIR}/capture-preview-mobile.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(mobileErrors, [])
+  await mobileContext.close()
 }
 
 async function testCampaignWizardDraftSwitch(browserInstance) {
@@ -1282,6 +1433,35 @@ async function installBackendMock(context, state) {
     })
   })
 
+  await context.route('**/capture-preview', async (route) => {
+    const request = route.request()
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: capturePreviewCorsHeaders(),
+      })
+      return
+    }
+
+    const body = request.postData()
+      ? JSON.parse(request.postData())
+      : {}
+    state.capturePreviewRequests.push({
+      authorization: request.headers().authorization ?? null,
+      body,
+    })
+    const queued = state.capturePreviewResponses.shift() ?? {
+      body: capturePreviewFixture(
+        body.url ?? 'https://example.com',
+        `request-${state.capturePreviewRequests.length}`,
+      ),
+    }
+    if (queued.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, queued.delayMs))
+    }
+    await capturePreviewJson(route, queued.body, queued.status ?? 200)
+  })
+
   await context.route('**/api/**', async (route) => {
     const request = route.request()
     const requestUrl = new URL(request.url())
@@ -1541,6 +1721,8 @@ function createState({
     confirmedSelections: [],
     cancelCalls: 0,
     campaignWrites: [],
+    capturePreviewRequests: [],
+    capturePreviewResponses: [],
     enqueueFailuresRemaining,
     enqueueModes: [],
     enqueueRequests: [],
@@ -1784,6 +1966,69 @@ function edgePosterSvg() {
 
 function posterSvg() {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="#edf3ee"/><circle cx="240" cy="150" r="75" fill="#174a58"/></svg>'
+}
+
+function capturePreviewFixture(
+  sourceUrl,
+  marker,
+  { includeMissingImage = false } = {},
+) {
+  const styleBoard = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480">
+      <rect width="640" height="480" fill="#f2f3f0"/>
+      <rect x="32" y="32" width="576" height="120" fill="#174a58"/>
+      <circle cx="180" cy="310" r="90" fill="#e05b3f"/>
+      <text x="320" y="330" text-anchor="middle" font-size="28">${marker}</text>
+    </svg>
+  `.trim()
+  return {
+    preview: {
+      sourceUrl,
+      styleBoardDataUrl: `data:image/svg+xml,${encodeURIComponent(styleBoard)}`,
+      logoUrl: `${BASE_URL}/fixture/logo-${marker}.svg`,
+      imageUrls: [
+        `${BASE_URL}/fixture/product-${marker}.svg`,
+        ...(includeMissingImage
+          ? [`${BASE_URL}/fixture/missing-poster.svg`]
+          : []),
+      ],
+      colors: ['#174a58', '#e05b3f', '#b9dfce'],
+      fonts: ['Space Grotesk', 'Archivo'],
+    },
+    error: null,
+  }
+}
+
+function emptyCapturePreview(sourceUrl) {
+  return {
+    sourceUrl,
+    styleBoardDataUrl: null,
+    logoUrl: null,
+    imageUrls: [],
+    colors: [],
+    fonts: [],
+  }
+}
+
+function capturePreviewCorsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  }
+}
+
+async function capturePreviewJson(route, body, status = 200) {
+  try {
+    await route.fulfill({
+      status,
+      contentType: 'application/json',
+      headers: capturePreviewCorsHeaders(),
+      body: JSON.stringify(body),
+    })
+  } catch (error) {
+    if (!/closed|disposed|already handled/i.test(String(error))) throw error
+  }
 }
 
 async function json(route, body, status = 200) {

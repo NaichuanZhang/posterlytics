@@ -18,6 +18,7 @@ import { AssetSelectionModeControl } from '../components/AssetSelectionModeContr
 import { GenerationReferences } from '../components/GenerationReferences'
 import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
+import { WebsiteCapturePreview } from '../components/WebsiteCapturePreview'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
@@ -639,6 +640,12 @@ export function CampaignWizardPage() {
                       )}
                     </InlineNotice>
                   </div>
+                )}
+                {selectedUseCaseId === 'website_product' && (
+                  <WebsiteCapturePreview
+                    url={productUrl}
+                    disabled={Boolean(mismatchTarget)}
+                  />
                 )}
                 {inputFields.productName !== 'hidden' && (
                   <div className="field">

@@ -54,28 +54,36 @@ const DEFAULT_DEPENDENCIES: SourceAcquisitionDependencies = {
   capture: captureSite,
 };
 
+export function resolveProductSourceMode(
+  productUrl: string,
+  recipe: ProductUseCaseRecipe,
+): ProductSourceMode {
+  if (recipe.acquisitionMode === 'reference-only') {
+    return 'reference-only';
+  }
+
+  // URL classification is an independent safety boundary: even a malformed
+  // persisted recipe can never make a recognized Amazon host fetch or capture.
+  if (
+    isAmazonSourceUrl(productUrl)
+    || recipe.acquisitionMode === 'amazon-reference'
+  ) {
+    return 'amazon-reference';
+  }
+
+  return 'website';
+}
+
 export async function acquireProductSource(
   productUrl: string,
   colorScheme: CaptureColorScheme,
   recipe: ProductUseCaseRecipe,
   dependencies: SourceAcquisitionDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<ProductSourceAcquisition> {
-  if (recipe.acquisitionMode === 'reference-only') {
+  const mode = resolveProductSourceMode(productUrl, recipe);
+  if (mode !== 'website') {
     return {
-      mode: 'reference-only',
-      html: '',
-      capture: null,
-    };
-  }
-
-  // URL classification is the independent safety boundary: even a malformed
-  // persisted recipe can never make a recognized Amazon host fetch or capture.
-  if (
-    isAmazonSourceUrl(productUrl)
-    || recipe.acquisitionMode === 'amazon-reference'
-  ) {
-    return {
-      mode: 'amazon-reference',
+      mode,
       html: '',
       capture: null,
     };
@@ -85,6 +93,37 @@ export async function acquireProductSource(
     mode: 'website',
     html: await dependencies.fetchHtml(productUrl),
     capture: await dependencies.capture(productUrl, colorScheme),
+  };
+}
+
+export async function acquireProductPreviewSource(
+  productUrl: string,
+  colorScheme: CaptureColorScheme,
+  recipe: ProductUseCaseRecipe,
+  dependencies: SourceAcquisitionDependencies = DEFAULT_DEPENDENCIES,
+): Promise<ProductSourceAcquisition> {
+  const mode = resolveProductSourceMode(productUrl, recipe);
+  if (mode !== 'website') {
+    return {
+      mode,
+      html: '',
+      capture: null,
+    };
+  }
+
+  const capture = await dependencies.capture(productUrl, colorScheme);
+  if (capture.error) {
+    return {
+      mode,
+      html: '',
+      capture,
+    };
+  }
+
+  return {
+    mode,
+    capture,
+    html: await dependencies.fetchHtml(productUrl),
   };
 }
 
