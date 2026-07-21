@@ -70,9 +70,9 @@ not a security or correctness boundary.
 
 ## Follow-ups
 
-1. A durable server-side per-user capture quota remains deferred. This slice
-   does not add a capture entry point, and a process-local edge counter would
-   not provide reliable enforcement.
+1. The durable server-side per-user preview quota is implemented in
+   `2026-07-21-capture-preview-rate-limit.md`; analyze capture remains outside
+   that preview-only boundary.
 2. Add lifecycle cleanup for superseded eager style-board objects if storage
    growth becomes material. Failed campaign updates already remove their newly
    uploaded object, but successful replacement uses a new provenance key.

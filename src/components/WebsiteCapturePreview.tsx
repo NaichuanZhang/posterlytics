@@ -196,6 +196,8 @@ export function WebsiteCapturePreview({
             <strong>
               {error.code === 'invalid_source_url'
                 ? t('Enter a complete HTTP or HTTPS website URL.')
+                : error.code === 'rate_limited'
+                  ? t('Website capture limit reached. Try again shortly.')
                 : t('Website preview unavailable.')}
             </strong>
             <span>{t('You can still generate the poster.')}</span>

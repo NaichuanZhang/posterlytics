@@ -210,6 +210,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Capture website',
   'Capture again',
   'Website preview unavailable.',
+  'Website capture limit reached. Try again shortly.',
   'You can still generate the poster.',
   'No website evidence was found.',
   'Enter a complete HTTP or HTTPS website URL.',
@@ -878,6 +879,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'Capture website': '采集网站',
   'Capture again': '重新采集',
   'Website preview unavailable.': '网站预览不可用。',
+  'Website capture limit reached. Try again shortly.':
+    '网站采集次数已达当前上限，请稍后再试。',
   'You can still generate the poster.': '你仍可继续生成海报。',
   'No website evidence was found.': '未找到网站视觉证据。',
   'Enter a complete HTTP or HTTPS website URL.':

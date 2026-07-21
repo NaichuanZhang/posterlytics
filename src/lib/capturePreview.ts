@@ -120,6 +120,13 @@ function responseError(value: unknown, status: number): CapturePreviewError {
     const error = normalizeError((value as Record<string, unknown>).error)
     if (error) return error
   }
+  if (status === 429) {
+    return {
+      code: 'rate_limited',
+      message: status.toString(),
+      retryable: true,
+    }
+  }
   return {
     code: 'capture_preview_request_failed',
     message: status.toString(),

@@ -10,6 +10,10 @@ import {
   validateCapturePreviewRequest,
 } from '../functions/_capturePreview.ts'
 import {
+  MAX_CAPTURE_PREVIEW_RETRY_AFTER_SECONDS,
+  mapCapturePreviewRateLimit,
+} from '../functions/_captureRateLimit.ts'
+import {
   acquireProductPreviewSource,
   acquireProductSourceWithoutCapture,
   resolveProductSourceMode,
@@ -113,6 +117,90 @@ test('capture preview leaves private-network enforcement to the capture service'
   assert.equal(validated.ok, true)
   if (validated.ok) {
     assert.equal(validated.value.url, 'http://127.0.0.1/internal')
+  }
+})
+
+test('capture preview quota mapper accepts the RPC row and array shapes', () => {
+  assert.deepEqual(
+    mapCapturePreviewRateLimit(
+      [{ allowed: true, retry_after_seconds: 0 }],
+      null,
+    ),
+    { kind: 'allow' },
+  )
+  assert.deepEqual(
+    mapCapturePreviewRateLimit(
+      { allowed: true, retry_after_seconds: 0 },
+      null,
+    ),
+    { kind: 'allow' },
+  )
+})
+
+test('capture preview quota mapper returns a sanitized retryable 429 denial', () => {
+  const decision = mapCapturePreviewRateLimit(
+    [{ allowed: false, retry_after_seconds: 87 }],
+    null,
+  )
+
+  assert.deepEqual(decision, {
+    kind: 'deny',
+    status: 429,
+    error: {
+      code: 'rate_limited',
+      message: 'Website capture is temporarily limited. Try again shortly.',
+      retryable: true,
+    },
+    retryAfterSeconds: 87,
+  })
+})
+
+test('capture preview quota mapper bounds retry-after hints', () => {
+  for (const [value, expected] of [
+    [-5, 1],
+    [0, 1],
+    [1.2, 2],
+    [MAX_CAPTURE_PREVIEW_RETRY_AFTER_SECONDS + 1, 86_400],
+  ] as const) {
+    const decision = mapCapturePreviewRateLimit(
+      [{ allowed: false, retry_after_seconds: value }],
+      null,
+    )
+    assert.equal(decision.kind, 'deny')
+    if (decision.kind === 'deny') {
+      assert.equal(decision.retryAfterSeconds, expected)
+    }
+  }
+})
+
+test('capture preview quota mapper fails closed without leaking RPC failures', () => {
+  const sensitive = 'relation capture_preview_attempts does not exist at db:5432'
+  for (const [data, error] of [
+    [null, null],
+    [[], null],
+    [[{ allowed: true }, { allowed: true }], null],
+    [[{ allowed: 'yes' }], null],
+    [[{ allowed: true }], null],
+    [[{ allowed: true, retry_after_seconds: 1 }], null],
+    [[{ allowed: false }], null],
+    [[{ allowed: false, retry_after_seconds: Number.POSITIVE_INFINITY }], null],
+    [[{ allowed: false, retry_after_seconds: '60' }], null],
+    [[{ allowed: true }], new Error(sensitive)],
+  ] as const) {
+    const decision = mapCapturePreviewRateLimit(data, error)
+    assert.deepEqual(decision, {
+      kind: 'unavailable',
+      status: 503,
+      error: {
+        code: 'capture_preview_unavailable',
+        message: 'Website capture is temporarily unavailable.',
+        retryable: true,
+      },
+    })
+    if (decision.kind === 'unavailable') {
+      assert.equal(decision.error.message.includes('db:5432'), false)
+      assert.equal(decision.error.message.includes('relation'), false)
+    }
   }
 })
 
@@ -393,11 +481,23 @@ test('shared source-mode resolution preserves reference-only and Amazon guards',
   )
 })
 
-test('capture preview handler does not import storage-writing evidence helpers', () => {
+test('capture preview handler enforces quota before acquisition without storage writes', () => {
   const source = readFileSync(
     new URL('../functions/capture-preview.ts', import.meta.url),
     'utf8',
   )
+  const validation = source.indexOf(
+    'const validated = validateCapturePreviewRequest',
+  )
+  const rateLimit = source.indexOf("'consume_capture_preview_quota'", validation)
+  const acquisition = source.indexOf(
+    'await acquireProductPreviewSource',
+    rateLimit,
+  )
+
+  assert.ok(validation >= 0)
+  assert.ok(rateLimit > validation)
+  assert.ok(acquisition > rateLimit)
   for (const helper of ['rehost', 'rehostBrandAssets', 'uploadStyleBoard']) {
     assert.equal(source.includes(helper), false, helper)
   }

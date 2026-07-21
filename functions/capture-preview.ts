@@ -9,6 +9,10 @@ import {
   validateCapturePreviewRequest,
 } from './_capturePreview.ts';
 import {
+  mapCapturePreviewRateLimit,
+  type CapturePreviewRateLimitDecision,
+} from './_captureRateLimit.ts';
+import {
   acquireProductPreviewSource,
 } from './_sourceAcquisition.ts';
 import {
@@ -63,6 +67,30 @@ export default async function (req: Request): Promise<Response> {
   const validated = validateCapturePreviewRequest(parsed.value);
   if (!validated.ok) {
     return jsonResponse({ error: validated.error }, validated.status);
+  }
+
+  let rateLimit: CapturePreviewRateLimitDecision;
+  try {
+    const { data, error } = await client.database.rpc(
+      'consume_capture_preview_quota',
+      {},
+    );
+    rateLimit = mapCapturePreviewRateLimit(data, error);
+  } catch (error) {
+    rateLimit = mapCapturePreviewRateLimit(null, error);
+  }
+  if (rateLimit.kind !== 'allow') {
+    const response = jsonResponse(
+      { error: rateLimit.error },
+      rateLimit.status,
+    );
+    if (rateLimit.kind === 'deny') {
+      response.headers.set(
+        'Retry-After',
+        rateLimit.retryAfterSeconds.toString(),
+      );
+    }
+    return response;
   }
 
   const recipe = resolveProductUseCaseRecipe(validated.value.useCase);

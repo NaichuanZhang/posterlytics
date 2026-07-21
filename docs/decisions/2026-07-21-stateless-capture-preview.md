@@ -9,9 +9,10 @@ without creating a campaign, generation, or stored asset.
 
 ## Decisions
 
-1. Expose capture preview through an authenticated, stateless
-   `capture-preview` edge function; it writes no database rows or Storage
-   objects.
+1. Expose capture preview through an authenticated, stateless-evidence
+   `capture-preview` edge function; it writes no preview, campaign, generation,
+   or Storage objects. The later server-side quota slice records only bounded
+   capture-admission rows.
 2. Accept only `website_product` requests and reject invalid or Amazon sources
    before capture. Private-network enforcement remains inside the capture
    service, and those failures return as degraded HTTP 200 preview responses.
@@ -31,11 +32,10 @@ without creating a campaign, generation, or stored asset.
 7. Sanitize capture-service errors at the edge. The browser receives only the
    stable error code, retryability, and a generic safe message, never upstream
    hosts, URLs, ports, stack details, or Playwright text.
-8. Deliberately defer a hard server-side per-user rate limit or quota because
-   this endpoint has no database-backed counter. Current cost controls are
-   authentication, an explicit capture button, client debounce, single-flight
-   and cooldown behavior, and the capture service deadline. Submit-time
-   evidence persistence does not provide a durable quota.
+8. Enforce the hard server-side per-user quota recorded in
+   `2026-07-21-capture-preview-rate-limit.md`. Client debounce, single-flight,
+   cooldown behavior, and the capture deadline remain UX and defense-in-depth
+   controls rather than the authoritative cost boundary.
 
 ## Reasoning
 
@@ -56,5 +56,3 @@ service-level degradation.
    are recorded in `2026-07-21-single-paid-eager-capture.md`.
 2. Add capture-preview operational metrics if traffic warrants a separate
    service-level objective.
-3. Add a durable per-user capture quota in a dedicated backend slice; do not
-   rely on a process-local edge counter.

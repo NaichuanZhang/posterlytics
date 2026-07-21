@@ -646,6 +646,29 @@ async function testWebsiteCapturePreview(browserInstance) {
     true,
   )
 
+  const rateLimitedUrl = 'https://example.com/product?limited=1'
+  state.capturePreviewResponses.push({
+    status: 429,
+    body: { error: { code: 'rate_limited' } },
+  })
+  await page.locator('#product-url').fill(rateLimitedUrl)
+  const rateLimitedButton = page.getByRole('button', { name: 'Capture website' })
+  await rateLimitedButton.waitFor()
+  await rateLimitedButton.click()
+  await waitFor(() => state.capturePreviewRequests.length === 3)
+  assert.equal(state.capturePreviewRequests[2].body.url, rateLimitedUrl)
+  await page.getByText(
+    'Website capture limit reached. Try again shortly.',
+    { exact: true },
+  ).waitFor()
+  await page.getByText('You can still generate the poster.', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
+    true,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 350))
+  assert.equal(state.capturePreviewRequests.length, 3)
+
   state.capturePreviewResponses.push(
     {
       delayMs: 260,
@@ -658,10 +681,10 @@ async function testWebsiteCapturePreview(browserInstance) {
   )
   await page.locator('#product-url').fill('https://old.example/product')
   await page.getByRole('button', { name: 'Capture website' }).click()
-  await waitFor(() => state.capturePreviewRequests.length === 3)
+  await waitFor(() => state.capturePreviewRequests.length === 4)
   await page.locator('#product-url').fill('https://new.example/product')
   await page.getByRole('button', { name: 'Capture website' }).click()
-  await waitFor(() => state.capturePreviewRequests.length === 4)
+  await waitFor(() => state.capturePreviewRequests.length === 5)
   await page.locator('img[src*="logo-fresh.svg"]').waitFor()
   await new Promise((resolve) => setTimeout(resolve, 320))
   assert.equal(await page.locator('img[src*="stale"]').count(), 0)
