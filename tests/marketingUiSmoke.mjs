@@ -50,6 +50,7 @@ try {
   await testAuthenticatedNotFound(browser)
   await testSignupMode(browser)
   await testPasswordRecovery(browser)
+  await testPublicResponsiveAccessibility(browser)
   await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
   await testChineseLocale(browser)
@@ -221,6 +222,103 @@ async function testPasswordRecovery(browserInstance) {
   assert.deepEqual(pageErrors, [])
 
   await context.close()
+}
+
+async function testPublicResponsiveAccessibility(browserInstance) {
+  const viewports = [
+    { width: 280, height: 653 },
+    { width: 320, height: 653 },
+    { width: 375, height: 812 },
+    { width: 768, height: 900 },
+    { width: 1280, height: 900 },
+    { width: 2560, height: 1440 },
+  ]
+
+  for (const viewport of viewports) {
+    const context = await browserInstance.newContext({
+      locale: 'en-US',
+      viewport,
+      reducedMotion: 'reduce',
+      deviceScaleFactor: 1,
+    })
+    await installBackendMock(context, { authenticated: false })
+    const page = await context.newPage()
+    const pageErrors = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+
+    await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' })
+    await page.getByRole('heading', { name: 'Posterlytics', exact: true }).waitFor()
+    await page.locator('#attribution').waitFor()
+    await page.evaluate(() => document.fonts.ready)
+    await assertNoHorizontalOverflow(page, `landing ${viewport.width}px`)
+
+    if (viewport.width === 280) {
+      await assertElementsWithinViewport(
+        page,
+        '.public-hero h1, .public-hero-actions .public-button-primary',
+        'landing 280px critical content',
+      )
+      await assertMinimumHitTargets(
+        page,
+        '.public-nav a',
+        'landing 280px visible navigation links',
+      )
+      await assertMinimumHitTargets(
+        page,
+        '.public-nav-shell > .public-brand, .public-nav select',
+        'landing 280px header controls',
+      )
+      await assertNoTargetIntersections(
+        page,
+        '.public-nav-shell > .public-brand, .public-nav a, .public-nav select',
+        'landing 280px header controls',
+      )
+      await page.screenshot({
+        path: `${OUTPUT_DIR}/responsive-280x653-landing.png`,
+        fullPage: true,
+      })
+    }
+
+    await page.goto(`${BASE_URL}/signin`, { waitUntil: 'networkidle' })
+    await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+    await page.getByLabel('Email').waitFor()
+    await page.evaluate(() => document.fonts.ready)
+    await assertNoHorizontalOverflow(page, `sign in ${viewport.width}px`)
+
+    if (viewport.width === 280) {
+      await assertElementsWithinViewport(
+        page,
+        [
+          '.public-auth-panel',
+          '.public-auth-language select',
+          '.public-auth-field input',
+          '.public-auth-submit',
+        ].join(', '),
+        'sign in 280px critical content',
+      )
+      await assertMinimumHitTargets(
+        page,
+        '.public-auth-brand, .public-auth-language select, .public-auth-inline-button',
+        'sign in 280px header and recovery controls',
+      )
+      await assertNoTargetIntersections(
+        page,
+        '.public-auth-brand, .public-auth-language select',
+        'sign in 280px header controls',
+      )
+      await page.screenshot({
+        path: `${OUTPUT_DIR}/responsive-280x653-sign-in.png`,
+        fullPage: true,
+      })
+    }
+
+    assert.deepEqual(
+      pageErrors,
+      [],
+      `${viewport.width}px public page errors: ${pageErrors.join('; ')}`,
+    )
+    await context.close()
+  }
 }
 
 async function testPosterBreakpoints(browserInstance) {
@@ -610,6 +708,126 @@ async function revealLazyContent(page) {
   })
   await page.waitForFunction(() => window.scrollY === 0)
   await page.waitForTimeout(100)
+}
+
+async function assertNoHorizontalOverflow(page, label) {
+  const dimensions = await page.evaluate(() => {
+    const root = document.scrollingElement
+    return {
+      clientWidth: root?.clientWidth ?? 0,
+      scrollWidth: root?.scrollWidth ?? 0,
+    }
+  })
+
+  assert.ok(
+    dimensions.scrollWidth <= dimensions.clientWidth,
+    `${label} horizontal overflow: ${JSON.stringify(dimensions)}`,
+  )
+}
+
+async function assertElementsWithinViewport(page, selector, label) {
+  const issues = await page.locator(selector).evaluateAll((elements) => {
+    const viewportWidth = document.documentElement.clientWidth
+    const viewportHeight = window.innerHeight
+    return elements.flatMap((element) => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      if (
+        style.display === 'none'
+        || style.visibility === 'hidden'
+        || rect.width <= 0
+        || rect.height <= 0
+      ) return []
+
+      if (
+        rect.left >= -0.5
+        && rect.right <= viewportWidth + 0.5
+        && rect.top >= -0.5
+        && rect.bottom <= viewportHeight + 0.5
+      ) return []
+      const name = element.getAttribute('aria-label')
+        || element.textContent?.trim()
+        || element.className
+        || element.tagName
+      return [
+        `${name}: x ${rect.left.toFixed(1)}-${rect.right.toFixed(1)}px, `
+        + `y ${rect.top.toFixed(1)}-${rect.bottom.toFixed(1)}px`,
+      ]
+    })
+  })
+
+  assert.deepEqual(issues, [], `${label} outside viewport: ${issues.join('; ')}`)
+}
+
+async function assertMinimumHitTargets(page, selector, label) {
+  const issues = await page.locator(selector).evaluateAll((elements) =>
+    elements.flatMap((element) => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      if (
+        style.display === 'none'
+        || style.visibility === 'hidden'
+        || rect.width <= 0
+        || rect.height <= 0
+      ) return []
+
+      if (rect.width >= 43.99 && rect.height >= 43.99) return []
+      const name = element.getAttribute('aria-label')
+        || element.textContent?.trim()
+        || element.className
+        || element.tagName
+      return [`${name}: ${rect.width.toFixed(1)}x${rect.height.toFixed(1)}px`]
+    }),
+  )
+
+  assert.deepEqual(issues, [], `${label} below 44px: ${issues.join('; ')}`)
+}
+
+async function assertNoTargetIntersections(page, selector, label) {
+  const intersections = await page.locator(selector).evaluateAll((elements) => {
+    const targets = elements.flatMap((element) => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      if (
+        style.display === 'none'
+        || style.visibility === 'hidden'
+        || rect.width <= 0
+        || rect.height <= 0
+      ) return []
+
+      return [{
+        name: element.getAttribute('aria-label')
+          || element.textContent?.trim()
+          || element.className
+          || element.tagName,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+      }]
+    })
+    const overlaps = []
+
+    for (let leftIndex = 0; leftIndex < targets.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < targets.length; rightIndex += 1) {
+        const left = targets[leftIndex]
+        const right = targets[rightIndex]
+        const overlapWidth = Math.min(left.right, right.right) - Math.max(left.left, right.left)
+        const overlapHeight = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top)
+        if (overlapWidth > 0.5 && overlapHeight > 0.5) {
+          overlaps.push(`${left.name} / ${right.name}`)
+        }
+      }
+    }
+
+    return overlaps
+  })
+
+  assert.deepEqual(
+    intersections,
+    [],
+    `${label} overlap: ${intersections.join('; ')}`,
+  )
 }
 
 async function assertLandingGeometry(page) {

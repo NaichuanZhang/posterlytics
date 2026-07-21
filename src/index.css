@@ -55,13 +55,11 @@
 }
 
 html {
-  min-width: 320px;
   min-height: 100%;
   scroll-behavior: smooth;
 }
 
 body {
-  min-width: 320px;
   min-height: 100%;
   margin: 0;
   background: var(--surface-subtle);
@@ -145,6 +143,7 @@ img {
 
 .app-shell {
   display: grid;
+  min-width: 320px;
   grid-template-columns: var(--rail-width) minmax(0, 1fr);
   min-height: 100dvh;
   background: var(--surface-subtle);

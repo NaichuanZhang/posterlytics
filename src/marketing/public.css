@@ -44,7 +44,7 @@
   --public-moss: #425b4d;
   --public-yellow: #f4c95d;
   --public-shadow: 0 24px 70px rgba(21, 23, 25, 0.17);
-  min-width: 320px;
+  min-width: 280px;
   min-height: 100dvh;
   overflow-x: clip;
   background: var(--public-paper);
@@ -107,6 +107,12 @@
   font-weight: 720;
 }
 
+.public-nav-shell > .public-brand,
+.public-auth-brand {
+  min-width: 44px;
+  min-height: 44px;
+}
+
 .public-brand-mark {
   display: grid;
   width: 32px;
@@ -130,13 +136,16 @@
 
 .language-select-public {
   display: inline-flex;
-  min-height: 30px;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   gap: 5px;
   color: var(--public-ink);
 }
 
 .language-select-public select {
+  min-width: 44px;
+  min-height: 44px;
   max-width: 92px;
   border: 0;
   border-bottom: 1px solid var(--public-line-strong);
@@ -155,6 +164,11 @@
 
 .public-nav a {
   position: relative;
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
   color: var(--public-ink);
   font-size: 12px;
   font-weight: 640;
@@ -182,7 +196,7 @@
 
 .public-nav .public-nav-cta {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 44px;
   align-items: center;
   padding: 0 12px;
   border: 1px solid var(--public-ink);
@@ -1287,7 +1301,8 @@
 
 .public-auth-inline-button {
   display: inline-flex;
-  min-height: 24px;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -1541,7 +1556,7 @@
   }
 
   .public-nav .public-nav-cta {
-    min-height: 32px;
+    min-height: 44px;
     padding: 0 9px;
   }
 
@@ -1681,7 +1696,7 @@
   }
 
   .public-nav .language-select-public select {
-    width: 39px;
+    width: 44px;
     font-size: 9px;
   }
 
@@ -1690,7 +1705,7 @@
   }
 
   .public-nav .public-nav-cta {
-    min-height: 29px;
+    min-height: 44px;
     padding: 0 7px;
   }
 
@@ -1735,9 +1750,13 @@
   }
 
   .public-button {
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 12px;
     font-size: 11px;
+  }
+
+  .public-auth-field input {
+    font-size: 16px;
   }
 
   .public-text-link {
@@ -2115,7 +2134,7 @@
   }
 
   .public-nav .public-nav-cta {
-    min-height: 28px;
+    min-height: 44px;
     padding: 0 5px;
   }
 
@@ -2129,6 +2148,47 @@
 
   .public-final-cta h2 {
     font-size: 45px;
+  }
+}
+
+@media (max-width: 319px) {
+  .public-nav-shell {
+    gap: 2px;
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .public-nav {
+    gap: 2px;
+  }
+
+  .public-nav .public-nav-cta {
+    padding-right: 3px;
+    padding-left: 3px;
+  }
+
+  .public-hero-grid {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .public-hero h1 {
+    font-size: 38px;
+  }
+
+  .public-hero-actions {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .public-auth-main {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .public-auth-panel {
+    padding-right: 14px;
+    padding-left: 14px;
   }
 }
 
