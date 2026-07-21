@@ -5,6 +5,18 @@ import type { BrandAssets, DesignTokens } from './types'
 import type { CreatableUseCaseId } from './useCases'
 
 export const EAGER_CAPTURE_MAX_AGE_MS = 30 * 60 * 1000
+export const EAGER_CAPTURE_MAX_IMAGES = 4
+export const EAGER_CAPTURE_MAX_SELECTED_ASSETS = 6
+
+export interface EagerCaptureSelection {
+  imageUrls: string[]
+  logoExcluded: boolean
+}
+
+export interface SelectedEagerCapture {
+  preview: CapturePreview
+  selection: EagerCaptureSelection
+}
 
 export type EagerCaptureAdoptionReason =
   | 'eligible'
@@ -140,6 +152,7 @@ export function buildEagerCapturePatch(
   campaignId: string,
   preview: CapturePreview,
   uploaded: { url: string; key: string },
+  selection: EagerCaptureSelection | null = null,
 ): EagerCaptureCampaignPatch {
   if (
     !preview.designTokens
@@ -153,7 +166,7 @@ export function buildEagerCapturePatch(
   }
   return {
     design_tokens: preview.designTokens,
-    brand_assets: buildSourceBrandAssets(preview),
+    brand_assets: buildSourceBrandAssets(preview, selection),
     screenshot_url: uploaded.url,
     screenshot_key: uploaded.key,
     eager_capture_url: preview.sourceUrl,
@@ -174,19 +187,103 @@ export function clearEagerCapturePatch(): EagerCaptureCampaignPatch {
   }
 }
 
-function buildSourceBrandAssets(preview: CapturePreview): BrandAssets {
+export function createDefaultEagerCaptureSelection(
+  preview: CapturePreview,
+): EagerCaptureSelection {
+  return {
+    imageUrls: sourceImageUrls(preview),
+    logoExcluded: false,
+  }
+}
+
+function buildSourceBrandAssets(
+  preview: CapturePreview,
+  selection: EagerCaptureSelection | null,
+): BrandAssets {
   const logoUrl = safeSourceUrl(preview.logoUrl)
-  const images = preview.imageUrls
+  const capturedImageUrls = sourceImageUrls(preview)
+  if (!selection) {
+    const images = capturedImageUrls.map((url) => ({ url }))
+    return {
+      ...(logoUrl ? { logo_url: logoUrl } : {}),
+      images,
+      ...(images[0] ? { primary_image_url: images[0].url } : {}),
+    }
+  }
+
+  const selectedImageUrls = validateEagerCaptureSelection(
+    selection,
+    capturedImageUrls,
+    logoUrl,
+  )
+  const selectedSet = new Set(selectedImageUrls)
+  const excludedUrls = capturedImageUrls.filter((url) => !selectedSet.has(url))
+  const orderedImageUrls = [
+    ...selectedImageUrls,
+    ...excludedUrls,
+  ]
+  return {
+    ...(logoUrl ? { logo_url: logoUrl } : {}),
+    images: orderedImageUrls.map((url) => ({ url })),
+    ...(selectedImageUrls[0]
+      ? { primary_image_url: selectedImageUrls[0] }
+      : {}),
+    eager_selection: {
+      version: 1,
+      excluded_urls: excludedUrls,
+      logo_excluded: selection.logoExcluded,
+    },
+  }
+}
+
+function sourceImageUrls(preview: CapturePreview): string[] {
+  return preview.imageUrls
     .map(safeSourceUrl)
     .filter((url): url is string => !!url)
     .filter((url, index, values) => values.indexOf(url) === index)
-    .slice(0, 4)
-    .map((url) => ({ url }))
-  return {
-    ...(logoUrl ? { logo_url: logoUrl } : {}),
-    images,
-    ...(images[0] ? { primary_image_url: images[0].url } : {}),
+    .slice(0, EAGER_CAPTURE_MAX_IMAGES)
+}
+
+function validateEagerCaptureSelection(
+  selection: EagerCaptureSelection,
+  capturedImageUrls: string[],
+  logoUrl: string | null,
+): string[] {
+  if (
+    !selection
+    || !Array.isArray(selection.imageUrls)
+    || typeof selection.logoExcluded !== 'boolean'
+    || selection.imageUrls.length > EAGER_CAPTURE_MAX_SELECTED_ASSETS
+  ) {
+    throw new EagerCaptureEvidenceError(
+      'Eager capture asset selection is invalid.',
+    )
   }
+
+  const captured = new Set(capturedImageUrls)
+  const selected: string[] = []
+  for (const value of selection.imageUrls) {
+    const url = safeSourceUrl(value)
+    if (
+      !url
+      || url !== value
+      || !captured.has(url)
+      || selected.includes(url)
+    ) {
+      throw new EagerCaptureEvidenceError(
+        'Eager capture asset selection is invalid.',
+      )
+    }
+    selected.push(url)
+  }
+  const selectedAssetCount = selected.length
+    + (logoUrl && !selection.logoExcluded ? 1 : 0)
+  if (selectedAssetCount > EAGER_CAPTURE_MAX_SELECTED_ASSETS) {
+    throw new EagerCaptureEvidenceError(
+      'Eager capture asset selection is invalid.',
+    )
+  }
+  return selected
 }
 
 function safeSourceUrl(value: string | null): string | null {

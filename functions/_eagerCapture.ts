@@ -3,6 +3,8 @@ import type { DesignTokens } from './_shared.ts';
 import type { ProductSourceMode } from './_sourceAcquisition.ts';
 
 export const EAGER_CAPTURE_MAX_AGE_MS = 30 * 60 * 1000;
+const EAGER_CAPTURE_MAX_IMAGES = 4;
+const EAGER_CAPTURE_MAX_SELECTION_URLS = 6;
 
 export type EagerCaptureReuseReason =
   | 'eligible'
@@ -50,6 +52,10 @@ export interface EagerGenerationSnapshot {
 export interface EagerSourceAssets {
   logoCandidates: string[];
   images: string[];
+  selection?: {
+    excludedUrls: string[];
+    logoExcluded: boolean;
+  };
 }
 
 export type EagerCaptureReuseDecision =
@@ -279,7 +285,11 @@ function hasEagerCaptureCandidate(
 }
 
 function parseEagerSourceAssets(value: unknown): EagerSourceAssets | null {
-  if (!isRecord(value) || !Array.isArray(value.images) || value.images.length > 4) {
+  if (
+    !isRecord(value)
+    || !Array.isArray(value.images)
+    || value.images.length > EAGER_CAPTURE_MAX_IMAGES
+  ) {
     return null;
   }
   const logoUrl = value.logo_url === undefined
@@ -294,9 +304,50 @@ function parseEagerSourceAssets(value: unknown): EagerSourceAssets | null {
     if (!url) return null;
     if (!images.includes(url)) images.push(url);
   }
+  const selection = parseEagerAssetSelection(value.eager_selection, images);
   return {
     logoCandidates: logoUrl ? [logoUrl] : [],
     images,
+    ...(selection ? { selection } : {}),
+  };
+}
+
+function parseEagerAssetSelection(
+  value: unknown,
+  capturedImageUrls: string[],
+): EagerSourceAssets['selection'] | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== 3
+    || keys[0] !== 'excluded_urls'
+    || keys[1] !== 'logo_excluded'
+    || keys[2] !== 'version'
+    || value.version !== 1
+    || typeof value.logo_excluded !== 'boolean'
+    || !Array.isArray(value.excluded_urls)
+    || value.excluded_urls.length > EAGER_CAPTURE_MAX_SELECTION_URLS
+  ) {
+    return null;
+  }
+
+  const captured = new Set(capturedImageUrls);
+  const excludedUrls: string[] = [];
+  for (const valueUrl of value.excluded_urls) {
+    const url = safeSourceUrl(valueUrl);
+    if (
+      !url
+      || url !== valueUrl
+      || !captured.has(url)
+      || excludedUrls.includes(url)
+    ) {
+      return null;
+    }
+    excludedUrls.push(url);
+  }
+  return {
+    excludedUrls,
+    logoExcluded: value.logo_excluded,
   };
 }
 

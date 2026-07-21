@@ -53,12 +53,21 @@ export interface PosterContent {
   cta: string
 }
 
+export interface EagerAssetSelectionMarker {
+  version: 1
+  excluded_urls: string[]
+  logo_excluded: boolean
+}
+
 export interface BrandAssets {
   logo_url?: string
   logo_key?: string
   // Eager campaign snapshots retain source URLs until analyze rehosts them.
   images: Array<{ url: string; key?: string }>
   primary_image_url?: string
+  // Present only on newly adopted eager snapshots. Analyze removes it when
+  // source candidates are rehosted into final generation assets.
+  eager_selection?: EagerAssetSelectionMarker
 }
 
 export interface ReferenceImage {

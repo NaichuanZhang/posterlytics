@@ -87,7 +87,7 @@ test('HTML color fallback deduplicates colors and orders them by frequency', () 
   assert.deepEqual(extractColors(''), [])
 })
 
-test('eager source assets extend fresh HTML evidence without changing fresh priority', () => {
+test('legacy marker absence preserves fresh-then-eager order and full inclusion', () => {
   const extracted = extractAssets(`
     <meta property="og:logo" content="https://source.example/fresh-logo.png">
     <meta property="og:image" content="https://source.example/fresh-product.jpg">
@@ -114,6 +114,77 @@ test('eager source assets extend fresh HTML evidence without changing fresh prio
       images: [
         'https://source.example/fresh-product.jpg',
         'https://source.example/eager-product.jpg',
+      ],
+    },
+  )
+})
+
+test('eager selection puts included candidates first and filters exclusions from fresh extraction', () => {
+  const excluded = 'https://source.example/excluded-product.jpg'
+  const selectedOne = 'https://source.example/selected-one.jpg'
+  const selectedTwo = 'https://source.example/selected-two.jpg'
+  const freshOnly = 'https://source.example/fresh-only.jpg'
+  const extracted = {
+    logo: 'https://source.example/fresh-logo.png',
+    logoCandidates: [
+      'https://source.example/fresh-logo.png',
+      'https://source.example/eager-logo.png',
+    ],
+    images: [
+      excluded,
+      freshOnly,
+      selectedOne,
+    ],
+    themeColor: null,
+  }
+
+  assert.deepEqual(
+    mergeEagerSourceAssets(extracted, {
+      logoCandidates: ['https://source.example/eager-logo.png'],
+      images: [selectedTwo, selectedOne, excluded],
+      selection: {
+        excludedUrls: [excluded],
+        logoExcluded: false,
+      },
+    }),
+    {
+      ...extracted,
+      logo: 'https://source.example/eager-logo.png',
+      logoCandidates: [
+        'https://source.example/eager-logo.png',
+        'https://source.example/fresh-logo.png',
+      ],
+      images: [
+        selectedTwo,
+        selectedOne,
+        freshOnly,
+      ],
+    },
+  )
+})
+
+test('eager logo exclusion suppresses every eager and fresh logo candidate', () => {
+  const extracted = extractAssets(`
+    <meta property="og:logo" content="https://source.example/fresh-logo.png">
+    <meta property="og:image" content="https://source.example/fresh-product.jpg">
+  `, 'https://source.example/product')
+
+  assert.deepEqual(
+    mergeEagerSourceAssets(extracted, {
+      logoCandidates: ['https://source.example/eager-logo.png'],
+      images: ['https://source.example/eager-product.jpg'],
+      selection: {
+        excludedUrls: [],
+        logoExcluded: true,
+      },
+    }),
+    {
+      ...extracted,
+      logo: null,
+      logoCandidates: [],
+      images: [
+        'https://source.example/eager-product.jpg',
+        'https://source.example/fresh-product.jpg',
       ],
     },
   )

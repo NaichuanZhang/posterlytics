@@ -231,6 +231,9 @@ export async function runAnalyzeStage(
     colorScheme,
     productSourceMode: resolveProductSourceMode(productUrl, productRecipe),
   });
+  const eagerAssetSelection = eagerCaptureDecision.reused
+    ? eagerCaptureDecision.sourceAssets.selection
+    : undefined;
 
   // 1. Acquire source evidence. Legacy events retain the strict Luma allowlist.
   // Amazon product pages intentionally use seller-provided references because
@@ -699,6 +702,14 @@ export async function runAnalyzeStage(
         ? {
             eager_capture_reused: eagerCaptureDecision.reused,
             eager_capture_reason: eagerCaptureDecision.reason,
+          }
+        : {}),
+      ...(eagerAssetSelection
+        ? {
+            eager_asset_selection_applied: true,
+            eager_asset_excluded_count:
+              eagerAssetSelection.excludedUrls.length,
+            eager_logo_excluded: eagerAssetSelection.logoExcluded,
           }
         : {}),
     },

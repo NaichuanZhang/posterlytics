@@ -1,8 +1,12 @@
 import {
+  ArrowDown,
+  ArrowUp,
   Camera,
+  Check,
   ImageOff,
   LoaderCircle,
   RefreshCw,
+  X,
 } from 'lucide-react'
 import {
   useEffect,
@@ -17,6 +21,11 @@ import {
   type CapturePreviewError,
 } from '../lib/capturePreview'
 import { getDeviceColorScheme } from '../lib/colorScheme'
+import {
+  createDefaultEagerCaptureSelection,
+  type EagerCaptureSelection,
+  type SelectedEagerCapture,
+} from '../lib/eagerCapture'
 import { InlineNotice } from './ui/Feedback'
 
 type CaptureStatus = 'idle' | 'capturing' | 'ready' | 'error'
@@ -30,11 +39,15 @@ export function WebsiteCapturePreview({
 }: {
   url: string
   disabled?: boolean
-  onPreviewChange?: (preview: CapturePreview | null) => void
+  onPreviewChange?: (capture: SelectedEagerCapture | null) => void
 }) {
   const { t } = useI18n()
   const [status, setStatus] = useState<CaptureStatus>('idle')
   const [preview, setPreview] = useState<CapturePreview | null>(null)
+  const [selection, setSelection] = useState<EagerCaptureSelection>({
+    imageUrls: [],
+    logoExcluded: false,
+  })
   const [error, setError] = useState<CapturePreviewError | null>(null)
   const [coolingDown, setCoolingDown] = useState(false)
   const activeRequest = useRef<AbortController | null>(null)
@@ -54,6 +67,7 @@ export function WebsiteCapturePreview({
     setCoolingDown(false)
     setStatus('idle')
     setPreview(null)
+    setSelection({ imageUrls: [], logoExcluded: false })
     setError(null)
     onPreviewChange?.(null)
   }, [url, onPreviewChange])
@@ -86,6 +100,7 @@ export function WebsiteCapturePreview({
     activeRequest.current = controller
     setStatus('capturing')
     setPreview(null)
+    setSelection({ imageUrls: [], logoExcluded: false })
     setError(null)
     onPreviewChange?.(null)
 
@@ -101,10 +116,14 @@ export function WebsiteCapturePreview({
       ) {
         return
       }
+      const nextSelection = createDefaultEagerCaptureSelection(response.preview)
       setPreview(response.preview)
+      setSelection(nextSelection)
       setError(response.error)
       setStatus(response.error ? 'error' : 'ready')
-      onPreviewChange?.(response.error ? null : response.preview)
+      onPreviewChange?.(response.error
+        ? null
+        : { preview: response.preview, selection: nextSelection })
       startCooldown()
     } catch (cause) {
       if (
@@ -125,37 +144,62 @@ export function WebsiteCapturePreview({
     }
   }
 
-  const evidenceImages = preview
-    ? [
-        ...(preview.styleBoardDataUrl
-          ? [{
-              key: 'style-board',
-              label: t('Website style board'),
-              url: preview.styleBoardDataUrl,
-              featured: true,
-            }]
-          : []),
-        ...(preview.logoUrl
-          ? [{
-              key: 'logo',
-              label: t('Website logo'),
-              url: preview.logoUrl,
-              featured: false,
-            }]
-          : []),
-        ...preview.imageUrls.map((imageUrl, index) => ({
-          key: `product-${imageUrl}`,
-          label: t('Product image {number}', { number: index + 1 }),
-          url: imageUrl,
-          featured: false,
-        })),
-      ]
+  const capturedImageUrls = preview
+    ? createDefaultEagerCaptureSelection(preview).imageUrls
     : []
+  const orderedImageUrls = [
+    ...selection.imageUrls,
+    ...capturedImageUrls.filter((url) => !selection.imageUrls.includes(url)),
+  ]
+  const hasSourceCandidates = !!preview
+    && (!!preview.logoUrl || capturedImageUrls.length > 0)
   const hasEvidence = !!preview && (
-    evidenceImages.length > 0
+    !!preview.styleBoardDataUrl
+    || hasSourceCandidates
     || preview.colors.length > 0
     || preview.fonts.length > 0
   )
+
+  function commitSelection(nextSelection: EagerCaptureSelection) {
+    if (!preview || status !== 'ready') return
+    setSelection(nextSelection)
+    onPreviewChange?.({ preview, selection: nextSelection })
+  }
+
+  function toggleLogoCandidate() {
+    commitSelection({
+      ...selection,
+      logoExcluded: !selection.logoExcluded,
+    })
+  }
+
+  function toggleImageCandidate(imageUrl: string) {
+    const included = selection.imageUrls.includes(imageUrl)
+    commitSelection({
+      ...selection,
+      imageUrls: included
+        ? selection.imageUrls.filter((url) => url !== imageUrl)
+        : [...selection.imageUrls, imageUrl],
+    })
+  }
+
+  function moveImageCandidate(imageUrl: string, direction: -1 | 1) {
+    const currentIndex = selection.imageUrls.indexOf(imageUrl)
+    const targetIndex = currentIndex + direction
+    if (
+      currentIndex < 0
+      || targetIndex < 0
+      || targetIndex >= selection.imageUrls.length
+    ) {
+      return
+    }
+    const nextImageUrls = [...selection.imageUrls]
+    ;[nextImageUrls[currentIndex], nextImageUrls[targetIndex]] = [
+      nextImageUrls[targetIndex],
+      nextImageUrls[currentIndex],
+    ]
+    commitSelection({ ...selection, imageUrls: nextImageUrls })
+  }
 
   return (
     <div className="website-capture-preview field-wide">
@@ -216,16 +260,57 @@ export function WebsiteCapturePreview({
           className="website-evidence-panel"
           aria-label={t('Website evidence preview')}
         >
-          {evidenceImages.length > 0 && (
+          {hasSourceCandidates && (
+            <div className="website-evidence-candidate-copy">
+              <strong>{t('Captured image candidates')}</strong>
+              <p>
+                {t('Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Yolo may omit or reorder images within the included set.')}
+              </p>
+            </div>
+          )}
+          {(preview.styleBoardDataUrl || hasSourceCandidates) && (
             <div className="website-evidence-images">
-              {evidenceImages.map((image) => (
+              {preview.styleBoardDataUrl && (
                 <EvidenceImage
-                  key={image.key}
-                  label={image.label}
-                  url={image.url}
-                  featured={image.featured}
+                  label={t('Website style board')}
+                  url={preview.styleBoardDataUrl}
+                  featured
                 />
-              ))}
+              )}
+              {preview.logoUrl && (
+                <CandidateEvidenceImage
+                  label={t('Website logo')}
+                  url={preview.logoUrl}
+                  included={!selection.logoExcluded}
+                  priority={null}
+                  canRaise={false}
+                  canLower={false}
+                  onToggle={toggleLogoCandidate}
+                />
+              )}
+              {orderedImageUrls.map((imageUrl) => {
+                const selectedIndex = selection.imageUrls.indexOf(imageUrl)
+                const capturedIndex = capturedImageUrls.indexOf(imageUrl)
+                return (
+                  <CandidateEvidenceImage
+                    key={imageUrl}
+                    label={t('Product image {number}', {
+                      number: capturedIndex + 1,
+                    })}
+                    url={imageUrl}
+                    included={selectedIndex >= 0}
+                    priority={selectedIndex >= 0 ? selectedIndex + 1 : null}
+                    canRaise={selectedIndex > 0}
+                    canLower={
+                      selectedIndex >= 0
+                      && selectedIndex < selection.imageUrls.length - 1
+                    }
+                    onToggle={() => toggleImageCandidate(imageUrl)}
+                    onRaise={() => moveImageCandidate(imageUrl, -1)}
+                    onLower={() => moveImageCandidate(imageUrl, 1)}
+                  />
+                )
+              })}
             </div>
           )}
           {(preview.colors.length > 0 || preview.fonts.length > 0) && (
@@ -274,7 +359,7 @@ function EvidenceImage({
 
   return (
     <figure className={featured ? 'is-featured' : ''}>
-      <div>
+      <div className="website-evidence-image-preview">
         {failed ? (
           <span>
             <ImageOff size={18} aria-hidden="true" />
@@ -291,6 +376,106 @@ function EvidenceImage({
         )}
       </div>
       <figcaption>{label}</figcaption>
+    </figure>
+  )
+}
+
+function CandidateEvidenceImage({
+  label,
+  url,
+  included,
+  priority,
+  canRaise,
+  canLower,
+  onToggle,
+  onRaise,
+  onLower,
+}: {
+  label: string
+  url: string
+  included: boolean
+  priority: number | null
+  canRaise: boolean
+  canLower: boolean
+  onToggle: () => void
+  onRaise?: () => void
+  onLower?: () => void
+}) {
+  const { t } = useI18n()
+  const [failed, setFailed] = useState(false)
+  const includeLabel = included
+    ? t('Exclude {name} as a candidate', { name: label })
+    : t('Include {name} as a candidate', { name: label })
+
+  return (
+    <figure
+      className={[
+        'is-candidate',
+        included ? 'is-included' : 'is-excluded',
+      ].join(' ')}
+    >
+      <div className="website-evidence-image-preview">
+        {failed ? (
+          <span>
+            <ImageOff size={18} aria-hidden="true" />
+            {t('Preview unavailable')}
+          </span>
+        ) : (
+          <img
+            src={url}
+            alt={label}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setFailed(true)}
+          />
+        )}
+        {priority !== null && (
+          <b aria-label={t('Priority {number}', { number: priority })}>
+            {priority}
+          </b>
+        )}
+      </div>
+      <figcaption>{label}</figcaption>
+      <div className="website-evidence-candidate-controls">
+        {priority !== null && onRaise && onLower && (
+          <>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={t('Raise {name} candidate priority', { name: label })}
+              data-tooltip={t('Raise candidate priority')}
+              title={t('Raise candidate priority')}
+              disabled={!canRaise}
+              onClick={onRaise}
+            >
+              <ArrowUp size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={t('Lower {name} candidate priority', { name: label })}
+              data-tooltip={t('Lower candidate priority')}
+              title={t('Lower candidate priority')}
+              disabled={!canLower}
+              onClick={onLower}
+            >
+              <ArrowDown size={13} aria-hidden="true" />
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          className={`website-evidence-candidate-toggle${included ? ' is-included' : ''}`}
+          aria-label={includeLabel}
+          aria-pressed={included}
+          onClick={onToggle}
+        >
+          {included
+            ? <Check size={12} aria-hidden="true" />
+            : <X size={12} aria-hidden="true" />}
+          {t(included ? 'Candidate included' : 'Candidate excluded')}
+        </button>
+      </div>
     </figure>
   )
 }

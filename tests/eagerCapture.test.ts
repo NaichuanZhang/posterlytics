@@ -8,6 +8,7 @@ import type { DesignTokens as BackendDesignTokens } from '../functions/_shared.t
 import type { CapturePreview } from '../src/lib/capturePreview.ts'
 import {
   EAGER_CAPTURE_MAX_AGE_MS as ADOPTION_MAX_AGE_MS,
+  buildEagerCapturePatch,
   clearEagerCapturePatch,
   eagerStyleBoardBlob,
   eagerStyleBoardKey,
@@ -107,7 +108,104 @@ test('wizard eager board helpers enforce campaign-scoped JPEG provenance', async
   )
 })
 
-test('analyze accepts only a fresh matching first website snapshot', () => {
+test('wizard adoption records exclusions, candidate order, and the first included primary image', () => {
+  const preview = capturePreview({
+    imageUrls: [
+      'https://source.example/product-one.jpg',
+      'https://source.example/product-two.jpg',
+      'https://source.example/product-three.jpg',
+      'https://source.example/product-four.jpg',
+      'https://source.example/product-five.jpg',
+    ],
+  })
+  const patch = buildEagerCapturePatch(
+    CAMPAIGN_ID,
+    preview,
+    { url: BOARD_URL, key: BOARD_KEY },
+    {
+      imageUrls: [
+        'https://source.example/product-three.jpg',
+        'https://source.example/product-one.jpg',
+      ],
+      logoExcluded: true,
+    },
+  )
+
+  assert.deepEqual(patch.brand_assets, {
+    logo_url: 'https://source.example/logo.png',
+    images: [
+      { url: 'https://source.example/product-three.jpg' },
+      { url: 'https://source.example/product-one.jpg' },
+      { url: 'https://source.example/product-two.jpg' },
+      { url: 'https://source.example/product-four.jpg' },
+    ],
+    primary_image_url: 'https://source.example/product-three.jpg',
+    eager_selection: {
+      version: 1,
+      excluded_urls: [
+        'https://source.example/product-two.jpg',
+        'https://source.example/product-four.jpg',
+      ],
+      logo_excluded: true,
+    },
+  })
+
+  const allExcluded = buildEagerCapturePatch(
+    CAMPAIGN_ID,
+    preview,
+    { url: BOARD_URL, key: BOARD_KEY },
+    { imageUrls: [], logoExcluded: false },
+  ).brand_assets
+  assert.equal(
+    Object.hasOwn(allExcluded ?? {}, 'primary_image_url'),
+    false,
+  )
+  assert.deepEqual(
+    allExcluded?.eager_selection?.excluded_urls,
+    [
+      'https://source.example/product-one.jpg',
+      'https://source.example/product-two.jpg',
+      'https://source.example/product-three.jpg',
+      'https://source.example/product-four.jpg',
+    ],
+  )
+})
+
+test('wizard adoption rejects invalid, duplicate, and oversized candidate selections', () => {
+  const preview = capturePreview({
+    imageUrls: [
+      'https://source.example/product-one.jpg',
+      'https://source.example/product-two.jpg',
+    ],
+  })
+  const build = (imageUrls: string[]) => buildEagerCapturePatch(
+    CAMPAIGN_ID,
+    preview,
+    { url: BOARD_URL, key: BOARD_KEY },
+    { imageUrls, logoExcluded: false },
+  )
+
+  assert.throws(
+    () => build(['https://source.example/not-captured.jpg']),
+    /asset selection is invalid/,
+  )
+  assert.throws(
+    () => build([
+      'https://source.example/product-one.jpg',
+      'https://source.example/product-one.jpg',
+    ]),
+    /asset selection is invalid/,
+  )
+  assert.throws(
+    () => build(Array.from(
+      { length: 7 },
+      () => 'https://source.example/product-one.jpg',
+    )),
+    /asset selection is invalid/,
+  )
+})
+
+test('analyze legacy marker absence preserves full inclusion and candidate order', () => {
   const { campaign, generation } = analyzeSnapshots()
   const decision = evaluateEagerCaptureReuse({
     campaign,
@@ -128,6 +226,107 @@ test('analyze accepts only a fresh matching first website snapshot', () => {
       'https://source.example/product-two.jpg',
     ],
   })
+})
+
+test('analyze accepts a snapshot-equal selection marker and preserves brand asset order', () => {
+  const brandAssets = selectedSourceBrandAssets()
+  const snapshots = analyzeSnapshots({
+    campaign: { brand_assets: brandAssets },
+    generation: { brand_assets: structuredClone(brandAssets) },
+  })
+  const decision = evaluateEagerCaptureReuse({
+    ...snapshots,
+    colorScheme: 'dark',
+    productSourceMode: 'website',
+    nowMs: NOW_MS,
+  })
+
+  assert.equal(decision.reused, true)
+  assert.equal(decision.reason, 'eligible')
+  if (!decision.reused) return
+  assert.deepEqual(decision.sourceAssets, {
+    logoCandidates: ['https://source.example/logo.png'],
+    images: [
+      'https://source.example/product-two.jpg',
+      'https://source.example/product-one.jpg',
+    ],
+    selection: {
+      excludedUrls: ['https://source.example/product-one.jpg'],
+      logoExcluded: true,
+    },
+  })
+})
+
+test('analyze ignores malformed or unknown eager selection markers and fully includes assets', () => {
+  const invalidMarkers = [
+    {
+      version: 2,
+      excluded_urls: [],
+      logo_excluded: false,
+    },
+    {
+      version: 1,
+      excluded_urls: ['https://source.example/not-captured.jpg'],
+      logo_excluded: false,
+    },
+    {
+      version: 1,
+      excluded_urls: ['data:image/png;base64,YQ=='],
+      logo_excluded: false,
+    },
+    {
+      version: 1,
+      excluded_urls: [
+        'https://source.example/product-one.jpg',
+        'https://source.example/product-one.jpg',
+      ],
+      logo_excluded: false,
+    },
+    {
+      version: 1,
+      excluded_urls: Array.from(
+        { length: 7 },
+        () => 'https://source.example/product-one.jpg',
+      ),
+      logo_excluded: false,
+    },
+    {
+      version: 1,
+      excluded_urls: ['https://source.example/product-one.jpg'],
+      logo_excluded: 'yes',
+    },
+    {
+      version: 1,
+      excluded_urls: [],
+      logo_excluded: false,
+      future_field: true,
+    },
+  ]
+
+  for (const eagerSelection of invalidMarkers) {
+    const brandAssets = {
+      ...selectedSourceBrandAssets(),
+      eager_selection: eagerSelection,
+    }
+    const decision = evaluateEagerCaptureReuse({
+      ...analyzeSnapshots({
+        campaign: { brand_assets: brandAssets },
+        generation: { brand_assets: structuredClone(brandAssets) },
+      }),
+      colorScheme: 'dark',
+      productSourceMode: 'website',
+      nowMs: NOW_MS,
+    })
+    assert.equal(decision.reused, true)
+    if (!decision.reused) continue
+    assert.deepEqual(decision.sourceAssets, {
+      logoCandidates: ['https://source.example/logo.png'],
+      images: [
+        'https://source.example/product-two.jpg',
+        'https://source.example/product-one.jpg',
+      ],
+    })
+  }
 })
 
 test('analyze freshness is inclusive at 30 minutes and rejects stale or future markers', () => {
@@ -274,6 +473,12 @@ test('runAnalyzeStage reuse skips capture and still rehosts every final brand UR
   assert.equal(result.status, 200)
   assert.equal(result.captureRequests.length, 0)
   assert.deepEqual(result.captureLogs, [])
+  assert.deepEqual(result.sourceImageRequests, [
+    'https://source.example/fresh-logo.png',
+    'https://source.example/eager-logo.png',
+    'https://source.example/fresh-product.jpg',
+    'https://source.example/eager-product.jpg',
+  ])
   assert.deepEqual(
     result.storageUploads.filter((key) => key.startsWith('brand/')),
     [
@@ -299,6 +504,48 @@ test('runAnalyzeStage reuse skips capture and still rehosts every final brand UR
   }
   assert.equal(result.traceMetadata.eager_capture_reused, true)
   assert.equal(result.traceMetadata.eager_capture_reason, 'eligible')
+})
+
+test('runAnalyzeStage applies eager exclusions before fetch/rehost and traces counts without URLs', async () => {
+  const result = await runAnalyzeEagerCaptureHarness('selection')
+
+  assert.equal(result.status, 200)
+  assert.equal(result.captureRequests.length, 0)
+  assert.deepEqual(result.sourceImageRequests, [
+    'https://source.example/eager-product-two.jpg',
+    'https://source.example/eager-product-one.jpg',
+  ])
+  assert.equal(
+    result.sourceImageRequests.includes(
+      'https://source.example/eager-product-excluded.jpg',
+    ),
+    false,
+  )
+  assert.equal(
+    result.sourceImageRequests.some((url) => url.includes('logo')),
+    false,
+  )
+  assert.deepEqual(
+    result.storageUploads.filter((key) => key.startsWith('brand/')),
+    [
+      `brand/${HARNESS_CAMPAIGN_ID}/generation-fixture/img-1.png`,
+      `brand/${HARNESS_CAMPAIGN_ID}/generation-fixture/img-2.png`,
+    ],
+  )
+  assert.deepEqual(result.traceMetadata, {
+    scenario: 'product',
+    source_mode: 'website',
+    used_fallback: false,
+    eager_capture_reused: true,
+    eager_capture_reason: 'eligible',
+    eager_asset_selection_applied: true,
+    eager_asset_excluded_count: 1,
+    eager_logo_excluded: true,
+  })
+  assert.equal(
+    JSON.stringify(result.traceMetadata).includes('source.example'),
+    false,
+  )
 })
 
 test('runAnalyzeStage stale eager evidence captures once and ignores the stale board', async () => {
@@ -438,6 +685,22 @@ function analyzeSnapshots({
     ...generationOverrides,
   }
   return { campaign, generation }
+}
+
+function selectedSourceBrandAssets() {
+  return {
+    logo_url: 'https://source.example/logo.png',
+    images: [
+      { url: 'https://source.example/product-two.jpg' },
+      { url: 'https://source.example/product-one.jpg' },
+    ],
+    primary_image_url: 'https://source.example/product-two.jpg',
+    eager_selection: {
+      version: 1,
+      excluded_urls: ['https://source.example/product-one.jpg'],
+      logo_excluded: true,
+    },
+  }
 }
 
 function capturePreview(

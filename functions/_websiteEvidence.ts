@@ -83,15 +83,35 @@ export function mergeEagerSourceAssets(
   extracted: ReturnType<typeof extractAssets>,
   eager: EagerSourceAssets,
 ): ReturnType<typeof extractAssets> {
-  const logoCandidates = dedupeUrls([
-    ...extracted.logoCandidates,
-    ...eager.logoCandidates,
-  ]);
+  if (!eager.selection) {
+    const logoCandidates = dedupeUrls([
+      ...extracted.logoCandidates,
+      ...eager.logoCandidates,
+    ]);
+    return {
+      ...extracted,
+      logo: logoCandidates[0] ?? null,
+      logoCandidates,
+      images: dedupeUrls([...extracted.images, ...eager.images]),
+    };
+  }
+
+  const excluded = new Set(eager.selection.excludedUrls);
+  const selectedEagerImages = eager.images.filter((url) => !excluded.has(url));
+  const logoCandidates = eager.selection.logoExcluded
+    ? []
+    : dedupeUrls([
+        ...eager.logoCandidates,
+        ...extracted.logoCandidates,
+      ]);
   return {
     ...extracted,
     logo: logoCandidates[0] ?? null,
     logoCandidates,
-    images: dedupeUrls([...extracted.images, ...eager.images]),
+    images: dedupeUrls([
+      ...selectedEagerImages,
+      ...extracted.images.filter((url) => !excluded.has(url)),
+    ]),
   };
 }
 

@@ -728,6 +728,15 @@ async function testSinglePaidEagerCapture(browserInstance) {
     reducedMotion: 'reduce',
   })
   const successState = createState()
+  const successCapture = capturePreviewFixture(
+    'https://example.com/product',
+    'selection',
+    {
+      colorScheme: 'dark',
+      productCount: 3,
+    },
+  )
+  successState.capturePreviewResponses.push({ body: successCapture })
   await installBackendMock(successContext, successState)
   const successPage = await successContext.newPage()
   const successErrors = []
@@ -740,7 +749,34 @@ async function testSinglePaidEagerCapture(browserInstance) {
     destinationUrl: 'https://example.com/start',
   })
   await successPage.getByRole('button', { name: 'Capture website' }).click()
-  await successPage.locator('.website-evidence-panel').waitFor()
+  const evidence = successPage.locator('.website-evidence-panel')
+  await evidence.waitFor()
+  await evidence.getByText('Captured image candidates', { exact: true }).waitFor()
+  await evidence.locator('figure').filter({ hasText: 'Website logo' })
+    .getByRole('button', { name: 'Exclude Website logo as a candidate' })
+    .click()
+  await evidence.locator('figure').filter({ hasText: 'Product image 2' })
+    .getByRole('button', { name: 'Exclude Product image 2 as a candidate' })
+    .click()
+  await evidence.locator('figure').filter({ hasText: 'Product image 3' })
+    .getByRole('button', { name: 'Raise Product image 3 candidate priority' })
+    .click()
+
+  assert.deepEqual(
+    await evidence.locator('figure.is-candidate.is-included figcaption').allTextContents(),
+    ['Product image 3', 'Product image 1'],
+  )
+  assert.deepEqual(
+    await evidence.locator('figure.is-candidate.is-excluded figcaption').allTextContents(),
+    ['Website logo', 'Product image 2'],
+  )
+  assert.deepEqual(
+    await evidence.locator(
+      'figure.is-candidate.is-included .website-evidence-image-preview > b',
+    ).allTextContents(),
+    ['1', '2'],
+  )
+  await assertNoOverflow(successPage)
   await submitWizardAndWaitForEnqueue(successPage, successState, 1)
 
   assert.equal(successState.capturePreviewRequests[0].body.color_scheme, 'dark')
@@ -756,6 +792,22 @@ async function testSinglePaidEagerCapture(browserInstance) {
   assert.equal(adopted.body.eager_capture_url, 'https://example.com/product')
   assert.equal(adopted.body.eager_capture_color_scheme, 'dark')
   assert.equal(adopted.body.screenshot_key, successState.storageUploads[0].key)
+  const [productOne, productTwo, productThree] =
+    successCapture.preview.imageUrls
+  assert.deepEqual(adopted.body.brand_assets, {
+    logo_url: successCapture.preview.logoUrl,
+    images: [
+      { url: productThree },
+      { url: productOne },
+      { url: productTwo },
+    ],
+    primary_image_url: productThree,
+    eager_selection: {
+      version: 1,
+      excluded_urls: [productTwo],
+      logo_excluded: true,
+    },
+  })
   assert.equal(successState.enqueueRequests[0].p_color_scheme, 'dark')
   assertOperationOrder(successState, [
     'capture-preview',
@@ -765,6 +817,54 @@ async function testSinglePaidEagerCapture(browserInstance) {
   ])
   assert.deepEqual(successErrors, [])
   await successContext.close()
+
+  const degradedContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const degradedState = createState()
+  const degradedUrl = 'https://degraded.example/product'
+  degradedState.capturePreviewResponses.push({
+    body: {
+      ...capturePreviewFixture(degradedUrl, 'degraded'),
+      error: {
+        code: 'capture_timeout',
+        message: 'Capture request timed out.',
+        retryable: true,
+      },
+    },
+  })
+  await installBackendMock(degradedContext, degradedState)
+  const degradedPage = await degradedContext.newPage()
+
+  await openWizardForm(degradedPage, 'Website product')
+  await fillWizardRequiredFields(degradedPage, {
+    sourceUrl: degradedUrl,
+    productName: 'Signal Studio',
+    destinationUrl: 'https://example.com/start',
+  })
+  await degradedPage.getByRole('button', { name: 'Capture website' }).click()
+  const degradedEvidence = degradedPage.locator('.website-evidence-panel')
+  await degradedEvidence.waitFor()
+  await degradedEvidence.locator('figure').filter({ hasText: 'Product image 1' })
+    .getByRole('button', { name: 'Exclude Product image 1 as a candidate' })
+    .click()
+  await submitWizardAndWaitForEnqueue(degradedPage, degradedState, 1)
+
+  assert.deepEqual(degradedState.storageUploads, [])
+  assert.equal(
+    degradedState.campaignWrites.some((write) =>
+      write.method === 'PATCH' && Boolean(write.body.eager_capture_url)
+    ),
+    false,
+  )
+  assertOperationOrder(degradedState, [
+    'capture-preview',
+    'campaign-eager-clear',
+    'enqueue',
+  ])
+  await degradedContext.close()
 
   const invalidationContext = await browserInstance.newContext({
     locale: 'en-US',
@@ -2220,6 +2320,7 @@ function capturePreviewFixture(
   {
     colorScheme = 'light',
     includeMissingImage = false,
+    productCount = 1,
   } = {},
 ) {
   return {
@@ -2232,7 +2333,12 @@ function capturePreviewFixture(
       styleBoardDataUrl: EAGER_STYLE_BOARD_DATA_URL,
       logoUrl: `${BASE_URL}/fixture/logo-${marker}.svg`,
       imageUrls: [
-        `${BASE_URL}/fixture/product-${marker}.svg`,
+        ...Array.from(
+          { length: productCount },
+          (_, index) => index === 0
+            ? `${BASE_URL}/fixture/product-${marker}.svg`
+            : `${BASE_URL}/fixture/product-${marker}-${index + 1}.svg`,
+        ),
         ...(includeMissingImage
           ? [`${BASE_URL}/fixture/missing-poster.svg`]
           : []),

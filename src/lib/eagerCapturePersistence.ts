@@ -6,6 +6,7 @@ import {
   eagerStyleBoardBlob,
   eagerStyleBoardKey,
   matchEagerCaptureForAdoption,
+  type EagerCaptureSelection,
   type EagerCaptureAdoptionReason,
 } from './eagerCapture'
 import { insforge } from './insforge'
@@ -44,6 +45,7 @@ export async function syncEagerCaptureEvidence({
   useCase,
   colorScheme,
   preview,
+  selection = null,
   nowMs = Date.now(),
 }: {
   campaignId: string
@@ -51,6 +53,7 @@ export async function syncEagerCaptureEvidence({
   useCase: CreatableUseCaseId
   colorScheme: DeviceColorScheme
   preview: CapturePreview | null
+  selection?: EagerCaptureSelection | null
   nowMs?: number
 }): Promise<EagerCaptureSyncResult> {
   const match = matchEagerCaptureForAdoption({
@@ -63,7 +66,7 @@ export async function syncEagerCaptureEvidence({
 
   return withTimeout(
     match.matched
-      ? adoptCapture(campaignId, match.preview)
+      ? adoptCapture(campaignId, match.preview, selection)
       : clearCapture(campaignId, match.reason),
     EAGER_CAPTURE_SYNC_TIMEOUT_MS,
   )
@@ -72,6 +75,7 @@ export async function syncEagerCaptureEvidence({
 async function adoptCapture(
   campaignId: string,
   preview: CapturePreview,
+  selection: EagerCaptureSelection | null,
 ): Promise<EagerCaptureSyncResult> {
   const captureId = preview.captureId
   if (!captureId || !preview.styleBoardDataUrl) {
@@ -102,7 +106,7 @@ async function adoptCapture(
 
   let patch: ReturnType<typeof buildEagerCapturePatch>
   try {
-    patch = buildEagerCapturePatch(campaignId, preview, data)
+    patch = buildEagerCapturePatch(campaignId, preview, data, selection)
   } catch {
     await insforge.storage.from(BUCKET).remove(data.key).catch(() => null)
     throw new EagerCaptureSyncError(

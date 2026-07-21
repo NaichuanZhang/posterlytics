@@ -50,8 +50,8 @@ import {
   EagerCaptureSyncError,
   syncEagerCaptureEvidence,
 } from '../lib/eagerCapturePersistence'
+import type { SelectedEagerCapture } from '../lib/eagerCapture'
 import { getDeviceColorScheme } from '../lib/colorScheme'
-import type { CapturePreview } from '../lib/capturePreview'
 import {
   CREATABLE_USE_CASES,
   getUseCase,
@@ -75,7 +75,8 @@ export function CampaignWizardPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [selectedUseCaseId, setSelectedUseCaseId] = useState<CreatableUseCaseId | null>(null)
   const [sourceMismatchAttempted, setSourceMismatchAttempted] = useState(false)
-  const [eagerCapturePreview, setEagerCapturePreview] = useState<CapturePreview | null>(null)
+  const [eagerCapturePreview, setEagerCapturePreview] =
+    useState<SelectedEagerCapture | null>(null)
 
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
@@ -238,7 +239,8 @@ export function CampaignWizardPage() {
         productUrl: submittedProductUrl,
         useCase: submittedUseCase,
         colorScheme: submittedColorScheme,
-        preview: submittedEagerCapture,
+        preview: submittedEagerCapture?.preview ?? null,
+        selection: submittedEagerCapture?.selection ?? null,
       })
     } catch (cause) {
       console.warn('Eager capture evidence was not persisted; generation will recapture.', {

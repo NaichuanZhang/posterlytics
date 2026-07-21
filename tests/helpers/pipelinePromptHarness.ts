@@ -27,6 +27,7 @@ interface HarnessState {
   storageRemovals: string[]
   sourceHtmlOverride: string | null
   imageUrls: Set<string>
+  sourceImageRequests: string[]
 }
 
 export interface PipelinePromptGoldens {
@@ -240,12 +241,13 @@ export async function captureAnalyzeSourceMode(
 }
 
 export async function runAnalyzeEagerCaptureHarness(
-  scenario: 'reuse' | 'stale' | 'no-preview',
+  scenario: 'reuse' | 'selection' | 'stale' | 'no-preview',
 ): Promise<{
   status: number
   captureRequests: Array<Record<string, unknown>>
   captureLogs: string[]
   storageUploads: string[]
+  sourceImageRequests: string[]
   generation: Record<string, unknown>
   traceMetadata: Record<string, unknown>
 }> {
@@ -254,19 +256,43 @@ export async function runAnalyzeEagerCaptureHarness(
   const captureId = '10000000-0000-4000-8000-000000000001'
   const boardKey = `style-board/${CAMPAIGN_ID}/eager/${captureId}.jpg`
   const boardUrl = `https://assets.example/${boardKey}`
-  const sourceBrandAssets = {
-    logo_url: 'https://source.example/eager-logo.png',
-    images: [{ url: 'https://source.example/eager-product.jpg' }],
-    primary_image_url: 'https://source.example/eager-product.jpg',
-  }
+  const sourceBrandAssets = scenario === 'selection'
+    ? {
+        logo_url: 'https://source.example/eager-logo.png',
+        images: [
+          { url: 'https://source.example/eager-product-two.jpg' },
+          { url: 'https://source.example/eager-product-one.jpg' },
+          { url: 'https://source.example/eager-product-excluded.jpg' },
+        ],
+        primary_image_url: 'https://source.example/eager-product-two.jpg',
+        eager_selection: {
+          version: 1,
+          excluded_urls: [
+            'https://source.example/eager-product-excluded.jpg',
+          ],
+          logo_excluded: true,
+        },
+      }
+    : {
+        logo_url: 'https://source.example/eager-logo.png',
+        images: [{ url: 'https://source.example/eager-product.jpg' }],
+        primary_image_url: 'https://source.example/eager-product.jpg',
+      }
   const tokens = captureDesignTokens()
 
   state.sourceHtmlOverride = `<!doctype html>
     <html>
       <head>
         <meta property="og:logo" content="https://source.example/fresh-logo.png">
-        <meta property="og:image" content="https://source.example/fresh-product.jpg">
+        <meta property="og:image" content="${
+          scenario === 'selection'
+            ? 'https://source.example/eager-product-excluded.jpg'
+            : 'https://source.example/fresh-product.jpg'
+        }">
       </head>
+      ${scenario === 'selection'
+        ? '<img src="https://source.example/fresh-only.jpg">'
+        : ''}
       <body>Northstar turns operational data into decisions without delay.</body>
     </html>`
   for (const url of [
@@ -274,6 +300,10 @@ export async function runAnalyzeEagerCaptureHarness(
     'https://source.example/eager-logo.png',
     'https://source.example/eager-product.jpg',
     'https://source.example/fresh-product.jpg',
+    'https://source.example/eager-product-one.jpg',
+    'https://source.example/eager-product-two.jpg',
+    'https://source.example/eager-product-excluded.jpg',
+    'https://source.example/fresh-only.jpg',
   ]) {
     state.imageUrls.add(url)
   }
@@ -343,6 +373,7 @@ export async function runAnalyzeEagerCaptureHarness(
     captureRequests: structuredClone(state.captureRequests),
     captureLogs: [...state.captureLogs],
     storageUploads: [...state.storageUploads],
+    sourceImageRequests: [...state.sourceImageRequests],
     generation: structuredClone(state.generation),
     traceMetadata: structuredClone(artifact?.metadata ?? {}),
   }
@@ -614,6 +645,7 @@ function createState(
     storageRemovals: [],
     sourceHtmlOverride: null,
     imageUrls: new Set(),
+    sourceImageRequests: [],
   }
 }
 
@@ -813,9 +845,13 @@ async function withHarnessGlobals<T>(
       )
     }
     if (url === 'https://source.example/fresh-logo.png') {
+      state.sourceImageRequests.push(url)
       return new Response(null, { status: 404 })
     }
     if (state.imageUrls.has(url)) {
+      if (url.startsWith('https://source.example/')) {
+        state.sourceImageRequests.push(url)
+      }
       return new Response(
         Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
         {
