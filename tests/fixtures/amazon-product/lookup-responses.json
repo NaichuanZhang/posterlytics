@@ -1,0 +1,16 @@
+{
+  "found": {
+    "status": "found",
+    "title": "Northstar Portable Signal Lamp"
+  },
+  "unavailable": {
+    "status": "unavailable"
+  },
+  "rateLimited": {
+    "error": {
+      "code": "rate_limited",
+      "message": "Amazon product lookup is temporarily limited. Try again shortly.",
+      "retryable": true
+    }
+  }
+}

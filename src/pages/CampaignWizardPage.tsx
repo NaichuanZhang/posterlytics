@@ -9,7 +9,7 @@ import {
   Sparkles,
   Type,
 } from 'lucide-react'
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
@@ -40,6 +40,8 @@ import {
   getSourceUseCaseSwitchTarget,
   isAmazonSourceUrl,
 } from '../lib/amazonSource'
+import { parseAmazonAsin } from '../lib/amazonProduct'
+import { lookupAmazonProductTitle } from '../lib/amazonProductLookup'
 import {
   DEFAULT_POSTER_SIZE_SLUG,
   getPosterSize,
@@ -60,6 +62,7 @@ import {
 } from '../lib/useCases'
 
 type Phase = 'form' | 'uploading' | 'started' | 'error'
+type AmazonTitleLookupStatus = 'idle' | 'loading' | 'unavailable'
 
 const AMAZON_SOURCE_HOST_LIST = AMAZON_SOURCE_HOSTS.join(', ')
 
@@ -75,6 +78,8 @@ export function CampaignWizardPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [selectedUseCaseId, setSelectedUseCaseId] = useState<CreatableUseCaseId | null>(null)
   const [sourceMismatchAttempted, setSourceMismatchAttempted] = useState(false)
+  const [amazonTitleLookupStatus, setAmazonTitleLookupStatus] =
+    useState<AmazonTitleLookupStatus>('idle')
   const [eagerCapturePreview, setEagerCapturePreview] =
     useState<SelectedEagerCapture | null>(null)
 
@@ -88,6 +93,25 @@ export function CampaignWizardPage() {
   const [referenceContext, setReferenceContext] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
   const productUrlInputRef = useRef<HTMLInputElement>(null)
+  const amazonTitleRequestToken = useRef(0)
+  const activeAmazonTitleRequest = useRef<{
+    asin: string
+    controller: AbortController
+    token: number
+  } | null>(null)
+  const attemptedAmazonTitleAsins = useRef(new Set<string>())
+  const latestProductUrl = useRef(productUrl)
+  const latestProductName = useRef(productName)
+  const latestUseCaseId = useRef(selectedUseCaseId)
+  latestProductUrl.current = productUrl
+  latestProductName.current = productName
+  latestUseCaseId.current = selectedUseCaseId
+
+  useEffect(() => () => {
+    amazonTitleRequestToken.current += 1
+    activeAmazonTitleRequest.current?.controller.abort()
+    activeAmazonTitleRequest.current = null
+  }, [])
 
   const selectedUseCase = selectedUseCaseId ? getUseCase(selectedUseCaseId) : null
   const inputFields = selectedUseCase?.inputFields ?? null
@@ -114,6 +138,8 @@ export function CampaignWizardPage() {
 
   function selectUseCase(useCaseId: CreatableUseCaseId) {
     const nextUseCase = getUseCase(useCaseId)
+    cancelAmazonTitleLookup()
+    latestUseCaseId.current = useCaseId
     setSelectedUseCaseId(useCaseId)
     setSourceMismatchAttempted(false)
     setEagerCapturePreview(null)
@@ -139,6 +165,84 @@ export function CampaignWizardPage() {
     ) {
       setDestinationUrl(productUrl.trim())
     }
+  }
+
+  function cancelAmazonTitleLookup() {
+    amazonTitleRequestToken.current += 1
+    activeAmazonTitleRequest.current?.controller.abort()
+    activeAmazonTitleRequest.current = null
+    setAmazonTitleLookupStatus('idle')
+  }
+
+  async function prefillAmazonProductName() {
+    if (
+      latestUseCaseId.current !== 'amazon_listing'
+      || latestProductName.current.trim()
+    ) {
+      return
+    }
+
+    const requestedUrl = latestProductUrl.current.trim()
+    const asin = parseAmazonAsin(requestedUrl)
+    if (!asin) {
+      if (isAmazonSourceUrl(requestedUrl)) {
+        setAmazonTitleLookupStatus('unavailable')
+      }
+      return
+    }
+    if (
+      activeAmazonTitleRequest.current?.asin === asin
+      || attemptedAmazonTitleAsins.current.has(asin)
+    ) {
+      return
+    }
+
+    activeAmazonTitleRequest.current?.controller.abort()
+    const controller = new AbortController()
+    const token = ++amazonTitleRequestToken.current
+    activeAmazonTitleRequest.current = { asin, controller, token }
+    attemptedAmazonTitleAsins.current.add(asin)
+    setAmazonTitleLookupStatus('loading')
+
+    try {
+      const result = await lookupAmazonProductTitle({
+        url: requestedUrl,
+        signal: controller.signal,
+      })
+      if (!amazonTitleRequestIsCurrent(token, asin)) return
+
+      if (
+        result.status === 'found'
+        && !latestProductName.current.trim()
+      ) {
+        latestProductName.current = result.title
+        setProductName(result.title)
+        setAmazonTitleLookupStatus('idle')
+      } else {
+        setAmazonTitleLookupStatus('unavailable')
+      }
+    } catch (cause) {
+      if (
+        isAbortError(cause)
+        || !amazonTitleRequestIsCurrent(token, asin)
+      ) {
+        return
+      }
+      setAmazonTitleLookupStatus('unavailable')
+    } finally {
+      if (activeAmazonTitleRequest.current?.token === token) {
+        activeAmazonTitleRequest.current = null
+      }
+    }
+  }
+
+  function amazonTitleRequestIsCurrent(token: number, asin: string) {
+    return (
+      token === amazonTitleRequestToken.current
+      && latestUseCaseId.current === 'amazon_listing'
+      && parseAmazonAsin(latestProductUrl.current) === asin
+      && !latestProductName.current.trim()
+    )
   }
 
   async function persistDraft(): Promise<string> {
@@ -568,6 +672,8 @@ export function CampaignWizardPage() {
                 type="button"
                 className="button button-secondary button-small"
                 onClick={() => {
+                  cancelAmazonTitleLookup()
+                  latestUseCaseId.current = null
                   setSelectedUseCaseId(null)
                   setSourceMismatchAttempted(false)
                   setEagerCapturePreview(null)
@@ -623,11 +729,17 @@ export function CampaignWizardPage() {
                           : undefined
                       }
                       onChange={(event) => {
-                        setProductUrl(event.target.value)
+                        const nextUrl = event.target.value
+                        latestProductUrl.current = nextUrl
+                        cancelAmazonTitleLookup()
+                        setProductUrl(nextUrl)
                         setSourceMismatchAttempted(false)
                         setEagerCapturePreview(null)
                       }}
-                      onBlur={prefillAmazonDestination}
+                      onBlur={() => {
+                        prefillAmazonDestination()
+                        void prefillAmazonProductName()
+                      }}
                     />
                   </div>
                 )}
@@ -691,8 +803,29 @@ export function CampaignWizardPage() {
                       required={inputFields.productName === 'required'}
                       placeholder={socialCover ? t('Summer launch cover') : 'Northstar Reports'}
                       value={productName}
-                      onChange={(event) => setProductName(event.target.value)}
+                      aria-describedby={
+                        amazonListing && amazonTitleLookupStatus !== 'idle'
+                          ? 'amazon-title-lookup-status'
+                          : undefined
+                      }
+                      onChange={(event) => {
+                        const nextName = event.target.value
+                        latestProductName.current = nextName
+                        if (nextName.trim()) cancelAmazonTitleLookup()
+                        setProductName(nextName)
+                      }}
                     />
+                    {amazonListing && amazonTitleLookupStatus !== 'idle' && (
+                      <p
+                        className="hint"
+                        id="amazon-title-lookup-status"
+                        aria-live="polite"
+                      >
+                        {amazonTitleLookupStatus === 'loading'
+                          ? t('Looking up the Amazon product title...')
+                          : t('Product title unavailable. Enter the product name.')}
+                      </p>
+                    )}
                   </div>
                 )}
                 {inputFields.tagline !== 'hidden' && (
@@ -819,6 +952,10 @@ function summarizeUrl(value: string) {
   } catch {
     return value
   }
+}
+
+function isAbortError(value: unknown): boolean {
+  return value instanceof DOMException && value.name === 'AbortError'
 }
 
 function FieldRequirement({

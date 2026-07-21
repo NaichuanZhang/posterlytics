@@ -229,6 +229,8 @@ export const ENGLISH_MESSAGE_IDS = [
   'Lower candidate priority',
   'Required',
   'Product name',
+  'Looking up the Amazon product title...',
+  'Product title unavailable. Enter the product name.',
   'Tagline',
   'Optional',
   'Reports your team can act on',
@@ -912,6 +914,9 @@ export const zhCN: Record<TranslationKey, string> = {
   'Lower candidate priority': '降低候选优先级',
   Required: '必填',
   'Product name': '产品名称',
+  'Looking up the Amazon product title...': '正在查找亚马逊商品标题…',
+  'Product title unavailable. Enter the product name.':
+    '无法获取商品标题，请手动输入产品名称。',
   Tagline: '宣传语',
   Optional: '选填',
   'Reports your team can act on': '让团队把报告变成行动',

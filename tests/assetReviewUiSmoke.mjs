@@ -51,6 +51,7 @@ try {
   await testGenerationDetailsSummary(browser)
   await testFailedGenerationDetails(browser)
   await testCampaignWizardUseCases(browser)
+  await testAmazonProductTitleAssist(browser)
   await testWebsiteCapturePreview(browser)
   await testSinglePaidEagerCapture(browser)
   await testCampaignWizardDraftSwitch(browser)
@@ -543,6 +544,108 @@ async function testCampaignWizardUseCases(browserInstance) {
   assert.deepEqual(state.campaignWrites, [])
   assert.deepEqual(state.enqueueRequests, [])
   await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testAmazonProductTitleAssist(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1180, height: 860 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState()
+  state.amazonProductLookupResponses.push({
+    delayMs: 120,
+    body: {
+      status: 'found',
+      title: 'Northstar Portable Signal Lamp',
+    },
+  })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await openWizardForm(page, 'Amazon listing')
+  const source = page.locator('#product-url')
+  const productName = page.locator('#product-name')
+  assert.equal(await productName.getAttribute('required'), '')
+
+  const firstUrl = 'https://www.amazon.com/dp/B0TITLE001?tag=seller-20'
+  await source.fill(firstUrl)
+  await source.blur()
+  await waitFor(() => state.amazonProductLookupRequests.length === 1)
+  assert.deepEqual(state.amazonProductLookupRequests[0].body, { url: firstUrl })
+  assert.equal(
+    state.amazonProductLookupRequests[0].authorization,
+    'Bearer asset-review-token',
+  )
+  await source.focus()
+  await source.blur()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(state.amazonProductLookupRequests.length, 1)
+  await page.waitForFunction(
+    (title) =>
+      document.querySelector('#product-name')?.value === title,
+    'Northstar Portable Signal Lamp',
+  )
+  assert.equal(await page.locator('#destination-url').inputValue(), firstUrl)
+
+  await productName.fill('')
+  await source.fill('https://www.amazon.com/dp/B0TITLE001?ref_=same-product')
+  await source.blur()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(state.amazonProductLookupRequests.length, 1)
+
+  await productName.fill('Seller-approved product name')
+  await source.fill('https://www.amazon.com/dp/B0TITLE002')
+  await source.blur()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(state.amazonProductLookupRequests.length, 1)
+  assert.equal(await productName.inputValue(), 'Seller-approved product name')
+
+  state.amazonProductLookupResponses.push(
+    {
+      delayMs: 180,
+      body: { status: 'found', title: 'Stale product title' },
+    },
+    {
+      body: { status: 'found', title: 'Current product title' },
+    },
+  )
+  await productName.fill('')
+  await source.fill('https://www.amazon.com/dp/B0TITLE003')
+  await source.blur()
+  await waitFor(() => state.amazonProductLookupRequests.length === 2)
+  await source.fill('https://www.amazon.com/dp/B0TITLE004')
+  await source.blur()
+  await waitFor(() => state.amazonProductLookupRequests.length === 3)
+  await page.waitForFunction(
+    () =>
+      document.querySelector('#product-name')?.value === 'Current product title',
+  )
+  await new Promise((resolve) => setTimeout(resolve, 220))
+  assert.equal(await productName.inputValue(), 'Current product title')
+
+  state.amazonProductLookupResponses.push({
+    body: { status: 'unavailable' },
+  })
+  await productName.fill('')
+  await source.fill('https://www.amazon.com/dp/B0TITLE005')
+  await source.blur()
+  await waitFor(() => state.amazonProductLookupRequests.length === 4)
+  await page.getByText(
+    'Product title unavailable. Enter the product name.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(await productName.getAttribute('required'), '')
+  assert.equal(await page.locator('.campaign-form > .inline-notice-error').count(), 0)
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/amazon-title-assist-desktop.png`,
+    fullPage: true,
+  })
   assert.deepEqual(pageErrors, [])
   await context.close()
 }
@@ -1718,6 +1821,33 @@ async function installBackendMock(context, state) {
     })
   })
 
+  await context.route('**/amazon-product-lookup', async (route) => {
+    const request = route.request()
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: capturePreviewCorsHeaders(),
+      })
+      return
+    }
+
+    const body = request.postData()
+      ? JSON.parse(request.postData())
+      : {}
+    state.amazonProductLookupRequests.push({
+      authorization: request.headers().authorization ?? null,
+      body,
+    })
+    state.operationLog.push({ type: 'amazon-product-lookup' })
+    const queued = state.amazonProductLookupResponses.shift() ?? {
+      body: { status: 'unavailable' },
+    }
+    if (queued.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, queued.delayMs))
+    }
+    await capturePreviewJson(route, queued.body, queued.status ?? 200)
+  })
+
   await context.route('**/capture-preview', async (route) => {
     const request = route.request()
     if (request.method() === 'OPTIONS') {
@@ -2061,6 +2191,8 @@ function createState({
     confirmedSelections: [],
     cancelCalls: 0,
     campaignWrites: [],
+    amazonProductLookupRequests: [],
+    amazonProductLookupResponses: [],
     capturePreviewRequests: [],
     capturePreviewResponses: [],
     eagerCampaignUpdateFailuresRemaining,

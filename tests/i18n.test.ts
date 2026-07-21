@@ -117,6 +117,8 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Create from an Amazon listing plus seller-provided copy and images.':
       '基于亚马逊商品页及卖家提供的文案和图片创建。',
     'Listing copy and product images': '商品文案与产品图片',
+    'Product title unavailable. Enter the product name.':
+      '无法获取商品标题，请手动输入产品名称。',
     'Switch to Amazon listing': '切换到亚马逊商品',
     'Switch to Website product': '切换到网站产品',
     'Target platform: {platform}': '目标平台：{platform}',
