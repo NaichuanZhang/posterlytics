@@ -841,7 +841,7 @@ export const zhCN: Record<TranslationKey, string> = {
     '基于亚马逊商品页及卖家提供的文案和图片创建。',
   'Social cover': '社交媒体封面',
   'Create full-bleed artwork from creative references and direction.':
-    '根据创意参考图和方向创建全出血画面。',
+    '根据创意参考图和方向创建满版画面。',
   Event: '活动',
   'The website supplies the visual and product context.': '网站将提供视觉风格与产品信息。',
   'Use a supported Amazon listing URL. Posterlytics will use seller-provided references instead of scraping the page.':
@@ -907,7 +907,7 @@ export const zhCN: Record<TranslationKey, string> = {
     '设置画面信息、创意参考素材和可选的平台提示。',
   'Artwork details': '画面信息',
   'Name the artwork and choose its full-bleed output format.':
-    '为画面命名，并选择全出血输出格式。',
+    '为画面命名，并选择满版输出格式。',
   'Artwork name': '画面名称',
   'Summer launch cover': '夏日发布封面',
   'Supporting line': '辅助文案',
@@ -1087,7 +1087,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Download {name} poster as {format} PNG': '将 {name} 海报下载为 {format} PNG',
   'A4 poster (2:3 artwork)': 'A4 海报（2:3 画面）',
   'Portrait 3:4 with QR footer': '竖版 3:4（带二维码页脚）',
-  'Portrait 3:4 full bleed': '竖版 3:4（全出血）',
+  'Portrait 3:4 full bleed': '竖版 3:4（满版）',
   'Landscape 16:9': '横版 16:9',
   'Square 1:1': '方形 1:1',
   'Artwork-only export. No QR code or placement tracking is included.':

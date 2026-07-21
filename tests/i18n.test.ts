@@ -99,7 +99,7 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Images used for the poster': '海报使用的图片',
     'Tracked link': '追踪链接',
     'Portrait 3:4 with QR footer': '竖版 3:4（带二维码页脚）',
-    'Portrait 3:4 full bleed': '竖版 3:4（全出血）',
+    'Portrait 3:4 full bleed': '竖版 3:4（满版）',
     'Landscape 16:9': '横版 16:9',
     'Square 1:1': '方形 1:1',
     'Artwork-only export. No QR code or placement tracking is included.':
