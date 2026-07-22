@@ -1,5 +1,6 @@
 // Shared types mirroring the InsForge schema.
 import type { PosterSizeSlug } from './posterSize'
+import type { RedNotePostPlan } from './redNotePost'
 import type { UseCaseId } from './useCases'
 
 export type CampaignStatus = 'draft' | 'analyzing' | 'published'
@@ -51,6 +52,7 @@ export interface PosterContent {
   why_use_it: string[]
   features: string[]
   cta: string
+  rednote_post?: RedNotePostPlan
 }
 
 export interface EagerAssetSelectionMarker {
