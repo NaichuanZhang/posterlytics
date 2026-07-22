@@ -28,6 +28,7 @@ import {
   type TypedImageReference,
 } from './_shared.ts';
 import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
+import type { ModelCopyPolicy } from './_copySanitizer.ts';
 
 // `designer` is the layout-design agent for the `designer` poster style. It runs
 // BETWEEN analyze and hero: given the brand context analyze produced
@@ -95,7 +96,7 @@ export async function runDesignerStage(
 
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_name, tagline')
+    .select('id, product_name, tagline, cta_text')
     .eq('id', campaignId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -298,6 +299,26 @@ export async function runDesignerStage(
   const features = Array.isArray(content.features) ? (content.features as string[]).slice(0, 6) : [];
   const headline = String(content.headline ?? copy.hook ?? product);
   const whatItDoes = String(content.what_it_does ?? copy.what_it_does ?? tagline);
+  const structuredCopySources = [copy, content].flatMap((record) =>
+    Object.values(record).flatMap((value) =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string')
+        : typeof value === 'string'
+          ? [value]
+          : []
+    )
+  );
+  const protectedCopySources = [
+    product,
+    tagline,
+    String(c.cta_text ?? ''),
+    instruction,
+    ...structuredCopySources,
+  ].filter(Boolean);
+  const copyPolicy: ModelCopyPolicy = {
+    verbatimTexts: protectedCopySources,
+    emojiSourceTexts: protectedCopySources,
+  };
   const fallbackZones = [
     {
       band: 'top' as const,
@@ -405,7 +426,7 @@ export async function runDesignerStage(
       async () => {
         const raw = await aiChat(messages, { maxTokens: 1800 });
         return ensurePosterLayoutZones(
-          normalizePosterLayout(extractJson(raw), palHint, sp),
+          normalizePosterLayout(extractJson(raw), palHint, sp, copyPolicy),
           fallbackZones,
         );
       },
@@ -429,7 +450,7 @@ export async function runDesignerStage(
         async () => {
           const raw = await aiChat(messages, { maxTokens: 1800 });
           return ensurePosterLayoutZones(
-            normalizePosterLayout(extractJson(raw), palHint, sp),
+            normalizePosterLayout(extractJson(raw), palHint, sp, copyPolicy),
             fallbackZones,
           );
         },

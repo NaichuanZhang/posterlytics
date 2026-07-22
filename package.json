@@ -11,7 +11,8 @@
     "lint": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "node --test --import ./tests/register.mjs tests/*.test.ts",
     "test:ui": "node tests/durableGenerationUiSmoke.mjs && node tests/assetReviewUiSmoke.mjs",
-    "test:marketing": "node tests/marketingUiSmoke.mjs"
+    "test:marketing": "node tests/marketingUiSmoke.mjs",
+    "prompts:goldens:update": "node --import ./tests/register.mjs tests/helpers/updatePipelinePromptGoldens.ts"
   },
   "dependencies": {
     "@fontsource-variable/archivo": "^5.2.8",

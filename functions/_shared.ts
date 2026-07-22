@@ -12,6 +12,14 @@ import {
   resolveProductUseCaseRecipe,
   type ProductUseCaseRecipe,
 } from './_useCasePolicy.ts';
+import {
+  sanitizeModelCopy,
+  type ModelCopyPolicy,
+} from './_copySanitizer.ts';
+import {
+  colorNameForHex,
+  replacePainterHexColors,
+} from './_painterColors.ts';
 
 export {
   DEFAULT_POSTER_SIZE,
@@ -1887,6 +1895,7 @@ export function normalizePosterLayout(
     proportions?: WeightedPaletteColor[];
   } = {},
   direction: Partial<NormalizedStyleProfile> = {},
+  copyPolicy: ModelCopyPolicy = {},
 ): PosterLayout {
   const o = (raw ?? {}) as Record<string, unknown>;
   const pr = (o.palette_roles ?? {}) as Record<string, unknown>;
@@ -1907,7 +1916,7 @@ export function normalizePosterLayout(
       return {
         band,
         role: str(x.role).slice(0, 80),
-        content: str(x.content).slice(0, 280),
+        content: sanitizeModelCopy(x.content, 280, copyPolicy),
         ...(emphasis ? { emphasis } : {}),
         ...(align ? { align } : {}),
       };
@@ -2138,7 +2147,11 @@ export function compileLayoutPrompt(
       const emph = z.emphasis === 'high' ? ' (dominant, largest element)' : z.emphasis === 'low' ? ' (small, secondary)' : '';
       const align = z.align ? `, ${z.align}-aligned` : '';
       const text = z.content ? ` Render the exact text: "${z.content}".` : '';
-      return `- ${bandLabel[z.band]}${align}: ${z.role}${emph}.${text}`;
+      return (
+        replacePainterHexColors(
+          `- ${bandLabel[z.band]}${align}: ${z.role}${emph}.`,
+        ) + text
+      );
     })
     .join('\n');
 
@@ -2150,10 +2163,15 @@ export function compileLayoutPrompt(
     : recipe.stages.heroStyleBoardMissing;
   const proportions = p.proportions?.length
     ? p.proportions
-        .map((entry) => `${entry.color} about ${Math.round(entry.proportion * 100)}%`)
+        .map((entry) =>
+          `${colorNameForHex(entry.color, 'source-matched color')} about ${Math.round(entry.proportion * 100)}%`
+        )
         .join(', ')
     : '';
-  const supporting = [p.secondary, ...(p.supporting ?? [])].filter(Boolean).join(', ');
+  const supporting = [p.secondary, ...(p.supporting ?? [])]
+    .filter((color): color is string => !!color)
+    .map((color) => colorNameForHex(color, 'source-matched color'))
+    .join(', ');
   const visualDirection = [
     layout.imagery ? `Imagery: ${layout.imagery}` : '',
     layout.typography_treatment ? `Typography treatment: ${layout.typography_treatment}` : '',
@@ -2168,7 +2186,7 @@ export function compileLayoutPrompt(
     dense: recipe.stages.heroDenseDensityRule,
   };
 
-  return `Create a single ${getPosterFrameLabel(posterSize)} ${recipe.stages.heroPosterKind}. Custom art-directed layout (NOT a generic template).
+  const beforeZones = `Create a single ${getPosterFrameLabel(posterSize)} ${recipe.stages.heroPosterKind}. Custom art-directed layout (NOT a generic template).
 Composition: ${layout.composition}. Overall mood: ${layout.mood}. Visual treatment: ${layout.art_style}.
 ${visualDirection ? `${visualDirection}\n` : ''}${sourceEvidence}
 
@@ -2178,7 +2196,7 @@ ${actionInstructions.painterRule}
 
 ${densityInstruction[density]}
 ${logoLine}
-Color roles — use these exact colors: background ${p.bg}; primary brand color ${p.primary}; accent ${p.accent}; ${p.surface ? `surface ${p.surface}; ` : ''}body text ${p.text}.${recipe.stages.heroPaletteBoundary(supporting)}
+Color-role fills — use these named colors: background ${colorNameForHex(p.bg, 'source-matched background')} fill; primary brand ${colorNameForHex(p.primary, 'source-matched primary')} fill; accent ${colorNameForHex(p.accent, 'source-matched accent')} fill; ${p.surface ? `surface ${colorNameForHex(p.surface, 'source-matched surface')} fill; ` : ''}body text ${colorNameForHex(p.text, 'source-matched text')} fill.${recipe.stages.heroPaletteBoundary(supporting)}
 ${proportions ? recipe.stages.heroColorProportions(proportions) : ''}
 
 ${recipe.stages.heroIdentityRule}
@@ -2187,10 +2205,20 @@ ${ctx.essence || ctx.product}
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings listed below, and they must all be in ENGLISH. Do NOT print any of the layout/section descriptions, role names, position words, or instruction words as visible text — those are directions, not content.
 
 Arrange the poster top to bottom using these zones — together they fill the complete frame:
-${zoneLines || '- TOP strip: plain-text product name.\n- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.'}
+`;
+
+  const quotedZones = zoneLines ||
+    '- TOP strip: plain-text product name.\n- UPPER area: a bold hero headline.\n- MIDDLE area: supporting product detail.';
+  const afterZones = `
 
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above. High quality, sharp, 8k, intentional professional graphic-design composition.
 Avoid: garbled or misspelled text, ${recipe.stages.heroAvoidControls}, painted buttons / pills / clickable UI controls, invented logos or symbols when no authentic logo reference is attached, ${actionInstructions.painterAvoid}, more than the quoted strings, non-English text, and watermarks.`;
+
+  return (
+    replacePainterHexColors(beforeZones) +
+    quotedZones +
+    replacePainterHexColors(afterZones)
+  );
 }
 
 export async function aiImage(

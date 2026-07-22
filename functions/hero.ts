@@ -27,6 +27,10 @@ import {
   type TypedImageReference,
 } from './_shared.ts';
 import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
+import {
+  colorNameForHex,
+  replacePainterHexColors,
+} from './_painterColors.ts';
 
 // `hero` renders the registered artwork frame as a single AI image. Products
 // compile the LLM-designed poster_layout (produced by the `designer` agent) into
@@ -523,7 +527,7 @@ export async function runHeroStage(
 // LLM-designed poster_layout. If the layout is missing (designer step failed /
 // not yet run), fall back to a minimal generic editorial layout compiled from
 // the same brand context, so hero never hard-fails.
-function buildPosterPrompt(
+export function buildPosterPrompt(
   c: Record<string, unknown>,
   style: string,
   hasLogo: boolean,
@@ -548,7 +552,10 @@ function buildPosterPrompt(
   const referenceBlock =
     `\n\n${parentContext}` +
     `\n${recipe.stages.heroReferenceSummary(referenceCount)}`;
-  if (style === 'event') return buildEventPrompt(c, hasLogo, posterSize) + referenceBlock;
+  const safeReferenceBlock = replacePainterHexColors(referenceBlock);
+  if (style === 'event') {
+    return buildEventPrompt(c, hasLogo, posterSize) + safeReferenceBlock;
+  }
   const layout = c.poster_layout as PosterLayout | null;
   const ctx = {
     product: String(c.product_name ?? 'the product'),
@@ -557,9 +564,10 @@ function buildPosterPrompt(
     hasStyleBoard,
   };
   if (layout && Array.isArray(layout.zones) && layout.zones.length > 0) {
-    return compileLayoutPrompt(layout, ctx, posterSize, recipe) + referenceBlock;
+    return compileLayoutPrompt(layout, ctx, posterSize, recipe) + safeReferenceBlock;
   }
-  return compileLayoutPrompt(fallbackLayout(c, recipe), ctx, posterSize, recipe) + referenceBlock;
+  return compileLayoutPrompt(fallbackLayout(c, recipe), ctx, posterSize, recipe) +
+    safeReferenceBlock;
 }
 
 // A safe generic layout for when poster_layout is absent (designer failed or
@@ -671,14 +679,16 @@ export function buildEventPrompt(
   const sp = (c.style_profile ?? {}) as { palette?: Record<string, string> };
   const primary = sp.palette?.primary || '#1f2937';
   const accent = sp.palette?.accent || '#e8633a';
+  const primaryName = colorNameForHex(primary, 'source-matched dominant');
+  const accentName = colorNameForHex(accent, 'source-matched accent');
   const logoLine = hasLogo
     ? '\nA reference image of the host/brand LOGO is provided — reproduce it faithfully (exact shape and colors) in the top brand area; do not redraw or distort it.\n'
     : '';
   const includesQrBand = hasPosterQrBand(posterSize);
   const logisticsLines = [
-    dateLine ? `- Lower information area: a clear date line reading "${dateLine}".` : '',
-    timeLine ? `- Lower information area: a clear time line reading "${timeLine}".` : '',
-    locationLine ? `- Lower information area: a clear location line reading "${locationLine}".` : '',
+    dateLine ? quotedPainterLine('- Lower information area: a clear date line reading ', dateLine, '.') : '',
+    timeLine ? quotedPainterLine('- Lower information area: a clear time line reading ', timeLine, '.') : '',
+    locationLine ? quotedPainterLine('- Lower information area: a clear location line reading ', locationLine, '.') : '',
   ].filter(Boolean).join('\n');
   const trackingInstruction = includesQrBand
     ? `Do NOT paint any date, time, address, QR code, or barcode yourself — the real date/time/location and a scannable QR
@@ -688,32 +698,49 @@ are printed separately below the artwork as crisp real text.`
     ? 'any QR/barcode drawn by you, any painted date/time/address'
     : 'any QR/barcode drawn by you, any URL, registration link, link call-to-action, or painted button/pill';
 
-  return `Create a single ${getPosterFrameLabel(posterSize)} EVENT PROMOTION poster — an inviting, high-energy real-world event flyer
+  const beforeZones = `Create a single ${getPosterFrameLabel(posterSize)} EVENT PROMOTION poster — an inviting, high-energy real-world event flyer
 (the kind pinned to a bulletin board or shared as a story). Bold, editorial, atmospheric. NOT a product/SaaS mockup,
 NOT a web UI.
 
 Honor this event's identity — infuse its palette, mood, and motif; do not invent an unrelated corporate look:
 ${essence || title}
-Use ${primary} as the dominant color and ${accent} as the vivid accent (headline emphasis, shapes, glow). Stay within
-this palette plus neutrals. If the brand is monochrome, add tasteful ${accent} accents as the only vivid color.
+Use ${primaryName} fill as the dominant color and ${accentName} fill as the vivid accent (headline emphasis, shapes, glow). Stay within
+this palette plus neutrals. If the brand is monochrome, add tasteful ${accentName} accents as the only vivid color.
 ${logoLine}
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings below, all in ENGLISH. Do NOT
 print any layout/section descriptions, position words, or instruction words as visible text.
+`;
 
+  const quotedZones = `
 Arrange it top to bottom:
 
-- Upper area: the EVENT TITLE as an oversized, bold, celebratory display headline reading "${title}" — the dominant
-  visual element, with expressive typography and decorative accents around it.
-${hook ? `- Just below the title, a short punchy hook line reading "${hook}".` : ''}
-${hostLine ? `- A small host/presenter line reading "${hostLine}".` : ''}
+${quotedPainterLine(
+    '- Upper area: the EVENT TITLE as an oversized, bold, celebratory display headline reading ',
+    title,
+    ' — the dominant\n  visual element, with expressive typography and decorative accents around it.',
+  )}
+${hook ? quotedPainterLine('- Just below the title, a short punchy hook line reading ', hook, '.') : ''}
+${hostLine ? quotedPainterLine('- A small host/presenter line reading ', hostLine, '.') : ''}
 - Middle${includesQrBand || !logisticsLines ? ' and lower' : ''}: rich atmospheric illustration evoking the event's theme and energy (people gathering, venue mood,
   motifs from the brand essence)${includesQrBand || !logisticsLines ? ', filling the frame all the way to the bottom edge' : ''} — make it feel exciting and
   specific, not generic clip-art.
 ${!includesQrBand && logisticsLines ? `${logisticsLines}\n` : ''}
 ${trackingInstruction}
+`;
 
+  const afterZones = `
 All rendered text must be crisp, correctly spelled, legible, ENGLISH only, and limited to the quoted strings above.
 High quality, sharp, 8k, atmospheric event-poster art direction.
 Avoid: product/app UI mockups, painted buttons/pills, ${avoidInstruction},
 garbled or misspelled text, non-English text, and watermarks.`;
+
+  return (
+    replacePainterHexColors(beforeZones) +
+    quotedZones +
+    replacePainterHexColors(afterZones)
+  );
+}
+
+function quotedPainterLine(prefix: string, content: string, suffix: string): string {
+  return `${replacePainterHexColors(prefix)}"${content}"${replacePainterHexColors(suffix)}`;
 }

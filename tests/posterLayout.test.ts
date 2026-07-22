@@ -14,6 +14,7 @@ import {
   POSTER_SIZES,
 } from '../src/lib/posterSize.ts'
 import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
+import { buildPosterPrompt } from '../functions/hero.ts'
 
 const PALETTE = { bg: '#0b1020', text: '#e8ecf5', primary: '#3b82f6', accent: '#f97316' }
 
@@ -56,6 +57,48 @@ test('normalizePosterLayout caps zones at 7 and truncates long strings', () => {
   const l = normalizePosterLayout({ zones, composition: 'x'.repeat(500) }, PALETTE)
   assert.equal(l.zones.length, 7)
   assert.ok(l.composition.length <= 240)
+})
+
+test('normalizePosterLayout keeps role-only zones when copy is rejected', () => {
+  const l = normalizePosterLayout({
+    zones: [
+      { band: 'upper', role: 'hero headline', content: '{headline}' },
+      { band: 'mid', role: '', content: '[headline]' },
+    ],
+  }, PALETTE, {}, {})
+
+  assert.deepEqual(l.zones, [{
+    band: 'upper',
+    role: 'hero headline',
+    content: '',
+  }])
+})
+
+test('normalizePosterLayout preserves sourced emoji and removes decorative emoji', () => {
+  const l = normalizePosterLayout({
+    zones: [{
+      band: 'upper',
+      role: 'hero headline',
+      content: 'Visit Café ☕ Roasters 🚀',
+    }],
+  }, PALETTE, {}, {
+    verbatimTexts: ['Café ☕ Roasters'],
+    emojiSourceTexts: ['Café ☕ Roasters'],
+  })
+
+  assert.equal(l.zones[0].content, 'Visit Café ☕ Roasters')
+})
+
+test('normalizePosterLayout bounds zone copy by code point', () => {
+  const l = normalizePosterLayout({
+    zones: [{
+      band: 'upper',
+      role: 'hero headline',
+      content: '界'.repeat(300),
+    }],
+  }, PALETTE)
+
+  assert.equal(Array.from(l.zones[0].content).length, 280)
 })
 
 test('ensurePosterLayoutZones repairs sparse model output to three zones immutably', () => {
@@ -103,7 +146,9 @@ for (const size of POSTER_SIZES) {
     assert.ok(prompt.includes('"Start free today"'))
     assert.ok(prompt.includes('"Ship dashboards fast"'))
     assert.ok(prompt.includes(getPosterFrameLabel(size)))
-    assert.ok(prompt.includes('#3b82f6') && prompt.includes('#f97316'))
+    assert.match(prompt, /primary brand blue fill/)
+    assert.match(prompt, /accent orange fill/)
+    assert.doesNotMatch(prompt, /#[0-9a-f]{3,8}/i)
     assert.ok(prompt.includes('a crisp blue data brand'))
     assert.ok(/QR code or barcode drawn by you/i.test(prompt))
   })
@@ -202,8 +247,60 @@ test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', 
   assert.match(prompt, /generous intentional negative space/)
   assert.match(prompt, /metallic gold/)
   assert.match(prompt, /low-key violet rim light/)
-  assert.match(prompt, /#050711 about 72%/)
+  assert.match(prompt, /black about 72%/)
+  assert.match(prompt, /violet about 12%/)
+  assert.doesNotMatch(prompt, /#[0-9a-f]{3,8}/i)
   assert.match(prompt, /labeled STYLE BOARD image captured from the real source page is attached/)
+})
+
+test('compileLayoutPrompt preserves hex-like quoted zone copy only', () => {
+  const prompt = compileLayoutPrompt({
+    ...LAYOUT,
+    composition: 'high contrast #123456 field',
+    palette_roles: {
+      ...PALETTE,
+      bg: '#FF5733',
+    },
+    zones: [{
+      band: 'upper',
+      role: 'hero headline',
+      content: 'Launch #FF5733 at #facade',
+      emphasis: 'high',
+    }],
+  }, {
+    product: 'Acme',
+    essence: 'A bright #decade identity',
+  })
+
+  const quotedCopy = '"Launch #FF5733 at #facade"'
+  assert.match(prompt, /background coral fill/)
+  assert.ok(prompt.includes(quotedCopy))
+  assert.doesNotMatch(prompt.replace(quotedCopy, ''), /#[0-9a-f]{3,8}/i)
+})
+
+test('buildPosterPrompt scrubs hex in fallback and parent iteration context', () => {
+  const prompt = buildPosterPrompt({
+    product_name: 'Acme',
+    tagline: 'Ship with confidence',
+    instruction: 'Keep the #123456 field and refine the hierarchy.',
+    brand_essence: 'A precise #abcdef identity',
+    poster_content: {
+      headline: 'Move faster',
+      what_it_does: 'One clear workflow',
+      features: ['Fast setup'],
+    },
+    style_profile: {
+      palette: PALETTE,
+    },
+    reference_images: [],
+  }, 'designer', false, false, {
+    ...LAYOUT,
+    composition: 'parent #fedcba composition',
+  }, true)
+
+  assert.match(prompt, /USER REQUEST: Keep the \w+(?: \w+)* field and refine the hierarchy\./)
+  assert.match(prompt, /PARENT LAYOUT JSON/)
+  assert.doesNotMatch(prompt, /#[0-9a-f]{3,8}/i)
 })
 
 test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => {

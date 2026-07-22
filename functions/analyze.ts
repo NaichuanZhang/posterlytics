@@ -52,6 +52,11 @@ import {
   type ProductUseCaseRecipe,
   useCaseSourceMismatch,
 } from './_useCasePolicy.ts';
+import {
+  sanitizeModelCopy,
+  sanitizeModelCopyList,
+  type ModelCopyPolicy,
+} from './_copySanitizer.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
 //   1. scrapes the product site (HTML)
@@ -211,6 +216,16 @@ export async function runAnalyzeStage(
   const persistedScenario = (generation as { scenario?: string | null }).scenario;
   const scenario = persistedScenario === 'event' ? 'event' : 'product';
   const referenceContext = String((generation as Record<string, unknown>).instruction ?? '').trim().slice(0, 4000);
+  const protectedCopySources = [
+    String((campaign as Record<string, unknown>).product_name ?? ''),
+    String((campaign as Record<string, unknown>).tagline ?? ''),
+    String((campaign as Record<string, unknown>).cta_text ?? ''),
+    referenceContext,
+  ].filter(Boolean);
+  const copyPolicy: ModelCopyPolicy = {
+    verbatimTexts: protectedCopySources,
+    emojiSourceTexts: protectedCopySources,
+  };
   const userReferenceImages = Array.isArray((generation as Record<string, unknown>).reference_images)
     ? ((generation as Record<string, unknown>).reference_images as Array<Record<string, unknown>>)
         .filter((image) => typeof image.url === 'string' && image.url)
@@ -413,6 +428,7 @@ export async function runAnalyzeStage(
       referenceImages,
       attachedImages: preparedAnalysisImages.attachedImages,
       trace,
+      copyPolicy,
     });
     const { error: upErrEv } = await client.database
       .from('poster_generations')
@@ -595,6 +611,7 @@ export async function runAnalyzeStage(
           siteColors,
           design_tokens,
           productRecipe,
+          copyPolicy,
         );
       },
     );
@@ -625,6 +642,7 @@ export async function runAnalyzeStage(
             siteColors,
             design_tokens,
             productRecipe,
+            copyPolicy,
           );
         },
       );
@@ -645,6 +663,7 @@ export async function runAnalyzeStage(
         siteColors,
         design_tokens,
         productRecipe,
+        copyPolicy,
       );
       usedFallback = true;
     }
@@ -790,6 +809,7 @@ function normalize(
   siteColors: string[] = [],
   tokens: DesignTokens | null = null,
   recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
+  copyPolicy: ModelCopyPolicy = {},
 ): ParsedContent {
   const recordOf = (value: unknown): Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -883,17 +903,19 @@ function normalize(
 
   // The layout itself is designed later by the `designer` function; the product
   // poster_spec carries only what the SPA band reads (qr_label) + the urls line.
+  const modelQrLabel = sanitizeModelCopy(o.qr_label, 40, copyPolicy);
   const qrLabel = isReferenceOnlyProductRecipe(recipe)
     ? ''
-    : String((o.qr_label as unknown) ?? '').slice(0, 40) || 'Scan to start';
+    : modelQrLabel || 'Scan to start';
   const poster_spec = { qr_label: qrLabel, urls: c.product_url || '' };
 
-  const contentHeadline = (lc.headline as string) || product;
-  const contentWhat = (lc.what_it_does as string) || tagline;
-  const contentFeatures = asArray(lc.features).slice(0, 6);
+  const contentHeadline = sanitizeModelCopy(lc.headline, 140, copyPolicy) || product;
+  const contentWhat = sanitizeModelCopy(lc.what_it_does, 280, copyPolicy) || tagline;
+  const contentFeatures = sanitizeModelCopyList(lc.features, 6, 160, copyPolicy);
+  const modelCta = sanitizeModelCopy(lc.cta, 80, copyPolicy);
   const contentCta = isReferenceOnlyProductRecipe(recipe)
-    ? String(lc.cta ?? '').slice(0, 80)
-    : (lc.cta as string) || c.cta_text || 'Learn more';
+    ? modelCta
+    : modelCta || c.cta_text || 'Learn more';
 
   // poster_copy kept for backward-compat (editor fallbacks); derived straight
   // from the structured content now that the template specs are gone.
@@ -910,8 +932,8 @@ function normalize(
     poster_content: {
       headline: contentHeadline,
       what_it_does: contentWhat,
-      how_it_works: asArray(lc.how_it_works).slice(0, 4),
-      why_use_it: asArray(lc.why_use_it).slice(0, 4),
+      how_it_works: sanitizeModelCopyList(lc.how_it_works, 4, 160, copyPolicy),
+      why_use_it: sanitizeModelCopyList(lc.why_use_it, 4, 160, copyPolicy),
       features: contentFeatures,
       cta: contentCta,
     },
@@ -931,8 +953,9 @@ function fallbackContent(
   siteColors: string[] = [],
   tokens: DesignTokens | null = null,
   recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
+  copyPolicy: ModelCopyPolicy = {},
 ): ParsedContent {
-  return normalize({}, c, siteColors, tokens, recipe);
+  return normalize({}, c, siteColors, tokens, recipe, copyPolicy);
 }
 
 // =====================================================================
@@ -951,6 +974,7 @@ async function analyzeEvent(args: {
   referenceImages: TypedImageReference[];
   attachedImages: TraceImageAsset[];
   trace: StageTraceRecorder;
+  copyPolicy: ModelCopyPolicy;
 }): Promise<ParsedContent & { prompt: { system: string; user: string } }> {
   const {
     campaign,
@@ -962,6 +986,7 @@ async function analyzeEvent(args: {
     referenceImages,
     attachedImages,
     trace,
+    copyPolicy,
   } = args;
   const lines = formatEventLines(eventDetails);
   const title = eventDetails.event_name || campaign.product_name || 'the event';
@@ -1029,7 +1054,17 @@ async function analyzeEvent(args: {
     ev = {};
   }
 
-  return normalizeEvent(ev, campaign, eventDetails, lines, siteColors, tokens, rsvpUrl, { system: sys, user });
+  return normalizeEvent(
+    ev,
+    campaign,
+    eventDetails,
+    lines,
+    siteColors,
+    tokens,
+    rsvpUrl,
+    { system: sys, user },
+    copyPolicy,
+  );
 }
 
 // Assemble an EventPosterSpec + event copy from the model output, forcing the
@@ -1043,6 +1078,7 @@ function normalizeEvent(
   tokens: DesignTokens | null,
   rsvpUrl: string,
   prompt: { system: string; user: string },
+  copyPolicy: ModelCopyPolicy = {},
 ): ParsedContent & { prompt: { system: string; user: string } } {
   const sp = (raw.style_profile ?? {}) as Record<string, unknown>;
   const lc = (raw.poster_content ?? {}) as Record<string, unknown>;
@@ -1057,9 +1093,21 @@ function normalizeEvent(
     (isVivid(modelPalette.accent) ? modelPalette.accent : '#e8633a');
   const primary = tokens?.colors.primary || modelPalette.primary || '#1f2937';
 
-  const rsvpLabel = (ps.rsvp_label as string) || c.cta_text || 'Scan to RSVP';
+  const rsvpLabel =
+    sanitizeModelCopy(ps.rsvp_label, 40, copyPolicy) ||
+    c.cta_text ||
+    'Scan to RSVP';
+  const headline = sanitizeModelCopy(lc.headline, 140, copyPolicy);
+  const pitch = sanitizeModelCopy(lc.what_it_does, 280, copyPolicy);
+  const blurb = sanitizeModelCopy(ps.blurb, 240, copyPolicy);
+  const hook =
+    sanitizeModelCopy(ps.hook, 120, copyPolicy) ||
+    headline ||
+    `You're invited: ${title}`;
   const poster_spec = {
     title,
+    hook,
+    blurb: blurb || pitch,
     date_line: lines.date_line,
     time_line: lines.time_line,
     location_line: lines.location_line,
@@ -1069,7 +1117,7 @@ function normalizeEvent(
     urls: rsvpUrl,
   };
 
-  const hook = (ps.hook as string) || (lc.headline as string) || `You're invited: ${title}`;
+  const features = sanitizeModelCopyList(lc.features, 6, 160, copyPolicy);
 
   return {
     style_profile: {
@@ -1088,17 +1136,17 @@ function normalizeEvent(
     },
     poster_copy: {
       hook,
-      what_it_does: (ps.blurb as string) || (lc.what_it_does as string) || '',
-      features: asArray(lc.features).slice(0, 3),
+      what_it_does: blurb || pitch,
+      features: features.slice(0, 3),
       cta: rsvpLabel,
     },
     poster_content: {
-      headline: (lc.headline as string) || title,
-      what_it_does: (lc.what_it_does as string) || (ps.blurb as string) || '',
-      how_it_works: asArray(lc.how_it_works).slice(0, 4),
-      why_use_it: asArray(lc.why_use_it).slice(0, 4),
-      features: asArray(lc.features).slice(0, 6),
-      cta: (lc.cta as string) || rsvpLabel,
+      headline: headline || title,
+      what_it_does: pitch || blurb,
+      how_it_works: sanitizeModelCopyList(lc.how_it_works, 4, 160, copyPolicy),
+      why_use_it: sanitizeModelCopyList(lc.why_use_it, 4, 160, copyPolicy),
+      features,
+      cta: sanitizeModelCopy(lc.cta, 80, copyPolicy) || rsvpLabel,
     },
     brand_essence: String(raw.brand_essence ?? `${title}: a warm, inviting event`).slice(0, 400),
     poster_spec: poster_spec as unknown,

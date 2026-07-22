@@ -51,3 +51,27 @@ test('bandless event prompt paints exact logistics without promising a footer', 
   assert.doesNotMatch(prompt, /printed separately below the artwork/)
   assert.doesNotMatch(prompt, /Do NOT paint any date, time, address/)
 })
+
+test('event prompt uses color names while preserving hex-like quoted copy', () => {
+  const prompt = buildEventPrompt({
+    ...EVENT,
+    product_name: '#FF5733 Summit',
+    brand_essence: 'A luminous #123456 gathering',
+    poster_spec: {
+      ...EVENT.poster_spec,
+      title: '#FF5733 Summit',
+      hook: 'Meet at #facade',
+    },
+  }, false, getPosterSize('rednote_cover_3x4'))
+
+  assert.match(prompt, /charcoal fill as the dominant color/)
+  assert.match(prompt, /coral fill as the vivid accent/)
+  assert.match(prompt, /headline reading "#FF5733 Summit"/)
+  assert.match(prompt, /hook line reading "Meet at #facade"/)
+  assert.doesNotMatch(
+    prompt
+      .replace('"#FF5733 Summit"', '')
+      .replace('"Meet at #facade"', ''),
+    /#[0-9a-f]{3,8}/i,
+  )
+})
