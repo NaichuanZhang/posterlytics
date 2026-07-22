@@ -2,11 +2,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
+  captureRedNoteAnalyzeFallbackDiagnostics,
   captureAnalyzeSourceMode,
   captureCurrentPipelinePromptGoldens,
   captureRedNotePipelineDiagnostics,
   type PipelinePromptGoldens,
 } from './helpers/pipelinePromptHarness.ts'
+import {
+  projectRedNotePostPlanToPosterContent,
+  splitRedNoteSourceCopy,
+} from '../src/lib/redNotePost.ts'
 
 type LegacyPromptGoldens = {
   analyze: Pick<
@@ -35,9 +40,16 @@ const socialExpected = JSON.parse(readFileSync(
   designer: PipelinePromptGoldens['designer']['social_cover']
   hero: PipelinePromptGoldens['hero']['social_cover']
 }
+const redNoteAnalyzeExpected = JSON.parse(readFileSync(
+  new URL('./fixtures/redNoteAnalyzePromptGolden.json', import.meta.url),
+  'utf8',
+)) as PipelinePromptGoldens['analyze']['rednote_post']
 const actualPromise = captureCurrentPipelinePromptGoldens()
 const redNoteDiagnosticsPromise = actualPromise.then(
   () => captureRedNotePipelineDiagnostics(),
+)
+const redNoteFallbackPromise = redNoteDiagnosticsPromise.then(
+  () => captureRedNoteAnalyzeFallbackDiagnostics(),
 )
 
 test('website and Amazon analyze prompts match the pre-recipe byte goldens', async () => {
@@ -93,18 +105,17 @@ test('social analyze, designer, and hero prompts match their own goldens', async
   assert.equal(actual.hero.social_cover, socialExpected.hero)
 })
 
-test('RedNote reuses the social prompt recipe byte-for-byte', async () => {
+test('RedNote has its own analyze golden and preserves downstream social parity', async () => {
   const actual = await actualPromise
 
-  assert.deepEqual(actual.analyze.rednote_post, socialExpected.analyze)
+  assert.deepEqual(actual.analyze.rednote_post, redNoteAnalyzeExpected)
   assert.deepEqual(actual.designer.rednote_post, socialExpected.designer)
   assert.equal(actual.hero.rednote_post, socialExpected.hero)
-  assert.deepEqual(actual.analyze.rednote_post, actual.analyze.social_cover)
   assert.deepEqual(actual.designer.rednote_post, actual.designer.social_cover)
   assert.equal(actual.hero.rednote_post, actual.hero.social_cover)
 })
 
-test('RedNote keeps the single-call cover pipeline and writes no page plan', async () => {
+test('RedNote keeps the single-call cover pipeline and persists its page plan', async () => {
   assert.deepEqual(await redNoteDiagnosticsPromise, {
     analyzeChatCalls: 1,
     analyzeImageCalls: 0,
@@ -112,7 +123,67 @@ test('RedNote keeps the single-call cover pipeline and writes no page plan', asy
     designerImageCalls: 0,
     heroChatCalls: 0,
     heroImageCalls: 1,
-    wroteRedNotePost: false,
+    wroteRedNotePost: true,
+    persistedPosterContent: {
+      headline: 'Make the light the hook',
+      what_it_does: 'Keep the mood kinetic',
+      how_it_works: [],
+      why_use_it: [],
+      features: ['Lead with motion', 'Hold the focus'],
+      cta: '',
+      rednote_post: {
+        schema_version: 1,
+        pages: [
+          {
+            kind: 'cover',
+            title: 'Make the light the hook',
+            subtitle: 'Keep the mood kinetic',
+          },
+          {
+            kind: 'content',
+            heading: 'Lead with motion',
+            blocks: ['Build the composition around a diagonal sweep.'],
+          },
+          {
+            kind: 'content',
+            heading: 'Hold the focus',
+            blocks: ['Let the light band carry the visual hook.'],
+          },
+        ],
+      },
+    },
+    redNoteSchemaVersion: 1,
+    redNotePageCount: 3,
+  })
+})
+
+test('RedNote analyze treats draft copy as the sole factual copy source', async () => {
+  const actual = await actualPromise
+  const system = actual.analyze.rednote_post.system
+  const user = actual.analyze.rednote_post.user
+
+  assert.match(user, /SOURCE DRAFT COPY:/)
+  assert.doesNotMatch(user, /CREATIVE CONTEXT FROM THE USER:/)
+  assert.match(system, /without inventing facts, claims, experiences, or offers/)
+  assert.match(system, /Do not translate unless the user explicitly requests/)
+  assert.match(system, /exactly one leading cover followed by 1-8 ordered content pages/)
+  assert.match(system, /meaningful CJK punctuation/)
+  assert.match(system, /visual evidence only/)
+})
+
+test('RedNote projects deterministic draft copy after both analyze attempts fail', async () => {
+  const fallbackPlan = splitRedNoteSourceCopy({
+    title: 'Summer Signals',
+    subtitle: 'A new season in motion',
+    sourceCopy:
+      'Keep the mood kinetic and make the diagonal light band the visual hook.',
+  })
+
+  assert.deepEqual(await redNoteFallbackPromise, {
+    analyzeChatCalls: 2,
+    analyzeImageCalls: 0,
+    usedFallback: true,
+    posterContent: projectRedNotePostPlanToPosterContent(fallbackPlan),
   })
 })
 

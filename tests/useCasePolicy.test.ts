@@ -20,7 +20,14 @@ test('resolver exposes product recipes and an isolated event-bespoke sentinel', 
   assert.equal(amazon.acquisitionMode, 'amazon-reference')
   assert.equal(social.kind, 'product')
   assert.equal(social.acquisitionMode, 'reference-only')
-  assert.deepEqual(redNote, { ...social, id: 'rednote_post' })
+  assert.deepEqual(redNote, {
+    ...social,
+    id: 'rednote_post',
+    analyze: {
+      ...social.analyze,
+      outputMode: 'rednote-post-v1',
+    },
+  })
   assert.equal(
     isReferenceOnlyProductRecipe(resolveProductUseCaseRecipe('social_cover')),
     true,
@@ -110,11 +117,19 @@ test('social recipe is reference-only and contains no website or URL evidence la
   assert.doesNotMatch(materialized, /\bDOM\b/)
 })
 
-test('RedNote recipe reuses the social recipe byte-for-byte apart from its id', () => {
+test('RedNote isolates its analyze output mode while reusing downstream social policy', () => {
   const social = resolveProductUseCaseRecipe('social_cover')
   const redNote = resolveProductUseCaseRecipe('rednote_post')
 
-  assert.deepEqual(redNote, { ...social, id: 'rednote_post' })
+  assert.notStrictEqual(redNote.analyze, social.analyze)
+  assert.equal(social.analyze.outputMode, undefined)
+  assert.equal(redNote.analyze.outputMode, 'rednote-post-v1')
+  assert.deepEqual(
+    { ...redNote.analyze, outputMode: undefined },
+    { ...social.analyze, outputMode: undefined },
+  )
+  assert.strictEqual(redNote.references, social.references)
+  assert.strictEqual(redNote.stages, social.stages)
 })
 
 test('reference-purpose recipes match every pre-recipe byte string', () => {

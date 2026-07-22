@@ -12,7 +12,8 @@
     "test": "node --test --import ./tests/register.mjs tests/*.test.ts",
     "test:ui": "node tests/durableGenerationUiSmoke.mjs && node tests/assetReviewUiSmoke.mjs",
     "test:marketing": "node tests/marketingUiSmoke.mjs",
-    "prompts:goldens:update": "node --import ./tests/register.mjs tests/helpers/updatePipelinePromptGoldens.ts"
+    "prompts:goldens:update": "node --import ./tests/register.mjs tests/helpers/updatePipelinePromptGoldens.ts",
+    "prompts:rednote-analyze:update": "node --import ./tests/register.mjs tests/helpers/updateRedNoteAnalyzePromptGolden.ts"
   },
   "dependencies": {
     "@fontsource-variable/archivo": "^5.2.8",

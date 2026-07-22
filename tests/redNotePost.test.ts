@@ -6,7 +6,9 @@ import {
   REDNOTE_POST_MIN_PAGES,
   getRedNotePageComposition,
   normalizeRedNotePostPlan,
+  projectRedNotePostPlanToPosterContent,
   splitRedNoteSourceCopy,
+  type RedNotePostPlan,
   type RedNoteRect,
   type RedNoteSourceCopyInput,
 } from '../src/lib/redNotePost.ts'
@@ -36,6 +38,88 @@ test('malformed model output falls back to deterministic caller-supplied copy', 
     expected,
   )
   assert.deepEqual(normalizeRedNotePostPlan(null, FALLBACK), expected)
+})
+
+test('model text normalization never rewrites deterministic fallback fields', () => {
+  const fallback = {
+    title: 'User title ✨',
+    subtitle: 'User subtitle ✨',
+    sourceCopy: 'User body ✨.',
+  }
+  const normalizedValues: Array<[string, number]> = []
+  const plan = normalizeRedNotePostPlan({
+    pages: [
+      {
+        kind: 'cover',
+        title: '✨',
+      },
+      {
+        kind: 'content',
+        heading: 'Model heading ✨',
+        blocks: ['Model block ✨'],
+      },
+    ],
+  }, fallback, (value, maxCodePoints) => {
+    normalizedValues.push([value, maxCodePoints])
+    return value.replaceAll('✨', '').trim()
+  })
+
+  assert.deepEqual(plan, {
+    schema_version: 1,
+    pages: [
+      {
+        kind: 'cover',
+        title: 'User title ✨',
+        subtitle: 'User subtitle ✨',
+      },
+      {
+        kind: 'content',
+        heading: 'Model heading',
+        blocks: ['Model block'],
+      },
+    ],
+  })
+  assert.deepEqual(normalizedValues, [
+    ['✨', 48],
+    ['Model block ✨', 160],
+    ['Model heading ✨', 64],
+  ])
+  assert.equal(
+    normalizedValues.some(([value]) => value.startsWith('User ')),
+    false,
+  )
+})
+
+test('malformed model plans preserve fallback copy without invoking the model normalizer', () => {
+  const calls: string[] = []
+  const plan = normalizeRedNotePostPlan(
+    { schema_version: 1, pages: null },
+    FALLBACK,
+    (value) => {
+      calls.push(value)
+      return ''
+    },
+  )
+
+  assert.deepEqual(plan, splitRedNoteSourceCopy(FALLBACK))
+  assert.deepEqual(calls, [])
+})
+
+test('partial model plans use deterministic source-copy pages after the model cover', () => {
+  const fallbackPages = splitRedNoteSourceCopy(FALLBACK).pages.slice(1)
+  const plan = normalizeRedNotePostPlan({
+    schema_version: 1,
+    pages: [{ kind: 'cover', title: 'Optimized hook' }],
+  }, FALLBACK)
+
+  assert.deepEqual(plan.pages, [
+    {
+      kind: 'cover',
+      title: 'Optimized hook',
+      subtitle: FALLBACK.subtitle,
+    },
+    ...fallbackPages,
+  ])
 })
 
 test('normalization moves one cover to the front and preserves unique content order', () => {
@@ -187,6 +271,40 @@ test('normalization truncates by Unicode code point without splitting surrogate 
   )
 })
 
+test('CJK and Latin model copy obeys every Unicode code-point bound', () => {
+  const plan = normalizeRedNotePostPlan({
+    pages: [
+      {
+        kind: 'cover',
+        title: '标题'.repeat(30),
+        subtitle: '副标题A'.repeat(40),
+      },
+      {
+        kind: 'content',
+        heading: '章节Heading'.repeat(20),
+        blocks: Array.from(
+          { length: 6 },
+          (_, index) => `第${index + 1}段Block`.repeat(40),
+        ),
+      },
+    ],
+  }, FALLBACK)
+  const cover = plan.pages[0]
+  const content = plan.pages[1]
+  assert.equal(cover.kind, 'cover')
+  assert.equal(content.kind, 'content')
+  if (cover.kind !== 'cover' || content.kind !== 'content') return
+
+  assert.equal(Array.from(cover.title).length, 48)
+  assert.equal(Array.from(cover.subtitle ?? '').length, 96)
+  assert.equal(Array.from(content.heading).length, 64)
+  assert.equal(content.blocks.length, 4)
+  assert.equal(
+    content.blocks.every((block) => Array.from(block).length <= 160),
+    true,
+  )
+})
+
 test('normalization removes repeated blocks and duplicate content pages', () => {
   const repeatedPage = {
     kind: 'content',
@@ -227,6 +345,54 @@ test('fallback output contains only caller-supplied text or its substrings', () 
       `Unexpected fallback text: ${value}`,
     )
   }
+})
+
+test('projection maps the optimized cover and first six unique headings', () => {
+  const plan: RedNotePostPlan = {
+    schema_version: 1,
+    pages: [
+      {
+        kind: 'cover',
+        title: 'A stronger hook',
+        subtitle: 'A clearer promise',
+      },
+      { kind: 'content', heading: 'Start here', blocks: ['One'] },
+      { kind: 'content', heading: 'Start here', blocks: ['Two'] },
+      { kind: 'content', heading: 'Second', blocks: ['Three'] },
+      { kind: 'content', heading: 'Third', blocks: ['Four'] },
+      { kind: 'content', heading: 'Fourth', blocks: ['Five'] },
+      { kind: 'content', heading: 'Fifth', blocks: ['Six'] },
+      { kind: 'content', heading: 'Sixth', blocks: ['Seven'] },
+      { kind: 'content', heading: 'Seventh', blocks: ['Eight'] },
+    ],
+  }
+  const snapshot = structuredClone(plan)
+
+  assert.deepEqual(projectRedNotePostPlanToPosterContent(plan), {
+    headline: 'A stronger hook',
+    what_it_does: 'A clearer promise',
+    how_it_works: [],
+    why_use_it: [],
+    features: ['Start here', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'],
+    cta: '',
+    rednote_post: snapshot,
+  })
+  assert.deepEqual(plan, snapshot)
+})
+
+test('projection uses an empty supporting line when the cover has no subtitle', () => {
+  const plan: RedNotePostPlan = {
+    schema_version: 1,
+    pages: [
+      { kind: 'cover', title: 'Cover only' },
+      { kind: 'content', heading: 'Body', blocks: [] },
+    ],
+  }
+
+  assert.equal(
+    projectRedNotePostPlanToPosterContent(plan).what_it_does,
+    '',
+  )
 })
 
 test('normalization and splitting do not mutate caller inputs', () => {

@@ -66,6 +66,9 @@ export interface RedNotePipelineDiagnostics {
   heroChatCalls: number
   heroImageCalls: number
   wroteRedNotePost: boolean
+  persistedPosterContent: unknown
+  redNoteSchemaVersion: unknown
+  redNotePageCount: unknown
 }
 
 const USER_ID = 'user-fixture'
@@ -74,6 +77,7 @@ const GENERATION_ID = 'generation-fixture'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const CAPTURE_SERVICE_URL = 'https://capture.fixture'
 const SOCIAL_REFERENCE_URL = 'https://assets.example/social-reference.png'
+const CHAT_FAILURE = Symbol('chat-failure')
 
 const PRODUCT_LAYOUT = {
   composition: 'asymmetric editorial stack',
@@ -167,6 +171,27 @@ const SOCIAL_LAYOUT = {
   ],
 }
 
+const REDNOTE_MODEL_PLAN = {
+  schema_version: 1,
+  pages: [
+    {
+      kind: 'cover',
+      title: 'Make the light the hook',
+      subtitle: 'Keep the mood kinetic',
+    },
+    {
+      kind: 'content',
+      heading: 'Lead with motion',
+      blocks: ['Build the composition around a diagonal sweep.'],
+    },
+    {
+      kind: 'content',
+      heading: 'Hold the focus',
+      blocks: ['Let the light band carry the visual hook.'],
+    },
+  ],
+}
+
 export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePromptGoldens> {
   return {
     analyze: {
@@ -216,7 +241,7 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
   const analyzeState = createState('rednote_post', null, 'product')
   await withHarnessGlobals(
     analyzeState,
-    productAnalyzeResponse(),
+    productAnalyzeResponse('rednote_post'),
     () => runAnalyzeStage({
       client: createHarnessClient(analyzeState) as never,
       userId: USER_ID,
@@ -256,6 +281,7 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
     }),
   )
 
+  const analysisMetadata = analysisArtifactMetadata(analyzeState)
   return {
     analyzeChatCalls: analyzeState.chatRequests,
     analyzeImageCalls: analyzeState.imageRequests,
@@ -265,6 +291,40 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
     heroImageCalls: heroState.imageRequests,
     wroteRedNotePost: [analyzeState, designerState, heroState]
       .some(hasRedNotePostPlan),
+    persistedPosterContent: structuredClone(
+      analyzeState.generation.poster_content,
+    ),
+    redNoteSchemaVersion: analysisMetadata.rednote_schema_version,
+    redNotePageCount: analysisMetadata.rednote_page_count,
+  }
+}
+
+export async function captureRedNoteAnalyzeFallbackDiagnostics(): Promise<{
+  analyzeChatCalls: number
+  analyzeImageCalls: number
+  usedFallback: unknown
+  posterContent: unknown
+}> {
+  const state = createState('rednote_post', null, 'product')
+  await withHarnessGlobals(
+    state,
+    CHAT_FAILURE,
+    () => runAnalyzeStage({
+      client: createHarnessClient(state) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      colorScheme: 'light',
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+
+  return {
+    analyzeChatCalls: state.chatRequests,
+    analyzeImageCalls: state.imageRequests,
+    usedFallback: analysisArtifactMetadata(state).used_fallback,
+    posterContent: structuredClone(state.generation.poster_content),
   }
 }
 
@@ -303,7 +363,7 @@ export async function captureAnalyzeSourceMode(
   const state = createState(useCase, productUrl, 'product')
   await withHarnessGlobals(
     state,
-    productAnalyzeResponse(),
+    productAnalyzeResponse(useCase),
     () => runAnalyzeStage({
       client: createHarnessClient(state) as never,
       userId: USER_ID,
@@ -468,7 +528,9 @@ async function captureAnalyzePrompt(
   const state = createState(useCase, productUrl, scenario)
   const response = await withHarnessGlobals(
     state,
-    scenario === 'event' ? eventAnalyzeResponse() : productAnalyzeResponse(),
+    scenario === 'event'
+      ? eventAnalyzeResponse()
+      : productAnalyzeResponse(useCase),
     () => runAnalyzeStage({
       client: createHarnessClient(state) as never,
       userId: USER_ID,
@@ -858,7 +920,7 @@ class HarnessQuery {
 
 async function withHarnessGlobals<T>(
   state: HarnessState,
-  chatResponse: Record<string, unknown> | null,
+  chatResponse: Record<string, unknown> | null | typeof CHAT_FAILURE,
   run: () => Promise<T>,
 ): Promise<T> {
   const originalFetch = globalThis.fetch
@@ -912,6 +974,9 @@ async function withHarnessGlobals<T>(
         })
       }
       state.chatRequests += 1
+      if (chatResponse === CHAT_FAILURE) {
+        throw new Error('Fixture chat failure')
+      }
       return Response.json({
         choices: [{
           message: {
@@ -973,10 +1038,24 @@ async function withHarnessGlobals<T>(
 }
 
 function hasRedNotePostPlan(state: HarnessState): boolean {
+  return redNotePostPlanOf(state) !== undefined
+}
+
+function redNotePostPlanOf(state: HarnessState): unknown {
   const posterContent = state.generation.poster_content
-  return !!posterContent
-    && typeof posterContent === 'object'
-    && Object.prototype.hasOwnProperty.call(posterContent, 'rednote_post')
+  if (!posterContent || typeof posterContent !== 'object') return undefined
+  const plan = (posterContent as Record<string, unknown>).rednote_post
+  return plan === undefined ? undefined : structuredClone(plan)
+}
+
+function analysisArtifactMetadata(
+  state: HarnessState,
+): Record<string, unknown> {
+  const artifact = (state.traces.analyze.artifacts as Array<{
+    kind?: unknown
+    metadata?: Record<string, unknown>
+  }>).find((candidate) => candidate.kind === 'analysis')
+  return artifact?.metadata ?? {}
 }
 
 function sourceHtml(scenario: string): string {
@@ -1025,7 +1104,7 @@ function sourceHtml(scenario: string): string {
 </html>`
 }
 
-function productAnalyzeResponse(): Record<string, unknown> {
+function productAnalyzeResponse(useCase?: UseCaseId): Record<string, unknown> {
   return {
     style_profile: {
       palette: {
@@ -1038,14 +1117,16 @@ function productAnalyzeResponse(): Record<string, unknown> {
       tone: 'precise, confident',
       layout_hint: 'asymmetric editorial stack',
     },
-    poster_content: {
-      headline: 'See the signal',
-      what_it_does: 'Decisions without delay.',
-      how_it_works: ['Connect data', 'Spot changes', 'Act together'],
-      why_use_it: ['Faster focus', 'Shared context', 'Clear ownership'],
-      features: ['Fast setup', 'Shared context'],
-      cta: 'Start now',
-    },
+    poster_content: useCase === 'rednote_post'
+      ? { rednote_post: structuredClone(REDNOTE_MODEL_PLAN) }
+      : {
+          headline: 'See the signal',
+          what_it_does: 'Decisions without delay.',
+          how_it_works: ['Connect data', 'Spot changes', 'Act together'],
+          why_use_it: ['Faster focus', 'Shared context', 'Clear ownership'],
+          features: ['Fast setup', 'Shared context'],
+          cta: 'Start now',
+        },
     brand_essence: 'A precise analytics brand with deep blue geometry and coral accents.',
     qr_label: 'Start now',
   }

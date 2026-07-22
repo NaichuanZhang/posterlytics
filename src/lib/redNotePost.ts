@@ -35,6 +35,21 @@ export interface RedNoteSourceCopyInput {
   sourceCopy: string
 }
 
+export type RedNoteModelTextNormalizer = (
+  value: string,
+  maxCodePoints: number,
+) => string
+
+export interface RedNotePosterContentProjection {
+  headline: string
+  what_it_does: string
+  how_it_works: string[]
+  why_use_it: string[]
+  features: string[]
+  cta: string
+  rednote_post: RedNotePostPlan
+}
+
 export interface RedNoteRect {
   readonly x: number
   readonly y: number
@@ -64,6 +79,7 @@ const PAGE_MARKER: RedNoteRect = { x: 1002, y: 1516, width: 144, height: 40 }
 export function normalizeRedNotePostPlan(
   raw: unknown,
   fallback: RedNoteSourceCopyInput,
+  normalizeModelText?: RedNoteModelTextNormalizer,
 ): RedNotePostPlan {
   const fallbackPlan = splitRedNoteSourceCopy(fallback)
   const record = recordOf(raw)
@@ -78,8 +94,15 @@ export function normalizeRedNotePostPlan(
   const rawCover = record.pages.find(
     (page) => recordOf(page).kind === 'cover',
   )
-  const cover = normalizeCoverPage(rawCover, fallbackCover)
-  const contentPages = normalizeContentPages(record.pages)
+  const cover = normalizeCoverPage(
+    rawCover,
+    fallbackCover,
+    normalizeModelText,
+  )
+  const contentPages = normalizeContentPages(
+    record.pages,
+    normalizeModelText,
+  )
 
   if (contentPages.length === 0) {
     return {
@@ -94,6 +117,43 @@ export function normalizeRedNotePostPlan(
       cover,
       ...contentPages.slice(0, REDNOTE_POST_MAX_PAGES - 1),
     ],
+  }
+}
+
+export function projectRedNotePostPlanToPosterContent(
+  plan: RedNotePostPlan,
+): RedNotePosterContentProjection {
+  const cover = plan.pages[0] as RedNoteCoverPage
+  const features = uniqueStrings(
+    plan.pages
+      .filter((page): page is RedNoteContentPage => page.kind === 'content')
+      .map((page) => page.heading)
+      .filter(Boolean),
+  ).slice(0, 6)
+
+  return {
+    headline: cover.title,
+    what_it_does: cover.subtitle ?? '',
+    how_it_works: [],
+    why_use_it: [],
+    features,
+    cta: '',
+    rednote_post: {
+      schema_version: 1,
+      pages: plan.pages.map((page) => (
+        page.kind === 'cover'
+          ? {
+              kind: 'cover',
+              title: page.title,
+              ...(page.subtitle ? { subtitle: page.subtitle } : {}),
+            }
+          : {
+              kind: 'content',
+              heading: page.heading,
+              blocks: [...page.blocks],
+            }
+      )),
+    },
   }
 }
 
@@ -203,13 +263,19 @@ export function getRedNotePageComposition(
 function normalizeCoverPage(
   raw: unknown,
   fallback: RedNoteCoverPage,
+  normalizeModelText?: RedNoteModelTextNormalizer,
 ): RedNoteCoverPage {
   const record = recordOf(raw)
-  const title = boundedText(record.title, COVER_TITLE_MAX_CODE_POINTS)
+  const title = boundedModelText(
+    record.title,
+    COVER_TITLE_MAX_CODE_POINTS,
+    normalizeModelText,
+  )
     || fallback.title
-  const subtitle = boundedText(
+  const subtitle = boundedModelText(
     record.subtitle,
     COVER_SUBTITLE_MAX_CODE_POINTS,
+    normalizeModelText,
   ) || fallback.subtitle
 
   return {
@@ -219,7 +285,10 @@ function normalizeCoverPage(
   }
 }
 
-function normalizeContentPages(rawPages: unknown[]): RedNoteContentPage[] {
+function normalizeContentPages(
+  rawPages: unknown[],
+  normalizeModelText?: RedNoteModelTextNormalizer,
+): RedNoteContentPage[] {
   const pages: RedNoteContentPage[] = []
   const signatures = new Set<string>()
 
@@ -229,12 +298,17 @@ function normalizeContentPages(rawPages: unknown[]): RedNoteContentPage[] {
 
     const blocks = uniqueStrings(
       stringArray(record.blocks)
-        .map((block) => boundedText(block, CONTENT_BLOCK_MAX_CODE_POINTS))
+        .map((block) => boundedModelText(
+          block,
+          CONTENT_BLOCK_MAX_CODE_POINTS,
+          normalizeModelText,
+        ))
         .filter(Boolean),
     ).slice(0, CONTENT_BLOCK_MAX_COUNT)
-    const suppliedHeading = boundedText(
+    const suppliedHeading = boundedModelText(
       record.heading,
       CONTENT_HEADING_MAX_CODE_POINTS,
+      normalizeModelText,
     )
     const heading = suppliedHeading
       || boundedText(blocks[0], CONTENT_HEADING_MAX_CODE_POINTS)
@@ -302,6 +376,18 @@ function splitAtCodePoint(value: string, limit: number): [string, string] {
 function boundedText(value: unknown, limit: number): string {
   if (typeof value !== 'string') return ''
   return Array.from(normalizeWhitespace(value)).slice(0, limit).join('')
+}
+
+function boundedModelText(
+  value: unknown,
+  limit: number,
+  normalizeModelText?: RedNoteModelTextNormalizer,
+): string {
+  if (typeof value !== 'string') return ''
+  return boundedText(
+    normalizeModelText ? normalizeModelText(value, limit) : value,
+    limit,
+  )
 }
 
 function normalizeWhitespace(value: string): string {

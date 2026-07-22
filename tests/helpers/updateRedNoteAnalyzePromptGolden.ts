@@ -28,21 +28,29 @@ type SocialPromptGoldens = {
   hero: PipelinePromptGoldens['hero']['social_cover']
 }
 
-const legacyUrl = new URL('../fixtures/pipelinePromptGoldens.json', import.meta.url)
-const socialUrl = new URL('../fixtures/socialCoverPromptGoldens.json', import.meta.url)
+const legacy = readJson<LegacyPromptGoldens>(
+  new URL('../fixtures/pipelinePromptGoldens.json', import.meta.url),
+)
+const social = readJson<SocialPromptGoldens>(
+  new URL('../fixtures/socialCoverPromptGoldens.json', import.meta.url),
+)
 const redNoteAnalyzeUrl = new URL(
   '../fixtures/redNoteAnalyzePromptGolden.json',
   import.meta.url,
 )
-const legacy = readJson<LegacyPromptGoldens>(legacyUrl)
-const social = readJson<SocialPromptGoldens>(socialUrl)
-const redNoteAnalyze = readJson<
-  PipelinePromptGoldens['analyze']['rednote_post']
->(redNoteAnalyzeUrl)
 const actual = await captureCurrentPipelinePromptGoldens()
 
 for (const useCase of ['website_product', 'amazon_listing', 'event'] as const) {
-  assertChatUnchanged(`analyze.${useCase}`, actual.analyze[useCase], legacy.analyze[useCase])
+  assertChatUnchanged(
+    `analyze.${useCase}`,
+    actual.analyze[useCase],
+    legacy.analyze[useCase],
+  )
+  assert.equal(
+    actual.hero[useCase],
+    legacy.hero[useCase],
+    `hero.${useCase} changed; refusing to write the RedNote analyze fixture`,
+  )
 }
 for (const useCase of ['website_product', 'amazon_listing'] as const) {
   assertChatUnchanged(
@@ -51,38 +59,45 @@ for (const useCase of ['website_product', 'amazon_listing'] as const) {
     legacy.designer[useCase],
   )
 }
-assertChatUnchanged('analyze.social_cover', actual.analyze.social_cover, social.analyze)
+
 assertChatUnchanged(
-  'analyze.rednote_post',
-  actual.analyze.rednote_post,
-  redNoteAnalyze,
+  'analyze.social_cover',
+  actual.analyze.social_cover,
+  social.analyze,
 )
-assertChatUnchanged('designer.social_cover', actual.designer.social_cover, social.designer)
-assertChatUnchanged('designer.rednote_post', actual.designer.rednote_post, social.designer)
+assertChatUnchanged(
+  'designer.social_cover',
+  actual.designer.social_cover,
+  social.designer,
+)
+assert.equal(
+  actual.hero.social_cover,
+  social.hero,
+  'hero.social_cover changed; refusing to write the RedNote analyze fixture',
+)
+assert.deepEqual(
+  actual.designer.rednote_post,
+  actual.designer.social_cover,
+  'designer.rednote_post drifted from designer.social_cover; refusing to write the RedNote analyze fixture',
+)
 assert.equal(
   actual.hero.rednote_post,
   actual.hero.social_cover,
-  'hero.rednote_post drifted from hero.social_cover; refusing to rewrite fixtures',
+  'hero.rednote_post drifted from hero.social_cover; refusing to write the RedNote analyze fixture',
+)
+assert.notDeepEqual(
+  actual.analyze.rednote_post,
+  actual.analyze.social_cover,
+  'analyze.rednote_post did not diverge from social_cover',
 )
 
-const nextLegacy: LegacyPromptGoldens = {
-  analyze: legacy.analyze,
-  designer: legacy.designer,
-  hero: {
-    website_product: actual.hero.website_product,
-    amazon_listing: actual.hero.amazon_listing,
-    event: actual.hero.event,
-  },
-}
-const nextSocial: SocialPromptGoldens = {
-  analyze: social.analyze,
-  designer: social.designer,
-  hero: actual.hero.social_cover,
-}
-
-writeJson(legacyUrl, nextLegacy)
-writeJson(socialUrl, nextSocial)
-console.log('Updated hero prompt goldens; analyze/designer bytes were unchanged.')
+writeFileSync(
+  redNoteAnalyzeUrl,
+  `${JSON.stringify(actual.analyze.rednote_post, null, 2)}\n`,
+)
+console.log(
+  'Updated only the RedNote analyze prompt golden; all unaffected prompts were unchanged.',
+)
 
 function assertChatUnchanged(
   label: string,
@@ -92,19 +107,15 @@ function assertChatUnchanged(
   assert.equal(
     actualPrompt.system,
     expectedPrompt.system,
-    `${label}.system changed; refusing to rewrite fixtures`,
+    `${label}.system changed; refusing to write the RedNote analyze fixture`,
   )
   assert.equal(
     actualPrompt.user,
     expectedPrompt.user,
-    `${label}.user changed; refusing to rewrite fixtures`,
+    `${label}.user changed; refusing to write the RedNote analyze fixture`,
   )
 }
 
 function readJson<T>(url: URL): T {
   return JSON.parse(readFileSync(url, 'utf8')) as T
-}
-
-function writeJson(url: URL, value: unknown): void {
-  writeFileSync(url, `${JSON.stringify(value, null, 2)}\n`)
 }

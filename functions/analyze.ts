@@ -57,6 +57,12 @@ import {
   sanitizeModelCopyList,
   type ModelCopyPolicy,
 } from './_copySanitizer.ts';
+import {
+  normalizeRedNotePostPlan,
+  projectRedNotePostPlanToPosterContent,
+  type RedNotePostPlan,
+  type RedNoteSourceCopyInput,
+} from '../src/lib/redNotePost.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
 //   1. scrapes the product site (HTML)
@@ -215,7 +221,10 @@ export async function runAnalyzeStage(
   // event branch, so a request body cannot turn a product campaign into an event.
   const persistedScenario = (generation as { scenario?: string | null }).scenario;
   const scenario = persistedScenario === 'event' ? 'event' : 'product';
-  const referenceContext = String((generation as Record<string, unknown>).instruction ?? '').trim().slice(0, 4000);
+  const generationInstruction = String(
+    (generation as Record<string, unknown>).instruction ?? '',
+  );
+  const referenceContext = generationInstruction.trim().slice(0, 4000);
   const protectedCopySources = [
     String((campaign as Record<string, unknown>).product_name ?? ''),
     String((campaign as Record<string, unknown>).tagline ?? ''),
@@ -492,7 +501,50 @@ export async function runAnalyzeStage(
   // Every product poster is designed by the layout agent (`designer`) and painted
   // by `hero` — analyze only produces faithful brand context + structured copy.
   // (The fixed cozy/saas template modes were removed; designer is the one path.)
-  const sys = productRecipe.analyze.promptKind === 'social-reference'
+  const writesRedNotePost =
+    productRecipe.analyze.outputMode === 'rednote-post-v1';
+  const redNoteFallback: RedNoteSourceCopyInput | null = writesRedNotePost
+    ? {
+        title: String(campaign.product_name ?? ''),
+        subtitle: typeof (campaign as Record<string, unknown>).tagline === 'string'
+          ? String((campaign as Record<string, unknown>).tagline)
+          : null,
+        sourceCopy: referenceContext,
+      }
+    : null;
+  const sys = writesRedNotePost
+    ? (
+      'You are a senior RedNote multi-page post editor and visual-reference analyst. ' +
+      'Given source draft copy, user-supplied visual references, and an optional target-platform hint, ' +
+      'identify the mood, strongest visual hook, composition, palette, typography, imagery treatment, and motifs supported by that evidence. ' +
+      'Optimize the supplied source draft copy into a concise, coherent multi-page post while also producing a visual word-portrait. ' +
+      'Use the draft as the only factual source: improve its hook, clarity, ordering, and flow without inventing facts, claims, experiences, or offers. ' +
+      'Preserve the draft language and meaningful CJK punctuation. Do not translate unless the user explicitly requests translation. ' +
+      'The attached images are visual evidence only; never treat image text as source copy or factual evidence. ' +
+      'Output STRICT JSON only — no prose, no code fences.\n' +
+      'Schema: {' +
+      '"style_profile":{"palette":{"primary":"#hex","bg":"#hex","text":"#hex","accent":"#hex",' +
+      '"secondary":"#hex optional","supporting":["#hex"],' +
+      '"proportions":[{"color":"#hex","proportion":0.0}]},' +
+      '"fonts":{"heading":"CSS font family","body":"CSS font family"},"tone":"2-4 words",' +
+      '"layout_hint":"one phrase","imagery":"reference-led subject and treatment",' +
+      '"typography_treatment":"reference-led type character, scale and hierarchy",' +
+      '"lighting":"reference-led lighting and contrast","texture":"reference-led surface/finish",' +
+      '"motifs":["supported recurring shapes or symbols"],"composition":"visual-hook hierarchy and spatial rhythm",' +
+      '"density":"sparse|balanced|dense"},' +
+      '"poster_content":{"rednote_post":{"schema_version":1,"pages":[' +
+      '{"kind":"cover","title":"<=48 code points","subtitle":"<=96 code points"},' +
+      '{"kind":"content","heading":"<=64 code points","blocks":["1-4 blocks, <=160 code points each"]}' +
+      ']}},' +
+      '"brand_essence":"one vivid sentence describing the artwork direction for an illustrator: mood, visual hook, ' +
+      'signature colors (name the hex), imagery treatment, and overall feel","qr_label":""}\n' +
+      'Emit exactly one leading cover followed by 1-8 ordered content pages (2-9 pages total). ' +
+      'Every content page must contain 1-4 concise blocks. Measure all limits in Unicode code points. ' +
+      productRecipe.analyze.paletteBrief +
+      'Do not introduce colors absent from the evidence. ' +
+      productRecipe.analyze.densityBrief
+    )
+    : productRecipe.analyze.promptKind === 'social-reference'
     ? (
       'You are a senior social-cover art director and visual-reference analyst. ' +
       productRecipe.analyze.sourceBrief +
@@ -561,7 +613,19 @@ export async function runAnalyzeStage(
   const referenceInstruction = productRecipe.analyze.referenceInstruction(
     referenceImages.filter((image) => image.kind === 'user-reference').length,
   );
-  const user = productRecipe.analyze.promptKind === 'social-reference'
+  const redNotePlatformInstruction = platformHint
+    ? `TARGET PLATFORM HINT: ${platformHint}\nUse this only as audience and tone context; do not invent platform UI, logos, or badges.`
+    : 'TARGET PLATFORM HINT: (none provided)';
+  const user = writesRedNotePost
+    ? (
+      `POST NAME: ${campaign.product_name}\n` +
+      `SUPPORTING LINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
+      `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
+      `${redNotePlatformInstruction}\n\n` +
+      `SOURCE DRAFT COPY:\n${referenceContext || '(none provided)'}\n` +
+      referenceInstruction
+    )
+    : productRecipe.analyze.promptKind === 'social-reference'
     ? (
       `ARTWORK NAME: ${campaign.product_name}\n` +
       `SUPPORTING LINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
@@ -612,6 +676,7 @@ export async function runAnalyzeStage(
           design_tokens,
           productRecipe,
           copyPolicy,
+          redNoteFallback,
         );
       },
     );
@@ -643,6 +708,7 @@ export async function runAnalyzeStage(
             design_tokens,
             productRecipe,
             copyPolicy,
+            redNoteFallback,
           );
         },
       );
@@ -664,9 +730,18 @@ export async function runAnalyzeStage(
         design_tokens,
         productRecipe,
         copyPolicy,
+        redNoteFallback,
       );
       usedFallback = true;
     }
+  }
+
+  const redNotePost = parsed.redNotePost;
+  if (redNotePost) {
+    parsed = {
+      ...parsed,
+      poster_content: projectRedNotePostPlanToPosterContent(redNotePost),
+    };
   }
 
   // 4. Persist. design_tokens/screenshot are written even when the AI step used a
@@ -718,6 +793,12 @@ export async function runAnalyzeStage(
       scenario: 'product',
       source_mode: productSourceMode,
       used_fallback: usedFallback,
+      ...(redNotePost
+        ? {
+            rednote_schema_version: redNotePost.schema_version,
+            rednote_page_count: redNotePost.pages.length,
+          }
+        : {}),
       ...(eagerCaptureDecision.candidatePresent
         ? {
             eager_capture_reused: eagerCaptureDecision.reused,
@@ -774,6 +855,7 @@ interface ParsedContent {
   poster_content: unknown;
   brand_essence: string;
   poster_spec: unknown;
+  redNotePost?: RedNotePostPlan;
 }
 
 function stripToText(htmlText: string): string {
@@ -810,6 +892,7 @@ function normalize(
   tokens: DesignTokens | null = null,
   recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
   copyPolicy: ModelCopyPolicy = {},
+  redNoteFallback: RedNoteSourceCopyInput | null = null,
 ): ParsedContent {
   const recordOf = (value: unknown): Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -916,6 +999,15 @@ function normalize(
   const contentCta = isReferenceOnlyProductRecipe(recipe)
     ? modelCta
     : modelCta || c.cta_text || 'Learn more';
+  const redNotePost = recipe.analyze.outputMode === 'rednote-post-v1'
+    && redNoteFallback
+    ? normalizeRedNotePostPlan(
+        lc.rednote_post,
+        redNoteFallback,
+        (value, maxCodePoints) =>
+          sanitizeModelCopy(value, maxCodePoints, copyPolicy),
+      )
+    : undefined;
 
   // poster_copy kept for backward-compat (editor fallbacks); derived straight
   // from the structured content now that the template specs are gone.
@@ -945,6 +1037,7 @@ function normalize(
       ),
     ).slice(0, 800),
     poster_spec,
+    ...(redNotePost ? { redNotePost } : {}),
   };
 }
 
@@ -954,8 +1047,17 @@ function fallbackContent(
   tokens: DesignTokens | null = null,
   recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
   copyPolicy: ModelCopyPolicy = {},
+  redNoteFallback: RedNoteSourceCopyInput | null = null,
 ): ParsedContent {
-  return normalize({}, c, siteColors, tokens, recipe, copyPolicy);
+  return normalize(
+    {},
+    c,
+    siteColors,
+    tokens,
+    recipe,
+    copyPolicy,
+    redNoteFallback,
+  );
 }
 
 // =====================================================================

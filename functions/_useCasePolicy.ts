@@ -7,6 +7,7 @@ export type ProductSourceMode =
 
 export interface AnalyzeBriefSet {
   promptKind: 'product-source' | 'social-reference';
+  outputMode?: 'rednote-post-v1';
   sourceBrief: string;
   paletteBrief: string;
   densityBrief: string;
@@ -375,6 +376,10 @@ const SOCIAL_COVER_RECIPE: ProductUseCaseRecipe = {
 const REDNOTE_POST_RECIPE: ProductUseCaseRecipe = {
   ...SOCIAL_COVER_RECIPE,
   id: 'rednote_post',
+  analyze: {
+    ...SOCIAL_COVER_RECIPE.analyze,
+    outputMode: 'rednote-post-v1',
+  },
 };
 
 const EVENT_RECIPE: EventUseCaseRecipe = {
