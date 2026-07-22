@@ -26,6 +26,7 @@ import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterCanvas } from '../components/PosterCanvas'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
+import { PosterTranscript } from '../components/PosterTranscript'
 import { PosterVersionHistory } from '../components/PosterVersionHistory'
 import { InlineNotice } from '../components/ui/Feedback'
 import { Spinner } from '../components/ui/Spinner'
@@ -54,6 +55,7 @@ import {
   type PosterSizeSlug,
 } from '../lib/posterSize'
 import { normalizePlatformHint } from '../lib/platformHints'
+import { derivePosterTranscript } from '../lib/posterTranscript'
 import { getDeviceColorScheme } from '../lib/colorScheme'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
@@ -246,6 +248,14 @@ export function PosterEditorPage() {
   )
   const targetPosterSize = getPosterSize(campaign.poster_format)
   const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
+  const posterTranscript = derivePosterTranscript(previewCampaign, {
+    locale,
+    includeCompositedFooter: (
+      previewIncludesQrBand
+      && !!previewCode
+      && !!previewCampaign.hero_image_url
+    ),
+  })
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
   const campaignUseCase = getUseCase(campaign.use_case)
@@ -514,6 +524,7 @@ export function PosterEditorPage() {
 
   const versionPanel = (
     <PosterVersionHistory
+      campaign={campaign}
       generations={generations}
       activeGenerations={activeGenerations}
       failedGenerations={failedGenerations}
@@ -873,16 +884,20 @@ export function PosterEditorPage() {
               )}
             </div>
           )}
-          <PosterCanvas
-            campaign={previewCampaign}
-            code={previewCode}
-            zoom={preferences.zoom}
-            posterSize={previewPosterSize}
-            versionLabel={selectedGeneration
-              ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
-              : t('Current poster')}
-            onZoomChange={(zoom) => updatePreferences({ zoom })}
-          />
+          <figure className="poster-figure">
+            <PosterCanvas
+              campaign={previewCampaign}
+              code={previewCode}
+              imageAlt={posterTranscript.shortAlt}
+              zoom={preferences.zoom}
+              posterSize={previewPosterSize}
+              versionLabel={selectedGeneration
+                ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
+                : t('Current poster')}
+              onZoomChange={(zoom) => updatePreferences({ zoom })}
+            />
+            <PosterTranscript transcript={posterTranscript} />
+          </figure>
 
           {isMobileWorkspace && (
             <div className="mobile-workspace-panels">

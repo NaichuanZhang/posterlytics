@@ -13,6 +13,7 @@ import type { Campaign } from '../lib/types'
 import type { GenerationActivityItem } from '../lib/types'
 import { activityForCampaign, generationActivityLabel } from '../lib/generationActivity'
 import { useI18n } from '../i18n/I18nProvider'
+import { derivePosterTranscript } from '../lib/posterTranscript'
 import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
 
 export function CampaignsListPage() {
@@ -30,7 +31,7 @@ export function CampaignsListPage() {
     try {
       const { data, error: queryError } = await insforge.database
         .from('campaigns')
-        .select('id, product_name, product_url, use_case, status, created_at, brand_assets, hero_image_url')
+        .select('id, product_name, product_url, tagline, scenario, use_case, poster_format, poster_copy, poster_content, poster_spec, poster_layout, status, created_at, brand_assets, hero_image_url')
         .order('created_at', { ascending: false })
 
       if (queryError) {
@@ -177,10 +178,17 @@ function CampaignFile({
   activity: GenerationActivityItem | null
 }) {
   const { formatDate, locale, t } = useI18n()
-  const thumbnail = campaign.hero_image_url
+  const heroThumbnail = campaign.hero_image_url || ''
+  const thumbnail = heroThumbnail
     || campaign.brand_assets?.primary_image_url
     || campaign.brand_assets?.images?.[0]?.url
     || ''
+  const thumbnailAlt = heroThumbnail
+    ? derivePosterTranscript(campaign, {
+        locale,
+        includeCompositedFooter: false,
+      }).shortAlt
+    : ''
   const trackingEnabled = getUseCase(campaign.use_case).trackingEnabled
 
   return (
@@ -189,7 +197,7 @@ function CampaignFile({
         {thumbnail ? (
           <img
             src={thumbnail}
-            alt={t('{name} poster', { name: campaign.product_name })}
+            alt={thumbnailAlt}
           />
         ) : (
           <span className="campaign-placeholder" aria-hidden="true">

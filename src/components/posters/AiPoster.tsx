@@ -21,10 +21,12 @@ import { useI18n } from '../../i18n/I18nProvider'
 interface Props {
   campaign: Campaign
   code: string | null
+  imageAlt: string
   // Optional same-origin data-URL src for the hero image. PosterExportButton
   // pre-fetches the cross-origin hero to a data URL and passes it here so the
   // export canvas is never tainted by CORS. Falls back to hero_image_url.
   imageSrcOverride?: string
+  compositedFooterAriaHidden?: boolean
   onRenderReady?: (result: PosterRenderReady) => void
   posterSize?: PosterSize
 }
@@ -58,7 +60,9 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   {
     campaign,
     code,
+    imageAlt,
     imageSrcOverride,
+    compositedFooterAriaHidden = false,
     onRenderReady,
     posterSize = DEFAULT_POSTER_SIZE,
   },
@@ -211,7 +215,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             src={img}
             crossOrigin="anonymous"
             data-poster-hero
-            alt={t('{name} poster', { name: campaign.product_name })}
+            alt={imageAlt}
             onLoad={(event) => handleImageLoad(event.currentTarget)}
             onError={handleImageError}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
@@ -242,6 +246,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           data-poster-footer
           data-footer-color={footerBg}
           data-footer-color-source={footerColorSource}
+          aria-hidden={compositedFooterAriaHidden || undefined}
           style={{
             width: posterSize.artwork.width,
             height: qrBand.footerHeight,

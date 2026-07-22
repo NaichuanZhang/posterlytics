@@ -20,6 +20,7 @@ import { useI18n } from '../i18n/I18nProvider'
 interface PosterCanvasProps {
   campaign: Campaign
   code: string | null
+  imageAlt: string
   zoom: CanvasZoom
   versionLabel: string
   onZoomChange: (zoom: CanvasZoom) => void
@@ -34,6 +35,7 @@ interface ElementSize {
 export function PosterCanvas({
   campaign,
   code,
+  imageAlt,
   zoom,
   versionLabel,
   onZoomChange,
@@ -100,6 +102,7 @@ export function PosterCanvas({
                 <Poster
                   campaign={campaign}
                   code={code}
+                  imageAlt={imageAlt}
                   width={previewWidth}
                   posterSize={posterSize}
                 />
@@ -109,6 +112,7 @@ export function PosterCanvas({
             ) : (
               <LayoutPreview
                 layout={campaign.poster_layout}
+                ariaHidden
                 width={previewWidth}
                 posterSize={posterSize}
               />

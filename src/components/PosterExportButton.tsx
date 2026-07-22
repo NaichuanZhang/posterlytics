@@ -194,6 +194,7 @@ export function PosterExportButton({
             ref={offscreenRef}
             campaign={campaign}
             code={placement?.code ?? null}
+            imageAlt=""
             imageSrcOverride={renderAttempt.imageSrcOverride}
             onRenderReady={handleRenderReady}
             posterSize={posterSize}

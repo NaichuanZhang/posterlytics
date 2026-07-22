@@ -6,6 +6,7 @@ import { AiPoster } from './posters/AiPoster'
 interface Props {
   campaign: Campaign
   code: string | null // required only when the descriptor includes a QR band
+  imageAlt: string
   width?: number // rendered preview width in px (defaults to fit the editor column)
   posterSize?: PosterSize
 }
@@ -18,7 +19,13 @@ interface Props {
 const DEFAULT_PREVIEW_W = 440
 
 export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
-  { campaign, code, width = DEFAULT_PREVIEW_W, posterSize = DEFAULT_POSTER_SIZE },
+  {
+    campaign,
+    code,
+    imageAlt,
+    width = DEFAULT_PREVIEW_W,
+    posterSize = DEFAULT_POSTER_SIZE,
+  },
   ref,
 ) {
   const scale = width / posterSize.sheet.width
@@ -43,7 +50,14 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
           transformOrigin: 'top left',
         }}
       >
-        <AiPoster ref={ref} campaign={campaign} code={code} posterSize={posterSize} />
+        <AiPoster
+          ref={ref}
+          campaign={campaign}
+          code={code}
+          imageAlt={imageAlt}
+          compositedFooterAriaHidden
+          posterSize={posterSize}
+        />
       </div>
     </div>
   )

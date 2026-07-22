@@ -1,12 +1,15 @@
 import { AlertTriangle, Check, History, ListTree, RotateCcw } from 'lucide-react'
-import type { GenerationActivityItem, PosterGeneration } from '../lib/types'
+import type { Campaign, GenerationActivityItem, PosterGeneration } from '../lib/types'
 import { useI18n } from '../i18n/I18nProvider'
 import type { Translate } from '../lib/i18n'
+import { overlayGeneration } from '../lib/generations'
+import { derivePosterTranscript } from '../lib/posterTranscript'
 import { isReferenceOnlyUseCaseId } from '../lib/useCases'
 import { DurableGenerationStatus } from './DurableGenerationStatus'
 import { Skeleton } from './ui/Feedback'
 
 interface Props {
+  campaign: Campaign
   generations: PosterGeneration[]
   activeGenerations: PosterGeneration[]
   failedGenerations: PosterGeneration[]
@@ -23,6 +26,7 @@ interface Props {
 }
 
 export function PosterVersionHistory({
+  campaign,
   generations,
   activeGenerations,
   failedGenerations,
@@ -37,7 +41,7 @@ export function PosterVersionHistory({
   onReview,
   onRetry,
 }: Props) {
-  const { formatDate, t } = useI18n()
+  const { formatDate, locale, t } = useI18n()
   const activeGeneration = activeGenerations[0] ?? null
   const activeActivity = activeGeneration
     ? activities.find((item) => item.generation_id === activeGeneration.id) ?? null
@@ -88,6 +92,13 @@ export function PosterVersionHistory({
           {generations.map((generation) => {
             const selected = selectedGeneration?.id === generation.id
             const current = currentGenerationId === generation.id
+            const thumbnailAlt = derivePosterTranscript(
+              overlayGeneration(campaign, generation),
+              {
+                locale,
+                includeCompositedFooter: false,
+              },
+            ).shortAlt
             return (
               <button
                 key={generation.id}
@@ -99,9 +110,7 @@ export function PosterVersionHistory({
                 {generation.hero_image_url ? (
                   <img
                     src={generation.hero_image_url}
-                    alt={t('Version {number} poster thumbnail', {
-                      number: generation.version_number ?? '',
-                    })}
+                    alt={thumbnailAlt}
                   />
                 ) : (
                   <span className="version-image-placeholder" aria-hidden="true" />

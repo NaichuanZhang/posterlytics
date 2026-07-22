@@ -2550,6 +2550,77 @@ img {
   background: var(--canvas);
 }
 
+.poster-figure {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  margin: 0;
+}
+
+.poster-transcript {
+  display: grid;
+  max-height: 148px;
+  min-width: 0;
+  flex: 0 0 auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.poster-transcript-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.poster-transcript-heading > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.poster-transcript-heading svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.poster-transcript-heading strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.poster-transcript-heading .button {
+  flex: 0 0 auto;
+}
+
+.poster-transcript-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding-right: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #b8bac1 transparent;
+  scrollbar-width: thin;
+}
+
+.poster-transcript-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .editor-generation-status {
   display: flex;
   min-width: 0;

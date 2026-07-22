@@ -64,6 +64,18 @@ async function testDesktop(browserInstance) {
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
   })
+  await context.addInitScript(() => {
+    window.__posterTranscriptClipboardWrites = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText(value) {
+          window.__posterTranscriptClipboardWrites.push(String(value))
+          return Promise.resolve()
+        },
+      },
+    })
+  })
   const page = await context.newPage()
   const pageErrors = []
   page.on('pageerror', (error) => pageErrors.push(error))
@@ -78,8 +90,12 @@ async function testDesktop(browserInstance) {
   assert.equal(await status.locator('.durable-generation-status').getAttribute('aria-live'), 'polite')
   assert.equal((await status.innerText()).includes('%'), false)
 
-  const existingPoster = page.getByRole('img', { name: 'Northstar Analytics poster' })
+  const existingPoster = page.locator('[data-poster-hero]')
   await existingPoster.waitFor()
+  assert.equal(
+    await existingPoster.getAttribute('alt'),
+    'Poster for Northstar Analytics: Decisions without the dashboard hunt · See the signal · Point your camera here',
+  )
   assert.match(await existingPoster.getAttribute('src'), /old-poster\.svg$/)
   const posterBox = await existingPoster.boundingBox()
   assert.ok(posterBox && posterBox.width > 200 && posterBox.height > 250)
@@ -139,6 +155,17 @@ async function testDesktop(browserInstance) {
     path: `${OUTPUT_DIR}/editor-active-generation.png`,
     fullPage: true,
   })
+
+  const transcript = page.locator('.poster-transcript')
+  await transcript.getByText('Poster text', { exact: true }).waitFor()
+  await transcript.getByRole('button', { name: 'Copy poster text' }).click()
+  await page.getByText('Poster text copied.', { exact: true }).waitFor()
+  assert.deepEqual(
+    await page.evaluate(() => window.__posterTranscriptClipboardWrites),
+    [
+      'Northstar Analytics\n\nDecisions without the dashboard hunt\n\nSee the signal\n\nPoint your camera here',
+    ],
+  )
 
   assert.deepEqual(pageErrors, [])
   await context.close()

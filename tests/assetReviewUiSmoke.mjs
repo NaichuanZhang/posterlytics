@@ -57,6 +57,7 @@ try {
   await testCampaignWizardDraftSwitch(browser)
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
+  await testPosterTranscriptVersionSwitch(browser)
   await testSocialCoverFrozenHint(browser)
   await testQrBandEdgeSamplingAndExport(browser)
   await testQrBandSamplingFallback(browser)
@@ -420,7 +421,7 @@ async function testCampaignWizardUseCases(browserInstance) {
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
   const picker = page.locator('.use-case-picker')
   await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  assert.equal(await picker.getByRole('button').count(), 3)
+  assert.equal(await picker.getByRole('button').count(), 4)
   await picker.getByText(
     'Create from a product website and its visual identity.',
     { exact: true },
@@ -431,6 +432,10 @@ async function testCampaignWizardUseCases(browserInstance) {
   ).waitFor()
   await picker.getByText(
     'Create full-bleed artwork from creative references and direction.',
+    { exact: true },
+  ).waitFor()
+  await picker.getByText(
+    'Create a 3:4 RedNote cover from draft copy and creative references.',
     { exact: true },
   ).waitFor()
   assert.equal(await picker.getByText('Event', { exact: true }).count(), 0)
@@ -1153,6 +1158,11 @@ async function testEditorUseCaseInputs(browserInstance) {
 
   await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
   await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  const transcript = page.locator('.poster-transcript')
+  await transcript.getByText('Poster text', { exact: true }).waitFor()
+  await transcript.getByText('Signal Studio', { exact: true }).waitFor()
+  await transcript.getByText('Make the signal visible', { exact: true }).waitFor()
+  await transcript.getByRole('button', { name: 'Copy poster text' }).waitFor()
   assert.equal(
     await page.locator('.editor-inspector .generation-references label').first().innerText(),
     'What should change? (optional)',
@@ -1184,6 +1194,94 @@ async function testEditorUseCaseInputs(browserInstance) {
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/amazon-editor-inputs-desktop.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testPosterTranscriptVersionSwitch(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await context.addInitScript(() => {
+    window.__posterTranscriptClipboardWrites = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText(value) {
+          window.__posterTranscriptClipboardWrites.push(String(value))
+          return Promise.resolve()
+        },
+      },
+    })
+  })
+  const state = createState({ editorReady: true })
+  state.currentGeneration.version_number = 2
+  state.currentGeneration.poster_spec = {
+    qr_label: 'Review current',
+    urls: 'https://example.com',
+  }
+  state.currentGeneration.poster_layout = posterLayout([
+    { band: 'top', role: 'brand', content: 'Signal Studio' },
+    { band: 'upper', role: 'headline', content: 'Current signal' },
+    { band: 'lower', role: 'proof', content: 'Current proof' },
+  ])
+  state.readyGenerations.push({
+    ...state.currentGeneration,
+    id: 'generation-previous',
+    version_number: 1,
+    poster_spec: {
+      qr_label: 'Review earlier',
+      urls: 'https://example.com',
+    },
+    poster_layout: posterLayout([
+      { band: 'lower', role: 'proof', content: 'Previous proof' },
+      { band: 'top', role: 'brand', content: 'Signal Studio' },
+      { band: 'upper', role: 'headline', content: 'Earlier signal' },
+    ]),
+  })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  const transcript = page.locator('.poster-transcript')
+  await transcript.getByText('Current signal', { exact: true }).waitFor()
+  assert.equal(
+    await page.locator('[data-poster-hero]').getAttribute('alt'),
+    'Poster for Signal Studio: Current signal · Current proof · Review current · Point your camera here',
+  )
+
+  const versions = page.getByRole('region', { name: 'Versions' })
+  if (await versions.count() === 0) {
+    await page.getByRole('button', { name: 'Toggle versions panel' }).click()
+  }
+  await versions.locator('.version-row').filter({ hasText: 'Version 1' }).click()
+  await transcript.getByText('Earlier signal', { exact: true }).waitFor()
+  assert.equal(
+    await page.locator('[data-poster-hero]').getAttribute('alt'),
+    'Poster for Signal Studio: Earlier signal · Previous proof · Review earlier · Point your camera here',
+  )
+
+  await transcript.getByRole('button', { name: 'Copy poster text' }).click()
+  await page.getByText('Poster text copied.', { exact: true }).waitFor()
+  assert.deepEqual(
+    await page.evaluate(() => window.__posterTranscriptClipboardWrites),
+    [
+      'Signal Studio\n\nEarlier signal\n\nPrevious proof\n\nReview earlier\n\nPoint your camera here',
+    ],
+  )
+  assert.equal(
+    await page.locator('[data-poster-footer]').getAttribute('aria-hidden'),
+    'true',
+  )
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/poster-transcript-version-desktop.png`,
     fullPage: true,
   })
   assert.deepEqual(pageErrors, [])
@@ -2032,7 +2130,11 @@ async function installBackendMock(context, state) {
     }
     if (path === '/api/database/records/poster_generations') {
       return json(route, state.editorReady
-        ? [state.currentGeneration, ...state.failedGenerations]
+        ? [
+            state.currentGeneration,
+            ...state.readyGenerations,
+            ...state.failedGenerations,
+          ]
         : [state.reviewGeneration])
     }
     if (path === '/api/database/records/generation_assets') {
@@ -2057,6 +2159,21 @@ async function installBackendMock(context, state) {
     }
     return json(route, [])
   })
+}
+
+function posterLayout(zones) {
+  return {
+    composition: 'editorial',
+    mood: 'direct',
+    art_style: 'print',
+    palette_roles: {
+      bg: '#ffffff',
+      text: '#111111',
+      primary: '#3156d3',
+      accent: '#10b981',
+    },
+    zones,
+  }
 }
 
 function createState({
@@ -2199,6 +2316,7 @@ function createState({
     enqueueFailuresRemaining,
     enqueueModes: [],
     enqueueRequests: [],
+    readyGenerations: [],
     failedGenerations: [],
     operationLog: [],
     storageRemovals: [],

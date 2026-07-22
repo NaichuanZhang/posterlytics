@@ -294,6 +294,30 @@ const SOURCE_LITERAL_ALLOWLIST: AllowedLiteral[] = [
     category: 'generated-poster-copy',
     reason: 'Approved out-of-scope completed-poster default copy.',
   },
+  {
+    file: 'src/lib/posterTranscript.ts',
+    kind: 'visible-variable',
+    text: 'Scan to start',
+    count: 1,
+    category: 'generated-poster-copy',
+    reason: 'Exact English transcript mirror of the product QR-footer fallback painted by AiPoster.',
+  },
+  {
+    file: 'src/lib/posterTranscript.ts',
+    kind: 'visible-variable',
+    text: 'Scan to RSVP',
+    count: 1,
+    category: 'generated-poster-copy',
+    reason: 'Exact English transcript mirror of the event QR-footer fallback painted by AiPoster.',
+  },
+  {
+    file: 'src/lib/posterTranscript.ts',
+    kind: 'visible-variable',
+    text: 'Point your camera here',
+    count: 1,
+    category: 'generated-poster-copy',
+    reason: 'Exact English transcript mirror of the fixed camera instruction painted by AiPoster.',
+  },
 ]
 
 const VISIBLE_ATTRIBUTE_NAME =

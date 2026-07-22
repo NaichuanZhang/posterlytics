@@ -13,6 +13,7 @@ import {
 
 interface Props {
   layout: PosterLayout
+  ariaHidden?: boolean
   width?: number // rendered preview width in px
   posterSize?: PosterSize
 }
@@ -34,6 +35,7 @@ const BAND_LABEL_KEYS: Record<LayoutBand, TranslationKey> = {
 
 export function LayoutPreview({
   layout,
+  ariaHidden = false,
   width = DEFAULT_PREVIEW_W,
   posterSize = DEFAULT_POSTER_SIZE,
 }: Props) {
@@ -46,6 +48,7 @@ export function LayoutPreview({
 
   return (
     <div
+      aria-hidden={ariaHidden || undefined}
       style={{
         width,
         height: posterSize.sheet.height * scale,
