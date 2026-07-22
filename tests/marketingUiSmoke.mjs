@@ -301,7 +301,10 @@ async function testCampaignCreationFailure(browserInstance) {
     { exact: true },
   ).waitFor()
   assert.equal(
-    await page.getByText('Campaign draft saved.', { exact: true }).count(),
+    await page.getByText(
+      'Campaign details were saved; generation did not start.',
+      { exact: true },
+    ).count(),
     0,
   )
   assert.equal(

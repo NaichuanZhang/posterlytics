@@ -36,10 +36,12 @@ export function WebsiteCapturePreview({
   url,
   disabled = false,
   onPreviewChange,
+  onCaptureInFlightChange,
 }: {
   url: string
   disabled?: boolean
   onPreviewChange?: (capture: SelectedEagerCapture | null) => void
+  onCaptureInFlightChange?: (inFlight: boolean) => void
 }) {
   const { t } = useI18n()
   const [status, setStatus] = useState<CaptureStatus>('idle')
@@ -70,7 +72,8 @@ export function WebsiteCapturePreview({
     setSelection({ imageUrls: [], logoExcluded: false })
     setError(null)
     onPreviewChange?.(null)
-  }, [url, onPreviewChange])
+    onCaptureInFlightChange?.(false)
+  }, [url, onCaptureInFlightChange, onPreviewChange])
 
   useEffect(() => () => {
     requestToken.current += 1
@@ -80,7 +83,8 @@ export function WebsiteCapturePreview({
       clearTimeout(cooldownTimer.current)
       cooldownTimer.current = null
     }
-  }, [])
+    onCaptureInFlightChange?.(false)
+  }, [onCaptureInFlightChange])
 
   function startCooldown() {
     if (cooldownTimer.current !== null) clearTimeout(cooldownTimer.current)
@@ -103,6 +107,7 @@ export function WebsiteCapturePreview({
     setSelection({ imageUrls: [], logoExcluded: false })
     setError(null)
     onPreviewChange?.(null)
+    onCaptureInFlightChange?.(true)
 
     try {
       const response = await captureWebsitePreview({
@@ -140,6 +145,7 @@ export function WebsiteCapturePreview({
     } finally {
       if (token === requestToken.current) {
         activeRequest.current = null
+        onCaptureInFlightChange?.(false)
       }
     }
   }

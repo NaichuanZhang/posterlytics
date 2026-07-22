@@ -1089,6 +1089,10 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
   })
   await submitWizardAndWaitForEnqueue(page, state, 1)
   await page.getByText('Mock enqueue failed.', { exact: false }).waitFor()
+  await page.getByText(
+    'Campaign details were saved; generation did not start.',
+    { exact: true },
+  ).waitFor()
   assert.deepEqual(
     state.campaignWrites.map((write) => write.method),
     ['POST', 'PATCH', 'PATCH'],
@@ -1138,7 +1142,8 @@ async function testCampaignWizardPreference(browserInstance) {
   await mode.getByRole('button', { name: 'Yolo' }).click()
   await page.reload()
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
-  await selectWizardUseCase(page, 'Website product')
+  await page.getByText('Local draft restored.', { exact: true }).waitFor()
+  await page.locator('#product-url').waitFor()
   mode = page.getByRole('group', { name: 'Asset selection mode' })
   assert.equal(await mode.getByRole('button', { name: 'Yolo' }).getAttribute('aria-pressed'), 'true')
   await context.close()

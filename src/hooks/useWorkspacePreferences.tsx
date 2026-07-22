@@ -33,7 +33,11 @@ export function WorkspacePreferencesProvider({ children }: { children: ReactNode
   const [preferences, setPreferences] = useState<WorkspacePreferences>(initialPreferences)
 
   useEffect(() => {
-    window.localStorage.setItem(WORKSPACE_PREFERENCES_KEY, JSON.stringify(preferences))
+    try {
+      window.localStorage.setItem(WORKSPACE_PREFERENCES_KEY, JSON.stringify(preferences))
+    } catch {
+      // Preferences remain usable in memory when browser storage is unavailable.
+    }
   }, [preferences])
 
   useEffect(() => {

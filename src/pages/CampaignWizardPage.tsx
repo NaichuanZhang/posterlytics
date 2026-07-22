@@ -10,11 +10,20 @@ import {
   Sparkles,
   Type,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type SetStateAction,
+} from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
+import { DraftPersistenceStatus } from '../components/DraftPersistenceStatus'
 import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { GenerationReferences } from '../components/GenerationReferences'
 import { PlatformHintField } from '../components/PlatformHintField'
@@ -25,6 +34,7 @@ import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
 import { insforge } from '../lib/insforge'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
+import { useDebouncedLocalDraft } from '../hooks/useDebouncedLocalDraft'
 import { materializeReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -56,6 +66,19 @@ import {
 import type { SelectedEagerCapture } from '../lib/eagerCapture'
 import { getDeviceColorScheme } from '../lib/colorScheme'
 import {
+  buildCampaignDraftData,
+  campaignDraftKey,
+  isCampaignDraftDirty,
+  loadCampaignDraft,
+  restoreCampaignEagerCapture,
+  serializeCampaignDraft,
+} from '../lib/campaignDraft'
+import {
+  canonicalLocalDraftContent,
+  rehydrateLocalDraftReferences,
+  type LocalDraftFileReference,
+} from '../lib/localDraft'
+import {
   CREATABLE_USE_CASES,
   getUseCase,
   isReferenceOnlyUseCaseId,
@@ -84,6 +107,13 @@ export function CampaignWizardPage() {
     useState<AmazonTitleLookupStatus>('idle')
   const [eagerCapturePreview, setEagerCapturePreview] =
     useState<SelectedEagerCapture | null>(null)
+  const [captureInFlight, setCaptureInFlight] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(false)
+  const [restoredFileReferences, setRestoredFileReferences] =
+    useState<LocalDraftFileReference[]>([])
+  const [initialPersistedCanonical, setInitialPersistedCanonical] =
+    useState<string | null>(null)
 
   const [productUrl, setProductUrl] = useState('')
   const [productName, setProductName] = useState('')
@@ -102,12 +132,50 @@ export function CampaignWizardPage() {
     token: number
   } | null>(null)
   const attemptedAmazonTitleAsins = useRef(new Set<string>())
+  const restoredOwnerRef = useRef<string | null>(null)
+  const pendingReferencesRef = useRef(pendingReferences)
   const latestProductUrl = useRef(productUrl)
   const latestProductName = useRef(productName)
   const latestUseCaseId = useRef(selectedUseCaseId)
   latestProductUrl.current = productUrl
   latestProductName.current = productName
   latestUseCaseId.current = selectedUseCaseId
+  pendingReferencesRef.current = pendingReferences
+
+  useEffect(() => {
+    if (!user || restoredOwnerRef.current === user.id) return
+    restoredOwnerRef.current = user.id
+    const localDraft = loadCampaignDraft(user.id)
+    if (localDraft) {
+      const restoredReferences = rehydrateLocalDraftReferences(
+        localDraft.data.references,
+      )
+      setSelectedUseCaseId(localDraft.data.selectedUseCaseId)
+      setProductUrl(localDraft.data.productUrl)
+      setProductName(localDraft.data.productName)
+      setTagline(localDraft.data.tagline)
+      setCtaText(localDraft.data.ctaText)
+      setDestinationUrl(localDraft.data.destinationUrl)
+      setPosterFormat(localDraft.data.posterFormat)
+      setPlatformHint(localDraft.data.platformHint)
+      setReferenceContext(localDraft.data.referenceContext)
+      setPendingReferences(restoredReferences.pendingReferences)
+      setRestoredFileReferences(restoredReferences.unrestorableFiles)
+      setDraftId(localDraft.data.serverCampaignId)
+      setEagerCapturePreview(restoreCampaignEagerCapture({
+        metadata: localDraft.data.eagerCapture,
+        availableCapture: eagerCapturePreview,
+        productUrl: localDraft.data.productUrl,
+        useCase: localDraft.data.selectedUseCaseId,
+        colorScheme: getDeviceColorScheme(),
+      }))
+      setInitialPersistedCanonical(
+        canonicalLocalDraftContent(localDraft.data),
+      )
+      setRestoredDraft(true)
+    }
+    setDraftReady(true)
+  }, [user])
 
   useEffect(() => () => {
     amazonTitleRequestToken.current += 1
@@ -142,6 +210,100 @@ export function CampaignWizardPage() {
     inputFields?.referenceContext !== 'required'
     || normalizeReferenceContext(referenceContext) !== null
   )
+  const campaignDraftData = useMemo(() => buildCampaignDraftData({
+    selectedUseCaseId,
+    productUrl,
+    productName,
+    tagline,
+    ctaText,
+    destinationUrl,
+    posterFormat,
+    platformHint,
+    referenceContext,
+    pendingReferences,
+    unrestorableFiles: restoredFileReferences,
+    serverCampaignId: draftId,
+    eagerCapture: eagerCapturePreview,
+  }), [
+    ctaText,
+    destinationUrl,
+    draftId,
+    eagerCapturePreview,
+    pendingReferences,
+    platformHint,
+    posterFormat,
+    productName,
+    productUrl,
+    referenceContext,
+    restoredFileReferences,
+    selectedUseCaseId,
+    tagline,
+  ])
+  const campaignDraftHasContent = isCampaignDraftDirty(campaignDraftData)
+  const campaignDraftActive = phase !== 'started'
+  const serializeLocalCampaignDraft = useCallback((
+    value: typeof campaignDraftData,
+    nowMs: number,
+  ) => {
+    if (!user) throw new Error()
+    return serializeCampaignDraft(user.id, value, nowMs)
+  }, [user])
+  const campaignDraftPersistence = useDebouncedLocalDraft({
+    storageKey: user ? campaignDraftKey(user.id) : null,
+    value: campaignDraftData,
+    ready: draftReady,
+    dirty: campaignDraftActive && campaignDraftHasContent,
+    initialPersistedCanonical,
+    guardBeforeUnload: (
+      (campaignDraftActive && campaignDraftHasContent)
+      || phase === 'uploading'
+      || captureInFlight
+    ),
+    serialize: serializeLocalCampaignDraft,
+  })
+
+  function updatePendingReferences(
+    action: SetStateAction<PendingReference[]>,
+  ) {
+    const next = typeof action === 'function'
+      ? action(pendingReferencesRef.current)
+      : action
+    pendingReferencesRef.current = next
+    setPendingReferences(next)
+    setRestoredFileReferences((current) => current.filter((metadata) =>
+      !next.some((reference) => (
+        reference.kind === 'file'
+        && reference.file.name === metadata.name
+        && reference.file.size === metadata.size
+        && reference.file.type === metadata.type
+      ))
+    ))
+  }
+
+  function discardLocalDraft() {
+    campaignDraftPersistence.clear()
+    cancelAmazonTitleLookup()
+    setPhase('form')
+    setError(null)
+    setDraftId(null)
+    setJobId(null)
+    setSelectedUseCaseId(null)
+    setSourceMismatchAttempted(false)
+    setEagerCapturePreview(null)
+    setCaptureInFlight(false)
+    setProductUrl('')
+    setProductName('')
+    setTagline('')
+    setCtaText('Get started')
+    setDestinationUrl('')
+    setPosterFormat(DEFAULT_POSTER_SIZE_SLUG)
+    setPlatformHint('')
+    setReferenceContext('')
+    setPendingReferences([])
+    setRestoredFileReferences([])
+    setRestoredDraft(false)
+    setInitialPersistedCanonical(null)
+  }
 
   function selectUseCase(useCaseId: CreatableUseCaseId) {
     const nextUseCase = getUseCase(useCaseId)
@@ -380,6 +542,9 @@ export function CampaignWizardPage() {
         colorScheme: submittedColorScheme,
         locale,
       })
+      campaignDraftPersistence.clear()
+      setRestoredDraft(false)
+      setRestoredFileReferences([])
       setJobId(result.job.id)
       setPhase('started')
       await refreshActivity()
@@ -537,7 +702,7 @@ export function CampaignWizardPage() {
           existingImages={[]}
           onRemoveExisting={() => {}}
           pendingReferences={pendingReferences}
-          onPendingReferencesChange={setPendingReferences}
+          onPendingReferencesChange={updatePendingReferences}
           contextRequirement={fields.referenceContext}
           referenceImagesRequirement={fields.referenceImages.requirement}
           referenceImagesMinimumCount={fields.referenceImages.minimumCount}
@@ -590,6 +755,27 @@ export function CampaignWizardPage() {
           </p>
         </div>
       </header>
+
+      {(restoredDraft || campaignDraftPersistence.status !== 'pristine') && (
+        <div className="draft-persistence-bar">
+          {restoredDraft && (
+            <div className="draft-restored-copy" role="status">
+              <strong>{t('Local draft restored.')}</strong>
+              <span>{t('Your inputs were restored from this browser.')}</span>
+            </div>
+          )}
+          <DraftPersistenceStatus status={campaignDraftPersistence.status} />
+          {restoredDraft && (
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={discardLocalDraft}
+            >
+              {t('Discard local draft')}
+            </button>
+          )}
+        </div>
+      )}
 
       {phase === 'uploading' ? (
         <div className="creation-starting" aria-live="polite">
@@ -816,6 +1002,7 @@ export function CampaignWizardPage() {
                     url={productUrl}
                     disabled={Boolean(mismatchTarget)}
                     onPreviewChange={setEagerCapturePreview}
+                    onCaptureInFlightChange={setCaptureInFlight}
                   />
                 )}
                 {inputFields.productName !== 'hidden' && (
@@ -893,9 +1080,24 @@ export function CampaignWizardPage() {
             {renderCampaignAction(inputFields)}
             {!amazonListing && !referenceOnlyMode && renderGenerationReferences(inputFields)}
 
+            {restoredFileReferences.length > 0 && (
+              <div className="draft-file-restore-notice">
+                <InlineNotice tone="warning">
+                  <strong>{t('Re-add image files')}</strong>
+                  <span>
+                    {t('This local draft included image files that cannot be restored. Re-add them before generating.')}
+                  </span>
+                </InlineNotice>
+              </div>
+            )}
+
             {error && (
               <InlineNotice tone="error">
-                {draftId && <strong>{t('Campaign draft saved.')}</strong>}
+                {draftId && (
+                  <strong>
+                    {t('Campaign details were saved; generation did not start.')}
+                  </strong>
+                )}
                 <span>
                   {error}
                   {draftId && <> {t('Correct the issue and retry this draft.')}</>}

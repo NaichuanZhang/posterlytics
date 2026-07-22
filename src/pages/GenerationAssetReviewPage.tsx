@@ -119,6 +119,22 @@ export function GenerationAssetReviewPage() {
     return () => window.clearInterval(timer)
   }, [generation, load])
 
+  const reviewActionInFlight = (
+    saveState === 'saving'
+    || confirming
+    || canceling
+  )
+  useEffect(() => {
+    if (!reviewActionInFlight) return
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [reviewActionInFlight])
+
   const assetById = useMemo(
     () => new Map(assets.map((asset) => [asset.id, asset])),
     [assets],

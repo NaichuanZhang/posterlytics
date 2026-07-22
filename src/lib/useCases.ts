@@ -169,6 +169,12 @@ export function isUseCaseId(value: unknown): value is UseCaseId {
   return typeof value === 'string' && USE_CASE_BY_ID.has(value as UseCaseId)
 }
 
+export function isCreatableUseCaseId(
+  value: unknown,
+): value is CreatableUseCaseId {
+  return isUseCaseId(value) && getUseCase(value).creationEnabled
+}
+
 export function isReferenceOnlyUseCaseId(
   value: unknown,
 ): value is ReferenceOnlyUseCaseId {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { insforge } from '../lib/insforge'
 import { hasAuthHydrationSignal } from '../lib/authRouting'
+import { clearAllLocalDrafts } from '../lib/localDraft'
 
 interface AuthUser {
   id: string
@@ -57,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await insforge.auth.signOut()
+    clearAllLocalDrafts()
     setUser(null)
   }
 

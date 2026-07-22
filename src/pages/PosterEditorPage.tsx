@@ -12,13 +12,21 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SetStateAction,
+} from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { useAuth } from '../auth/AuthProvider'
 import { AppShell } from '../components/AppShell'
 import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
+import { DraftPersistenceStatus } from '../components/DraftPersistenceStatus'
 import { GenerationDetailsSheet } from '../components/GenerationDetailsSheet'
 import { GenerationInputsReview } from '../components/GenerationInputsReview'
 import { GenerationReferences } from '../components/GenerationReferences'
@@ -36,6 +44,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlacements } from '../hooks/usePlacements'
 import { usePosterGenerations } from '../hooks/usePosterGenerations'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
+import { useDebouncedLocalDraft } from '../hooks/useDebouncedLocalDraft'
 import { useI18n } from '../i18n/I18nProvider'
 import {
   activatePosterGeneration,
@@ -66,6 +75,19 @@ import {
 import type { PosterGeneration } from '../lib/types'
 import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
 import { buildViewUrl } from '../lib/viewUrl'
+import {
+  buildPosterEditorDraftData,
+  isPosterEditorDraftDirty,
+  loadPosterEditorDraft,
+  posterEditorDraftKey,
+  restorePosterEditorDraft,
+  serializePosterEditorDraft,
+} from '../lib/posterEditorDraft'
+import {
+  canonicalLocalDraftContent,
+  rehydrateLocalDraftReferences,
+  type LocalDraftFileReference,
+} from '../lib/localDraft'
 
 type BusyAction =
   | 'generate'
@@ -114,7 +136,11 @@ export function PosterEditorPage() {
   const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null)
   const [instruction, setInstruction] = useState('')
   const [platformHint, setPlatformHint] = useState('')
+  const [platformHintBaseline, setPlatformHintBaseline] =
+    useState<string | null>(null)
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
+  const [restoredFileReferences, setRestoredFileReferences] =
+    useState<LocalDraftFileReference[]>([])
   const [refreshWebsite, setRefreshWebsite] = useState(false)
   const [generationError, setGenerationError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -124,14 +150,98 @@ export function PosterEditorPage() {
   const deliberateSelectionRef = useRef(false)
   const activitySnapshotRef = useRef<string | null>(null)
   const trackedJobRef = useRef<string | null>(null)
+  const restoredEditorKeyRef = useRef<string | null>(null)
+  const pendingReferencesRef = useRef(pendingReferences)
+  const [draftReady, setDraftReady] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(false)
+  const [initialPersistedCanonical, setInitialPersistedCanonical] =
+    useState<string | null>(null)
+  pendingReferencesRef.current = pendingReferences
 
   useEffect(() => {
     if (user?.id && campaignTrackingEnabled) void ensureDefault()
   }, [campaignTrackingEnabled, user?.id, ensureDefault])
 
   useEffect(() => {
-    setPlatformHint(campaign?.platform_hint ?? '')
-  }, [campaign?.id, campaign?.platform_hint])
+    setDraftReady(false)
+    restoredEditorKeyRef.current = null
+  }, [id])
+
+  useEffect(() => {
+    if (!user || !campaign || campaign.id !== id) return
+    const restorationKey = posterEditorDraftKey(user.id, campaign.id)
+    if (restoredEditorKeyRef.current === restorationKey) return
+    restoredEditorKeyRef.current = restorationKey
+    setDraftReady(false)
+
+    const localDraft = loadPosterEditorDraft(user.id, campaign.id)
+    if (localDraft) {
+      const restored = restorePosterEditorDraft(
+        localDraft.data,
+        campaign.platform_hint,
+      )
+      const restoredReferences = rehydrateLocalDraftReferences(
+        restored.references,
+      )
+      setInstruction(restored.instruction)
+      setPlatformHint(restored.platformHint)
+      setPlatformHintBaseline(restored.platformHintBaseline)
+      setRefreshWebsite(restored.refreshWebsite)
+      setPendingReferences(restoredReferences.pendingReferences)
+      setRestoredFileReferences(restoredReferences.unrestorableFiles)
+      setInitialPersistedCanonical(
+        canonicalLocalDraftContent(localDraft.data),
+      )
+      setRestoredDraft(true)
+    } else {
+      setInstruction('')
+      setPlatformHint(campaign.platform_hint ?? '')
+      setPlatformHintBaseline(campaign.platform_hint)
+      setRefreshWebsite(false)
+      setPendingReferences([])
+      setRestoredFileReferences([])
+      setInitialPersistedCanonical(null)
+      setRestoredDraft(false)
+    }
+    setDraftReady(true)
+  }, [campaign, id, user])
+
+  const editorDraftData = useMemo(() => buildPosterEditorDraftData({
+    campaignId: id ?? '',
+    instruction,
+    platformHint,
+    platformHintBaseline,
+    refreshWebsite,
+    pendingReferences,
+    unrestorableFiles: restoredFileReferences,
+  }), [
+    id,
+    instruction,
+    pendingReferences,
+    platformHint,
+    platformHintBaseline,
+    refreshWebsite,
+    restoredFileReferences,
+  ])
+  const editorDraftHasContent = isPosterEditorDraftDirty(editorDraftData)
+  // useCampaign retains the previous record while an editor route is loading.
+  const editorDraftReady = draftReady && campaign?.id === id
+  const serializeLocalEditorDraft = useCallback((
+    value: typeof editorDraftData,
+    nowMs: number,
+  ) => {
+    if (!user) throw new Error()
+    return serializePosterEditorDraft(user.id, value, nowMs)
+  }, [user])
+  const editorDraftPersistence = useDebouncedLocalDraft({
+    storageKey: user && id ? posterEditorDraftKey(user.id, id) : null,
+    value: editorDraftData,
+    ready: editorDraftReady,
+    dirty: editorDraftHasContent,
+    initialPersistedCanonical,
+    guardBeforeUnload: editorDraftHasContent || busy === 'generate',
+    serialize: serializeLocalEditorDraft,
+  })
 
   useEffect(() => {
     if (placements.length === 0) {
@@ -317,6 +427,37 @@ export function PosterEditorPage() {
             contextHint: t('Everything else stays consistent.'),
           }
 
+  function updatePendingReferences(
+    action: SetStateAction<PendingReference[]>,
+  ) {
+    const next = typeof action === 'function'
+      ? action(pendingReferencesRef.current)
+      : action
+    pendingReferencesRef.current = next
+    setPendingReferences(next)
+    setRestoredFileReferences((current) => current.filter((metadata) =>
+      !next.some((reference) => (
+        reference.kind === 'file'
+        && reference.file.name === metadata.name
+        && reference.file.size === metadata.size
+        && reference.file.type === metadata.type
+      ))
+    ))
+  }
+
+  function discardLocalEditorDraft() {
+    editorDraftPersistence.clear()
+    setInstruction('')
+    setPlatformHint(campaignPlatformHint ?? '')
+    setPlatformHintBaseline(campaignPlatformHint)
+    setPendingReferences([])
+    setRestoredFileReferences([])
+    setRefreshWebsite(false)
+    setGenerationError(null)
+    setRestoredDraft(false)
+    setInitialPersistedCanonical(null)
+  }
+
   async function generateVersion() {
     if (!user || generating || uploadingInputs) return
     if (!referenceContextRequirementMet) {
@@ -360,6 +501,9 @@ export function PosterEditorPage() {
         colorScheme,
         locale,
       })
+      editorDraftPersistence.clear()
+      setRestoredDraft(false)
+      setRestoredFileReferences([])
       deliberateSelectionRef.current = false
       trackedJobRef.current = result.job.id
       await Promise.all([refreshActivity(), reloadGenerations()])
@@ -432,6 +576,7 @@ export function PosterEditorPage() {
       .update({ platform_hint: normalized })
       .eq('id', campaignId)
     if (error) throw new Error(error.message)
+    setPlatformHintBaseline(normalized)
     return true
   }
 
@@ -485,6 +630,7 @@ export function PosterEditorPage() {
     setBusy('delete')
     try {
       await remove()
+      editorDraftPersistence.clear()
       notify(t('Campaign deleted.'), 'success')
       navigate('/')
     } catch (cause) {
@@ -549,6 +695,26 @@ export function PosterEditorPage() {
           <h2 id="create-version-heading">{t('Create next version')}</h2>
         </div>
       </div>
+      {(restoredDraft || editorDraftPersistence.status !== 'pristine') && (
+        <div className="editor-draft-persistence">
+          {restoredDraft && (
+            <div className="draft-restored-copy" role="status">
+              <strong>{t('Local draft restored.')}</strong>
+              <span>{t('Your inputs were restored from this browser.')}</span>
+            </div>
+          )}
+          <DraftPersistenceStatus status={editorDraftPersistence.status} />
+          {restoredDraft && (
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={discardLocalEditorDraft}
+            >
+              {t('Discard local draft')}
+            </button>
+          )}
+        </div>
+      )}
       <PosterFormatSelect
         id="next-poster-format"
         value={targetPosterSize.slug}
@@ -585,13 +751,23 @@ export function PosterEditorPage() {
         existingImages={[]}
         onRemoveExisting={() => {}}
         pendingReferences={pendingReferences}
-        onPendingReferencesChange={setPendingReferences}
+        onPendingReferencesChange={updatePendingReferences}
         disabled={generationInputsDisabled}
         contextRequirement={campaignUseCase.inputFields.referenceContext}
         referenceImagesRequirement={campaignUseCase.inputFields.referenceImages.requirement}
         referenceImagesMinimumCount={campaignUseCase.inputFields.referenceImages.minimumCount}
         {...useCaseReferenceProps}
       />
+      {restoredFileReferences.length > 0 && (
+        <div className="draft-file-restore-notice">
+          <InlineNotice tone="warning">
+            <strong>{t('Re-add image files')}</strong>
+            <span>
+              {t('This local draft included image files that cannot be restored. Re-add them before generating.')}
+            </span>
+          </InlineNotice>
+        </div>
+      )}
       {amazonReferenceMode && (
         <InlineNotice>
           <strong>{t('Amazon seller reference mode')}</strong>
