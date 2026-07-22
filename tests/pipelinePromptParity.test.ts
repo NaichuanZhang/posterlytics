@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   captureAnalyzeSourceMode,
   captureCurrentPipelinePromptGoldens,
+  captureRedNotePipelineDiagnostics,
   type PipelinePromptGoldens,
 } from './helpers/pipelinePromptHarness.ts'
 
@@ -35,6 +36,9 @@ const socialExpected = JSON.parse(readFileSync(
   hero: PipelinePromptGoldens['hero']['social_cover']
 }
 const actualPromise = captureCurrentPipelinePromptGoldens()
+const redNoteDiagnosticsPromise = actualPromise.then(
+  () => captureRedNotePipelineDiagnostics(),
+)
 
 test('website and Amazon analyze prompts match the pre-recipe byte goldens', async () => {
   const actual = await actualPromise
@@ -89,6 +93,29 @@ test('social analyze, designer, and hero prompts match their own goldens', async
   assert.equal(actual.hero.social_cover, socialExpected.hero)
 })
 
+test('RedNote reuses the social prompt recipe byte-for-byte', async () => {
+  const actual = await actualPromise
+
+  assert.deepEqual(actual.analyze.rednote_post, socialExpected.analyze)
+  assert.deepEqual(actual.designer.rednote_post, socialExpected.designer)
+  assert.equal(actual.hero.rednote_post, socialExpected.hero)
+  assert.deepEqual(actual.analyze.rednote_post, actual.analyze.social_cover)
+  assert.deepEqual(actual.designer.rednote_post, actual.designer.social_cover)
+  assert.equal(actual.hero.rednote_post, actual.hero.social_cover)
+})
+
+test('RedNote keeps the single-call cover pipeline and writes no page plan', async () => {
+  assert.deepEqual(await redNoteDiagnosticsPromise, {
+    analyzeChatCalls: 1,
+    analyzeImageCalls: 0,
+    designerChatCalls: 1,
+    designerImageCalls: 0,
+    heroChatCalls: 0,
+    heroImageCalls: 1,
+    wroteRedNotePost: false,
+  })
+})
+
 test('social prompts contain reference and platform semantics without URL evidence language', async () => {
   const actual = await actualPromise
   const prompts = [
@@ -108,7 +135,7 @@ test('social prompts contain reference and platform semantics without URL eviden
   )
 })
 
-test('analyze trace metadata exposes all three product source modes', async () => {
+test('analyze trace metadata exposes every product source mode', async () => {
   const website = await captureAnalyzeSourceMode(
     'website_product',
     'https://example.com/products/northstar',
@@ -118,9 +145,10 @@ test('analyze trace metadata exposes all three product source modes', async () =
     'https://www.amazon.com/dp/B0FIXTURE1',
   )
   const social = await captureAnalyzeSourceMode('social_cover', null)
+  const redNote = await captureAnalyzeSourceMode('rednote_post', null)
 
   assert.deepEqual(
-    [website, amazon, social],
-    ['website', 'amazon-reference', 'reference-only'],
+    [website, amazon, social, redNote],
+    ['website', 'amazon-reference', 'reference-only', 'reference-only'],
   )
 })

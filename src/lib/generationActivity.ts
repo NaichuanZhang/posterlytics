@@ -10,6 +10,7 @@ import {
   translate,
   type SupportedLocale,
 } from './i18n'
+import { isReferenceOnlyUseCaseId } from './useCases'
 
 export type GenerationStageStatus =
   | 'pending'
@@ -66,7 +67,7 @@ export function generationActivityLabel(
   if (item.status === 'succeeded') return translate(locale, 'Ready')
   if (item.status === 'failed') return translate(locale, 'Failed')
   if (item.status === 'canceled') return translate(locale, 'Canceled')
-  if (item.stage === 'analyze' && item.use_case === 'social_cover') {
+  if (item.stage === 'analyze' && isReferenceOnlyUseCaseId(item.use_case)) {
     return translate(locale, 'Analyzing references')
   }
   const stageLabel = STAGE_LABELS[item.stage]
@@ -78,7 +79,7 @@ export function generationStageLabel(
   locale: SupportedLocale = DEFAULT_LOCALE,
   useCase?: GenerationActivityItem['use_case'],
 ): string {
-  if (stage === 'analyze' && useCase === 'social_cover') {
+  if (stage === 'analyze' && isReferenceOnlyUseCaseId(useCase)) {
     return translate(locale, 'Analyze references')
   }
   const stageLabel = STAGE_LABELS[stage]
@@ -114,7 +115,7 @@ export function deriveGenerationStages(
     else if (item.status === 'queued') status = 'pending'
     else status = 'running'
 
-    const labelKey = stage.key === 'analyze' && item.use_case === 'social_cover'
+    const labelKey = stage.key === 'analyze' && isReferenceOnlyUseCaseId(item.use_case)
       ? status === 'done'
         ? 'References analyzed'
         : 'Analyze references'

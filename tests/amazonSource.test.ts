@@ -110,30 +110,32 @@ test('Amazon acquisition returns reference mode without raw fetch or capture I/O
   assert.equal(captureCalls, 0)
 })
 
-test('social acquisition is reference-only with no URL fetch or capture I/O', async () => {
-  let ioCalls = 0
-  const acquisition = await acquireProductSource(
-    '',
-    'light',
-    resolveProductUseCaseRecipe('social_cover'),
-    {
-      fetchHtml: async () => {
-        ioCalls += 1
-        return '<html>unexpected</html>'
+test('reference-only acquisition performs no URL fetch or capture I/O', async () => {
+  for (const useCase of ['social_cover', 'rednote_post'] as const) {
+    let ioCalls = 0
+    const acquisition = await acquireProductSource(
+      '',
+      'light',
+      resolveProductUseCaseRecipe(useCase),
+      {
+        fetchHtml: async () => {
+          ioCalls += 1
+          return '<html>unexpected</html>'
+        },
+        capture: async () => {
+          ioCalls += 1
+          throw new Error('capture must not run')
+        },
       },
-      capture: async () => {
-        ioCalls += 1
-        throw new Error('capture must not run')
-      },
-    },
-  )
+    )
 
-  assert.deepEqual(acquisition, {
-    mode: 'reference-only',
-    html: '',
-    capture: null,
-  })
-  assert.equal(ioCalls, 0)
+    assert.deepEqual(acquisition, {
+      mode: 'reference-only',
+      html: '',
+      capture: null,
+    })
+    assert.equal(ioCalls, 0)
+  }
 })
 
 test('ordinary website acquisition retains raw fetch and browser capture', async () => {

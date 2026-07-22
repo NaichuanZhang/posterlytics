@@ -3,6 +3,7 @@ import {
   ArrowRight,
   ArrowRightLeft,
   CheckCircle2,
+  FileText,
   Globe2,
   ImagePlus,
   ShoppingBag,
@@ -57,6 +58,7 @@ import { getDeviceColorScheme } from '../lib/colorScheme'
 import {
   CREATABLE_USE_CASES,
   getUseCase,
+  isReferenceOnlyUseCaseId,
   type CreatableUseCaseId,
   type UseCaseFieldRequirement,
 } from '../lib/useCases'
@@ -127,7 +129,8 @@ export function CampaignWizardPage() {
     && productSourceKind === 'invalid'
   )
   const amazonListing = selectedUseCaseId === 'amazon_listing'
-  const socialCover = selectedUseCaseId === 'social_cover'
+  const referenceOnlyMode = isReferenceOnlyUseCaseId(selectedUseCaseId)
+  const redNotePost = selectedUseCaseId === 'rednote_post'
   const minimumReferenceImages = inputFields
     ? Math.max(
         inputFields.referenceImages.minimumCount,
@@ -135,6 +138,10 @@ export function CampaignWizardPage() {
       )
     : 0
   const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
+  const referenceContextRequirementMet = (
+    inputFields?.referenceContext !== 'required'
+    || normalizeReferenceContext(referenceContext) !== null
+  )
 
   function selectUseCase(useCaseId: CreatableUseCaseId) {
     const nextUseCase = getUseCase(useCaseId)
@@ -313,6 +320,10 @@ export function CampaignWizardPage() {
       productUrlInputRef.current?.focus()
       return
     }
+    if (!referenceContextRequirementMet) {
+      setError(t('RedNote post generation requires draft copy.'))
+      return
+    }
     if (pendingReferences.length < minimumReferenceImages) {
       setError(t('Add at least {count} images.', { count: minimumReferenceImages }))
       return
@@ -477,15 +488,23 @@ export function CampaignWizardPage() {
           referenceImagesLabel: t('Product and brand images'),
           referenceImagesHint: t('Seller-provided images are the primary visual source.'),
         }
-      : socialCover
+      : redNotePost
         ? {
+            contextLabel: t('Draft copy'),
+            contextPlaceholder: t('Paste the full draft copy for this RedNote post.'),
+            contextHint: t('The draft copy is interpreted together with the reference images.'),
+            referenceImagesLabel: t('Creative references'),
+            referenceImagesHint: t('Reference images are the primary visual source.'),
+          }
+        : referenceOnlyMode
+          ? {
             contextLabel: t('Creative direction'),
             contextPlaceholder: t('Describe the mood, visual hook, audience, and anything the artwork should preserve.'),
             contextHint: t('Creative direction is interpreted together with the reference images.'),
             referenceImagesLabel: t('Creative references'),
             referenceImagesHint: t('Reference images are the primary visual source.'),
           }
-      : {}
+          : {}
 
     return (
       <section className="form-section" aria-labelledby="references-heading">
@@ -495,15 +514,19 @@ export function CampaignWizardPage() {
             <h2 id="references-heading">
               {amazonListing
                 ? t('Listing copy and product images')
-                : socialCover
-                  ? t('Creative references and direction')
+                : redNotePost
+                  ? t('Draft copy and creative references')
+                  : referenceOnlyMode
+                    ? t('Creative references and direction')
                 : t('Generation references')}
             </h2>
             <p>
               {amazonListing
                 ? t('Provide the seller-owned text and visuals Posterlytics should use.')
-                : socialCover
-                  ? t('Start with at least one image, then add any context that should shape the artwork.')
+                : redNotePost
+                  ? t('Add the complete draft copy and at least one image for the post.')
+                  : referenceOnlyMode
+                    ? t('Start with at least one image, then add any context that should shape the artwork.')
                 : t('Add direction or images that are not present on the website.')}
             </p>
           </div>
@@ -558,8 +581,10 @@ export function CampaignWizardPage() {
               : working
                 ? t('Generation continues in the background after the inputs are queued.')
                 : selectedUseCase
-                  ? socialCover
-                    ? t('Set artwork details, creative references, and an optional platform hint.')
+                  ? redNotePost
+                    ? t('Set artwork details, draft copy, creative references, and an optional platform hint.')
+                    : referenceOnlyMode
+                      ? t('Set artwork details, creative references, and an optional platform hint.')
                     : t('Set the source, message, and tracked destination.')
                   : t('Choose the campaign source that matches what you want to create.')}
           </p>
@@ -645,9 +670,11 @@ export function CampaignWizardPage() {
                 <span className="use-case-card-icon" aria-hidden="true">
                   {useCase.id === 'amazon_listing'
                     ? <ShoppingBag size={22} />
-                    : useCase.id === 'social_cover'
-                      ? <ImagePlus size={22} />
-                      : <Globe2 size={22} />}
+                    : useCase.id === 'rednote_post'
+                      ? <FileText size={22} />
+                      : isReferenceOnlyUseCaseId(useCase.id)
+                        ? <ImagePlus size={22} />
+                        : <Globe2 size={22} />}
                 </span>
                 <span className="use-case-card-copy">
                   <strong>{t(useCase.label)}</strong>
@@ -684,23 +711,23 @@ export function CampaignWizardPage() {
               </button>
             </div>
 
-            {socialCover && renderGenerationReferences(inputFields)}
+            {referenceOnlyMode && renderGenerationReferences(inputFields)}
 
             <section className="form-section" aria-labelledby="source-heading">
               <div className="form-section-heading">
                 <span>
-                  {socialCover
+                  {referenceOnlyMode
                     ? <ImagePlus size={17} aria-hidden="true" />
                     : <Globe2 size={17} aria-hidden="true" />}
                 </span>
                 <div>
                   <h2 id="source-heading">
-                    {socialCover ? t('Artwork details') : t('Product source')}
+                    {referenceOnlyMode ? t('Artwork details') : t('Product source')}
                   </h2>
                   <p>
                     {amazonListing
                       ? t('Use a supported Amazon listing URL. Posterlytics will use seller-provided references instead of scraping the page.')
-                      : socialCover
+                      : referenceOnlyMode
                         ? t('Name the artwork and choose its full-bleed output format.')
                       : t('The website supplies the visual and product context.')}
                   </p>
@@ -794,14 +821,14 @@ export function CampaignWizardPage() {
                 {inputFields.productName !== 'hidden' && (
                   <div className="field">
                     <label htmlFor="product-name">
-                      {socialCover ? t('Artwork name') : t('Product name')}{' '}
+                      {referenceOnlyMode ? t('Artwork name') : t('Product name')}{' '}
                       <FieldRequirement requirement={inputFields.productName} />
                     </label>
                     <input
                       id="product-name"
                       className="input"
                       required={inputFields.productName === 'required'}
-                      placeholder={socialCover ? t('Summer launch cover') : 'Northstar Reports'}
+                      placeholder={referenceOnlyMode ? t('Summer launch cover') : 'Northstar Reports'}
                       value={productName}
                       aria-describedby={
                         amazonListing && amazonTitleLookupStatus !== 'idle'
@@ -831,14 +858,14 @@ export function CampaignWizardPage() {
                 {inputFields.tagline !== 'hidden' && (
                   <div className="field">
                     <label htmlFor="tagline">
-                      {socialCover ? t('Supporting line') : t('Tagline')}{' '}
+                      {referenceOnlyMode ? t('Supporting line') : t('Tagline')}{' '}
                       <FieldRequirement requirement={inputFields.tagline} />
                     </label>
                     <input
                       id="tagline"
                       className="input"
                       required={inputFields.tagline === 'required'}
-                      placeholder={socialCover
+                      placeholder={referenceOnlyMode
                         ? t('A short optional line')
                         : t('Reports your team can act on')}
                       value={tagline}
@@ -864,7 +891,7 @@ export function CampaignWizardPage() {
 
             {amazonListing && renderGenerationReferences(inputFields)}
             {renderCampaignAction(inputFields)}
-            {!amazonListing && !socialCover && renderGenerationReferences(inputFields)}
+            {!amazonListing && !referenceOnlyMode && renderGenerationReferences(inputFields)}
 
             {error && (
               <InlineNotice tone="error">
@@ -882,6 +909,7 @@ export function CampaignWizardPage() {
                 type="submit"
                 disabled={
                   !referenceMinimumMet
+                  || !referenceContextRequirementMet
                   || !pendingReferencesReady(pendingReferences)
                 }
               >

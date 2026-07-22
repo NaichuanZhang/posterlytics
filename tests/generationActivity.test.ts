@@ -120,20 +120,22 @@ test('asset review is active, directly labeled, and never represented as a runni
   )
 })
 
-test('social activity labels analyze as reference work in both locales', () => {
-  const social = activity({
-    stage: 'analyze',
-    use_case: 'social_cover',
-    generation_status: 'analyzing',
-  })
+test('reference-only activity labels analyze as reference work in both locales', () => {
+  for (const useCase of ['social_cover', 'rednote_post'] as const) {
+    const item = activity({
+      stage: 'analyze',
+      use_case: useCase,
+      generation_status: 'analyzing',
+    })
 
-  assert.equal(generationActivityLabel(social), 'Analyzing references')
-  assert.equal(generationActivityLabel(social, 'zh-CN'), '正在分析参考素材')
-  assert.equal(deriveGenerationStages(social)[0].label, 'Analyze references')
-  assert.equal(
-    deriveGenerationStages({ ...social, status: 'succeeded' })[0].label,
-    'References analyzed',
-  )
+    assert.equal(generationActivityLabel(item), 'Analyzing references')
+    assert.equal(generationActivityLabel(item, 'zh-CN'), '正在分析参考素材')
+    assert.equal(deriveGenerationStages(item)[0].label, 'Analyze references')
+    assert.equal(
+      deriveGenerationStages({ ...item, status: 'succeeded' })[0].label,
+      'References analyzed',
+    )
+  }
 })
 
 test('completion only replaces a deliberate canvas selection when it is the same version', () => {

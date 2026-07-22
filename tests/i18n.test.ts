@@ -116,6 +116,14 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
       '基于产品官网的内容和视觉风格创建。',
     'Create from an Amazon listing plus seller-provided copy and images.':
       '基于亚马逊商品页及卖家提供的文案和图片创建。',
+    'RedNote post': '小红书笔记',
+    'Create a 3:4 RedNote cover from draft copy and creative references.':
+      '根据笔记草稿和创意参考图创建 3:4 小红书封面。',
+    'Draft copy': '笔记草稿',
+    'Paste the full draft copy for this RedNote post.':
+      '粘贴这篇小红书笔记的完整草稿。',
+    'The draft copy is interpreted together with the reference images.':
+      '笔记草稿会与参考图片一起解读。',
     'Listing copy and product images': '商品文案与产品图片',
     'Product title unavailable. Enter the product name.':
       '无法获取商品标题，请手动输入产品名称。',

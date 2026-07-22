@@ -149,6 +149,7 @@ test('both tables constrain scenario, use_case, and their event equivalence', ()
       'website_product',
       'amazon_listing',
       'social_cover',
+      'rednote_post',
       'event',
     ]) {
       assert.match(baselineConstraint, new RegExp(`'${useCase}'`))

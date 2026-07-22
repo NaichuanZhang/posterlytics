@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  isReferenceOnlyProductRecipe,
   resolveProductUseCaseRecipe,
   resolveUseCaseRecipe,
   useCaseSourceMismatch,
@@ -10,6 +11,7 @@ test('resolver exposes product recipes and an isolated event-bespoke sentinel', 
   const website = resolveUseCaseRecipe('website_product')
   const amazon = resolveUseCaseRecipe('amazon_listing')
   const social = resolveUseCaseRecipe('social_cover')
+  const redNote = resolveUseCaseRecipe('rednote_post')
   const event = resolveUseCaseRecipe('event')
 
   assert.equal(website.kind, 'product')
@@ -18,6 +20,16 @@ test('resolver exposes product recipes and an isolated event-bespoke sentinel', 
   assert.equal(amazon.acquisitionMode, 'amazon-reference')
   assert.equal(social.kind, 'product')
   assert.equal(social.acquisitionMode, 'reference-only')
+  assert.deepEqual(redNote, { ...social, id: 'rednote_post' })
+  assert.equal(
+    isReferenceOnlyProductRecipe(resolveProductUseCaseRecipe('social_cover')),
+    true,
+  )
+  assert.equal(
+    isReferenceOnlyProductRecipe(resolveProductUseCaseRecipe('rednote_post')),
+    true,
+  )
+  assert.equal(isReferenceOnlyProductRecipe(website), false)
   assert.deepEqual(event, {
     kind: 'event-bespoke',
     id: 'event',
@@ -96,6 +108,13 @@ test('social recipe is reference-only and contains no website or URL evidence la
   assert.match(materialized, /TARGET PLATFORM HINT: Instagram/)
   assert.doesNotMatch(materialized, /\b(?:website|url)\b|browser capture/i)
   assert.doesNotMatch(materialized, /\bDOM\b/)
+})
+
+test('RedNote recipe reuses the social recipe byte-for-byte apart from its id', () => {
+  const social = resolveProductUseCaseRecipe('social_cover')
+  const redNote = resolveProductUseCaseRecipe('rednote_post')
+
+  assert.deepEqual(redNote, { ...social, id: 'rednote_post' })
 })
 
 test('reference-purpose recipes match every pre-recipe byte string', () => {
@@ -203,6 +222,7 @@ test('source mismatch accepts aligned rows and ignores event or NULL-ish legacy 
     null,
   )
   assert.equal(useCaseSourceMismatch('social_cover', null), null)
+  assert.equal(useCaseSourceMismatch('rednote_post', null), null)
   assert.equal(
     useCaseSourceMismatch(
       'social_cover',

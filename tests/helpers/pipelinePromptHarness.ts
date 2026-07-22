@@ -1,7 +1,10 @@
 import { runAnalyzeStage } from '../../functions/analyze.ts'
 import { runDesignerStage } from '../../functions/designer.ts'
 import { runHeroStage } from '../../functions/hero.ts'
-import type { UseCaseId } from '../../src/lib/useCases.ts'
+import {
+  isReferenceOnlyUseCaseId,
+  type UseCaseId,
+} from '../../src/lib/useCases.ts'
 
 type PipelineStage = 'analyze' | 'designer' | 'hero'
 
@@ -28,6 +31,8 @@ interface HarnessState {
   sourceHtmlOverride: string | null
   imageUrls: Set<string>
   sourceImageRequests: string[]
+  chatRequests: number
+  imageRequests: number
 }
 
 export interface PipelinePromptGoldens {
@@ -35,19 +40,32 @@ export interface PipelinePromptGoldens {
     website_product: { system: string; user: string }
     amazon_listing: { system: string; user: string }
     social_cover: { system: string; user: string }
+    rednote_post: { system: string; user: string }
     event: { system: string; user: string }
   }
   designer: {
     website_product: { system: string; user: string }
     amazon_listing: { system: string; user: string }
     social_cover: { system: string; user: string }
+    rednote_post: { system: string; user: string }
   }
   hero: {
     website_product: string
     amazon_listing: string
     social_cover: string
+    rednote_post: string
     event: string
   }
+}
+
+export interface RedNotePipelineDiagnostics {
+  analyzeChatCalls: number
+  analyzeImageCalls: number
+  designerChatCalls: number
+  designerImageCalls: number
+  heroChatCalls: number
+  heroImageCalls: number
+  wroteRedNotePost: boolean
 }
 
 const USER_ID = 'user-fixture'
@@ -167,6 +185,11 @@ export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePro
         null,
         'product',
       ),
+      rednote_post: await captureAnalyzePrompt(
+        'rednote_post',
+        null,
+        'product',
+      ),
       event: await captureAnalyzePrompt(
         'event',
         'https://lu.ma/fixture-summit',
@@ -177,13 +200,71 @@ export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePro
       website_product: await captureDesignerPrompt('website_product'),
       amazon_listing: await captureDesignerPrompt('amazon_listing'),
       social_cover: await captureDesignerPrompt('social_cover'),
+      rednote_post: await captureDesignerPrompt('rednote_post'),
     },
     hero: {
       website_product: await captureHeroPrompt('website_product', 'product'),
       amazon_listing: await captureHeroPrompt('amazon_listing', 'product'),
       social_cover: await captureHeroPrompt('social_cover', 'product'),
+      rednote_post: await captureHeroPrompt('rednote_post', 'product'),
       event: await captureHeroPrompt('event', 'event'),
     },
+  }
+}
+
+export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipelineDiagnostics> {
+  const analyzeState = createState('rednote_post', null, 'product')
+  await withHarnessGlobals(
+    analyzeState,
+    productAnalyzeResponse(),
+    () => runAnalyzeStage({
+      client: createHarnessClient(analyzeState) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      colorScheme: 'light',
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+
+  const designerState = createState('rednote_post', null, 'product')
+  await withHarnessGlobals(
+    designerState,
+    designerResponse(),
+    () => runDesignerStage({
+      client: createHarnessClient(designerState) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+
+  const heroState = createState('rednote_post', null, 'product')
+  await withHarnessGlobals(
+    heroState,
+    null,
+    () => runHeroStage({
+      client: createHarnessClient(heroState) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+
+  return {
+    analyzeChatCalls: analyzeState.chatRequests,
+    analyzeImageCalls: analyzeState.imageRequests,
+    designerChatCalls: designerState.chatRequests,
+    designerImageCalls: designerState.imageRequests,
+    heroChatCalls: heroState.chatRequests,
+    heroImageCalls: heroState.imageRequests,
+    wroteRedNotePost: [analyzeState, designerState, heroState]
+      .some(hasRedNotePostPlan),
   }
 }
 
@@ -215,7 +296,7 @@ export async function runAnalyzeMismatchCompatibility(
 export async function captureAnalyzeSourceMode(
   useCase: Extract<
     UseCaseId,
-    'website_product' | 'amazon_listing' | 'social_cover'
+    'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post'
   >,
   productUrl: string | null,
 ): Promise<unknown> {
@@ -407,10 +488,10 @@ async function captureAnalyzePrompt(
 async function captureDesignerPrompt(
   useCase: Extract<
     UseCaseId,
-    'website_product' | 'amazon_listing' | 'social_cover'
+    'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post'
   >,
 ): Promise<{ system: string; user: string }> {
-  const productUrl = useCase === 'social_cover'
+  const productUrl = isReferenceOnlyUseCaseId(useCase)
     ? null
     : useCase === 'amazon_listing'
       ? 'https://www.amazon.com/dp/B0FIXTURE1'
@@ -440,7 +521,7 @@ async function captureHeroPrompt(
 ): Promise<string> {
   const productUrl = useCase === 'amazon_listing'
     ? 'https://www.amazon.com/dp/B0FIXTURE1'
-    : useCase === 'social_cover'
+    : isReferenceOnlyUseCaseId(useCase)
       ? null
     : scenario === 'event'
       ? 'https://lu.ma/fixture-summit'
@@ -472,30 +553,30 @@ function createState(
   productUrl: string | null,
   scenario: 'product' | 'event',
 ): HarnessState {
-  const socialCover = useCase === 'social_cover'
+  const referenceOnly = isReferenceOnlyUseCaseId(useCase)
   const campaign = {
     id: CAMPAIGN_ID,
     user_id: USER_ID,
     product_url: productUrl,
     product_name: scenario === 'event'
       ? 'Fixture Summit'
-      : socialCover
+      : referenceOnly
         ? 'Summer Signals'
         : 'Northstar',
     tagline: scenario === 'event'
       ? 'Builders meet here'
-      : socialCover
+      : referenceOnly
         ? 'A new season in motion'
         : 'Operational clarity',
     cta_text: scenario === 'event'
       ? 'Reserve a seat'
-      : socialCover
+      : referenceOnly
         ? 'Learn more'
         : 'Start now',
-    destination_url: socialCover ? null : productUrl,
+    destination_url: referenceOnly ? null : productUrl,
     scenario,
     use_case: useCase,
-    platform_hint: socialCover ? 'Instagram' : null,
+    platform_hint: referenceOnly ? 'Instagram' : null,
     eager_capture_url: null,
     eager_capture_color_scheme: null,
     eager_captured_at: null,
@@ -507,10 +588,10 @@ function createState(
     status: 'created',
     parent_generation_id: null,
     generation_mode: 'website_refresh',
-    instruction: socialCover
+    instruction: referenceOnly
       ? 'Keep the mood kinetic and make the diagonal light band the visual hook.'
       : 'Keep the hierarchy focused and use the supplied proof points.',
-    reference_images: socialCover
+    reference_images: referenceOnly
       ? [{
           key: 'references/social-reference.png',
           url: SOCIAL_REFERENCE_URL,
@@ -519,10 +600,10 @@ function createState(
           size_bytes: 8,
         }]
       : [],
-    poster_format: socialCover ? 'rednote_cover_3x4' : 'a4_2x3',
+    poster_format: referenceOnly ? 'rednote_cover_3x4' : 'a4_2x3',
     scenario,
     use_case: useCase,
-    platform_hint: socialCover ? 'Instagram' : null,
+    platform_hint: referenceOnly ? 'Instagram' : null,
     screenshot_url: null,
     screenshot_key: null,
     style_profile: {
@@ -538,26 +619,26 @@ function createState(
         ],
       },
       fonts: { heading: 'Space Grotesk', body: 'Inter' },
-      tone: socialCover ? 'kinetic, luminous' : 'precise, confident',
-      layout_hint: socialCover
+      tone: referenceOnly ? 'kinetic, luminous' : 'precise, confident',
+      layout_hint: referenceOnly
         ? 'full-bleed diagonal editorial sweep'
         : 'asymmetric editorial stack',
-      imagery: socialCover
+      imagery: referenceOnly
         ? 'silhouetted figure crossing a luminous field'
         : 'one isolated product close-up',
-      typography_treatment: socialCover
+      typography_treatment: referenceOnly
         ? 'condensed display type with quiet supporting text'
         : 'high-contrast grotesk hierarchy',
-      lighting: socialCover
+      lighting: referenceOnly
         ? 'hard side light with a saturated glow'
         : 'soft directional studio light',
-      texture: socialCover
+      texture: referenceOnly
         ? 'fine photographic grain'
         : 'subtle uncoated paper grain',
-      motifs: socialCover
+      motifs: referenceOnly
         ? ['cropped circles', 'diagonal light bands']
         : ['thin registration lines'],
-      composition: socialCover
+      composition: referenceOnly
         ? 'full-bleed diagonal editorial sweep'
         : 'asymmetric editorial stack',
       density: 'balanced',
@@ -565,37 +646,37 @@ function createState(
     poster_copy: {
       hook: scenario === 'event'
         ? 'Meet the builders'
-        : socialCover
+        : referenceOnly
           ? 'Follow the light'
           : 'See the signal',
       what_it_does: scenario === 'event'
         ? 'A focused evening for builders.'
-        : socialCover
+        : referenceOnly
           ? 'A new season in motion.'
           : 'Decisions without delay.',
       features: ['Fast setup', 'Shared context'],
       cta: scenario === 'event'
         ? 'Reserve a seat'
-        : socialCover
+        : referenceOnly
           ? ''
           : 'Start now',
     },
     poster_content: {
       headline: scenario === 'event'
         ? 'Meet the builders'
-        : socialCover
+        : referenceOnly
           ? 'Follow the light'
           : 'See the signal',
       what_it_does: scenario === 'event'
         ? 'A focused evening for builders.'
-        : socialCover
+        : referenceOnly
           ? 'A new season in motion.'
           : 'Decisions without delay.',
       features: ['Fast setup', 'Shared context'],
     },
     brand_essence: scenario === 'event'
       ? 'An energetic builder gathering in deep blue and coral.'
-      : socialCover
+      : referenceOnly
         ? 'Kinetic editorial artwork with a coral light band, deep black field, and photographic grain.'
         : 'A precise analytics brand with deep blue geometry and coral accents.',
     poster_spec: scenario === 'event'
@@ -607,12 +688,12 @@ function createState(
           time_line: '6:30 PM UTC',
           location_line: 'Signal Hall - Seattle',
         }
-      : socialCover
+      : referenceOnly
         ? { qr_label: '', urls: '' }
         : { qr_label: 'Start now', urls: productUrl },
     poster_layout: scenario === 'event'
       ? null
-      : socialCover
+      : referenceOnly
         ? SOCIAL_LAYOUT
         : PRODUCT_LAYOUT,
     brand_assets: { images: [] },
@@ -646,6 +727,8 @@ function createState(
     sourceHtmlOverride: null,
     imageUrls: new Set(),
     sourceImageRequests: [],
+    chatRequests: 0,
+    imageRequests: 0,
   }
 }
 
@@ -815,6 +898,7 @@ async function withHarnessGlobals<T>(
         modalities?: unknown
       }
       if (Array.isArray(request.modalities) && request.modalities.includes('image')) {
+        state.imageRequests += 1
         return Response.json({
           choices: [{
             message: {
@@ -827,6 +911,7 @@ async function withHarnessGlobals<T>(
           }],
         })
       }
+      state.chatRequests += 1
       return Response.json({
         choices: [{
           message: {
@@ -885,6 +970,13 @@ async function withHarnessGlobals<T>(
       ;(globalThis as Record<string, unknown>).Deno = originalDeno
     }
   }
+}
+
+function hasRedNotePostPlan(state: HarnessState): boolean {
+  const posterContent = state.generation.poster_content
+  return !!posterContent
+    && typeof posterContent === 'object'
+    && Object.prototype.hasOwnProperty.call(posterContent, 'rednote_post')
 }
 
 function sourceHtml(scenario: string): string {

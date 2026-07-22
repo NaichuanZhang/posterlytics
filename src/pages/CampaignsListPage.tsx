@@ -13,7 +13,7 @@ import type { Campaign } from '../lib/types'
 import type { GenerationActivityItem } from '../lib/types'
 import { activityForCampaign, generationActivityLabel } from '../lib/generationActivity'
 import { useI18n } from '../i18n/I18nProvider'
-import { getUseCase } from '../lib/useCases'
+import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
 
 export function CampaignsListPage() {
   const { t } = useI18n()
@@ -209,7 +209,7 @@ function CampaignFile({
       <div className="campaign-file-copy">
         <strong>{campaign.product_name}</strong>
         <span>
-          {campaign.use_case === 'social_cover'
+          {isReferenceOnlyUseCaseId(campaign.use_case)
             ? t(getUseCase(campaign.use_case).label)
             : safeHostname(campaign.product_url)}
         </span>

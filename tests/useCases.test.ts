@@ -6,6 +6,7 @@ import { POSTER_SIZES } from '../src/lib/posterSize.ts'
 import {
   CREATABLE_USE_CASES,
   getUseCase,
+  isReferenceOnlyUseCaseId,
   isUseCaseId,
   USE_CASE_IDS,
   USE_CASES,
@@ -25,6 +26,14 @@ const editorSource = readFileSync(
 )
 const generationTracesSource = readFileSync(
   new URL('../src/lib/generationTraces.ts', import.meta.url),
+  'utf8',
+)
+const versionHistorySource = readFileSync(
+  new URL('../src/components/PosterVersionHistory.tsx', import.meta.url),
+  'utf8',
+)
+const generationDetailsSource = readFileSync(
+  new URL('../src/components/GenerationDetailsSheet.tsx', import.meta.url),
   'utf8',
 )
 const designerSource = readFileSync(
@@ -56,17 +65,19 @@ const placementsHookSource = readFileSync(
   'utf8',
 )
 
-test('registry contains the three creatable use cases plus historical event', () => {
+test('registry contains the four creatable use cases plus historical event', () => {
   assert.deepEqual(USE_CASE_IDS, [
     'website_product',
     'amazon_listing',
     'social_cover',
+    'rednote_post',
     'event',
   ])
   assert.deepEqual(USE_CASES.map((useCase) => useCase.id), USE_CASE_IDS)
   assert.equal(isUseCaseId('website_product'), true)
   assert.equal(isUseCaseId('amazon_listing'), true)
   assert.equal(isUseCaseId('social_cover'), true)
+  assert.equal(isUseCaseId('rednote_post'), true)
   assert.equal(isUseCaseId('event'), true)
   assert.equal(isUseCaseId('unknown'), false)
   assert.equal(getUseCase(undefined).id, 'website_product')
@@ -119,10 +130,30 @@ test('social cover is creatable from references with no URL or tracking fields',
   assert.equal(social.trackingEnabled, false)
 })
 
-test('all three creation cards have localized descriptions', () => {
+test('RedNote requires draft copy and otherwise mirrors social cover', () => {
+  const social = getUseCase('social_cover')
+  const redNote = getUseCase('rednote_post')
+
+  assert.deepEqual(redNote, {
+    ...social,
+    id: 'rednote_post',
+    label: 'RedNote post',
+    creationDescription:
+      'Create a 3:4 RedNote cover from draft copy and creative references.',
+    inputFields: {
+      ...social.inputFields,
+      referenceContext: 'required',
+    },
+  })
+  assert.equal(isReferenceOnlyUseCaseId('social_cover'), true)
+  assert.equal(isReferenceOnlyUseCaseId('rednote_post'), true)
+  assert.equal(isReferenceOnlyUseCaseId('website_product'), false)
+})
+
+test('all four creation cards have localized descriptions', () => {
   assert.deepEqual(
     CREATABLE_USE_CASES.map((useCase) => useCase.id),
-    ['website_product', 'amazon_listing', 'social_cover'],
+    ['website_product', 'amazon_listing', 'social_cover', 'rednote_post'],
   )
   assert.deepEqual(
     CREATABLE_USE_CASES.map((useCase) => zhCN[useCase.creationDescription!]),
@@ -130,6 +161,7 @@ test('all three creation cards have localized descriptions', () => {
       '基于产品官网的内容和视觉风格创建。',
       '基于亚马逊商品页及卖家提供的文案和图片创建。',
       '根据创意参考图和方向创建满版画面。',
+      '根据笔记草稿和创意参考图创建 3:4 小红书封面。',
     ],
   )
 })
@@ -153,7 +185,9 @@ test('event remains a non-creatable historical registry entry', () => {
 test('website, Amazon, and event retain all formats, A4 defaults, and tracking', () => {
   const formatSlugs = POSTER_SIZES.map((size) => size.slug)
 
-  for (const useCase of USE_CASES.filter(({ id }) => id !== 'social_cover')) {
+  for (const useCase of USE_CASES.filter(({ id }) =>
+    !isReferenceOnlyUseCaseId(id)
+  )) {
     assert.deepEqual(useCase.allowedPosterFormats, formatSlugs)
     assert.equal(useCase.defaultPosterFormat, 'a4_2x3')
     assert.equal(
@@ -167,7 +201,7 @@ test('website, Amazon, and event retain all formats, A4 defaults, and tracking',
 test('registry labels are localized without carrying a prompt recipe', () => {
   assert.deepEqual(
     USE_CASES.map((useCase) => zhCN[useCase.label]),
-    ['网站产品', '亚马逊商品', '社交媒体封面', '活动'],
+    ['网站产品', '亚马逊商品', '社交媒体封面', '小红书笔记', '活动'],
   )
   assert.doesNotMatch(registrySource, /\b(?:prompt|recipe)\b/i)
   assert.equal(
@@ -198,6 +232,10 @@ test('wizard persists spec-driven nullable sources and the platform target atomi
   )
   assert.match(wizard, /\.update\(values\)/)
   assert.match(wizard, /CREATABLE_USE_CASES\.map/)
+  assert.match(
+    wizard,
+    /useCase\.id === 'rednote_post'[\s\S]{0,100}<FileText size=\{22\}/,
+  )
   assert.match(wizard, /inputFields\.productUrl\.requirement/)
   assert.match(wizard, /inputFields\.referenceImages\.requirement/)
   assert.match(
@@ -206,25 +244,32 @@ test('wizard persists spec-driven nullable sources and the platform target atomi
   )
   assert.match(
     wizard,
-    /disabled=\{\s*!referenceMinimumMet\s+\|\| !pendingReferencesReady\(pendingReferences\)/,
+    /inputFields\?\.referenceContext !== 'required'\s+\|\| normalizeReferenceContext\(referenceContext\) !== null/,
+  )
+  assert.match(
+    wizard,
+    /disabled=\{[\s\S]*!referenceMinimumMet[\s\S]*!referenceContextRequirementMet[\s\S]*!pendingReferencesReady\(pendingReferences\)/,
   )
   assert.ok(
-    wizard.indexOf('{socialCover && renderGenerationReferences(inputFields)}')
+    wizard.indexOf('{referenceOnlyMode && renderGenerationReferences(inputFields)}')
       < wizard.indexOf('aria-labelledby="source-heading"'),
   )
   assert.doesNotMatch(wizard, /use_case:[\s\S]{0,120}(?:prompt|recipe)/i)
 })
 
-test('editor and preflight consume persisted intent while social always re-analyzes', () => {
+test('editor and preflight consume persisted intent while reference-only modes always re-analyze', () => {
   assert.match(
     editorSource,
     /getUseCase\(campaign\.use_case\)/,
   )
   assert.match(editorSource, /campaignUseCase\.id === 'amazon_listing'/)
-  assert.match(editorSource, /campaignUseCase\.id === 'social_cover'/)
   assert.match(
     editorSource,
-    /const effectiveRefreshWebsite = socialReferenceMode \|\| firstVersion \|\| refreshWebsite/,
+    /isReferenceOnlyUseCaseId\(campaignUseCase\.id\)/,
+  )
+  assert.match(
+    editorSource,
+    /const effectiveRefreshWebsite = referenceOnlyMode \|\| firstVersion \|\| refreshWebsite/,
   )
   assert.match(
     editorSource,
@@ -241,8 +286,14 @@ test('editor and preflight consume persisted intent while social always re-analy
   )
   assert.match(
     generationTracesSource,
-    /campaign\.use_case !== 'social_cover'/,
+    /!isReferenceOnlyUseCaseId\(campaign\.use_case\)/,
   )
+  for (const source of [versionHistorySource, generationDetailsSource]) {
+    assert.match(
+      source,
+      /isReferenceOnlyUseCaseId\((?:selectedGeneration|generation)\.use_case\)/,
+    )
+  }
   assert.doesNotMatch(editorSource, /isAmazonSourceUrl/)
   assert.doesNotMatch(generationTracesSource, /isAmazonSourceUrl/)
   assert.match(wizard, /isAmazonSourceUrl\(productUrl\)/)

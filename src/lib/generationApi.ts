@@ -28,8 +28,22 @@ const GENERATION_FUNCTION_ERROR_KEYS: Record<GenerationFunction, TranslationKey>
   hero: 'Image model failed',
 }
 
-const SOCIAL_REFERENCE_MINIMUM_ERROR =
-  'Social cover generation requires at least one reference image.'
+const LOCALIZED_GENERATION_ERRORS = {
+  'Social cover generation requires at least one reference image.':
+    'Reference-only generation requires at least one reference image.',
+  'RedNote post generation requires at least one reference image.':
+    'Reference-only generation requires at least one reference image.',
+  'RedNote post generation requires draft copy.':
+    'RedNote post generation requires draft copy.',
+} as const satisfies Record<string, TranslationKey>
+
+export function localizeGenerationApiError(
+  message: string,
+  locale: SupportedLocale = DEFAULT_LOCALE,
+): string {
+  const key = (LOCALIZED_GENERATION_ERRORS as Record<string, TranslationKey>)[message]
+  return key ? translate(locale, key) : message
+}
 
 export interface EnqueuedPosterGeneration {
   generation: PosterGeneration
@@ -54,14 +68,10 @@ export async function enqueuePosterGeneration(args: {
     p_asset_selection_mode: args.assetSelectionMode,
   })
   if (error) {
-    throw new Error(
-      error.message === SOCIAL_REFERENCE_MINIMUM_ERROR
-        ? translate(
-            args.locale ?? DEFAULT_LOCALE,
-            'Social cover generation requires at least one reference image.',
-          )
-        : error.message,
-    )
+    throw new Error(localizeGenerationApiError(
+      error.message,
+      args.locale ?? DEFAULT_LOCALE,
+    ))
   }
 
   const result = rpcRow<EnqueuedPosterGeneration>(data)
@@ -93,7 +103,7 @@ export async function retryPosterGeneration(
   const { data, error } = await insforge.database.rpc('retry_poster_generation', {
     p_job_id: jobId,
   })
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(localizeGenerationApiError(error.message, locale))
 
   const result = rpcRow<EnqueuedPosterGeneration>(data)
   if (!result?.generation?.id || !result.job?.id) {

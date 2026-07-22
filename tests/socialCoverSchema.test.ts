@@ -26,9 +26,12 @@ test('social migration makes campaign URLs nullable only behind a use-case check
   assert.match(baseline, /product_url TEXT,\s+product_name TEXT NOT NULL/)
   assert.match(baseline, /destination_url TEXT,\s+style_profile JSONB/)
 
-  for (const sql of [migration, baseline]) {
+  for (const [sql, referenceOnlyCheck] of [
+    [migration, /use_case = 'social_cover'/],
+    [baseline, /use_case IN \('social_cover', 'rednote_post'\)/],
+  ] as const) {
     const constraint = namedConstraint(sql, 'campaigns_source_urls_required')
-    assert.match(constraint, /use_case = 'social_cover'/)
+    assert.match(constraint, referenceOnlyCheck)
     assert.match(
       constraint,
       /product_url IS NOT NULL AND destination_url IS NOT NULL/,
@@ -85,19 +88,16 @@ test('platform_hint is a nullable social-only campaign target and frozen snapsho
   )
   assert.match(baseline, /use_case TEXT NOT NULL DEFAULT 'website_product',\s+platform_hint TEXT/)
 
-  for (const [sql, name] of [
-    [migration, 'campaigns_platform_hint_valid'],
-    [migration, 'poster_generations_platform_hint_valid'],
-    [baseline, 'campaigns_platform_hint_valid'],
-    [baseline, 'poster_generations_platform_hint_valid'],
+  for (const [sql, name, referenceOnlyCheck] of [
+    [migration, 'campaigns_platform_hint_valid', /use_case = 'social_cover' OR platform_hint IS NULL/],
+    [migration, 'poster_generations_platform_hint_valid', /use_case = 'social_cover' OR platform_hint IS NULL/],
+    [baseline, 'campaigns_platform_hint_valid', /use_case IN \('social_cover', 'rednote_post'\) OR platform_hint IS NULL/],
+    [baseline, 'poster_generations_platform_hint_valid', /use_case IN \('social_cover', 'rednote_post'\) OR platform_hint IS NULL/],
   ] as const) {
     const constraint = namedConstraint(sql, name)
     assert.match(constraint, /platform_hint = BTRIM\(platform_hint\)/)
     assert.match(constraint, /char_length\(platform_hint\) BETWEEN 1 AND 80/)
-    assert.match(
-      constraint,
-      /use_case = 'social_cover' OR platform_hint IS NULL/,
-    )
+    assert.match(constraint, referenceOnlyCheck)
   }
 
   assert.match(
@@ -143,27 +143,38 @@ test('frozen-generation guard is the current body plus null-safe platform_hint',
   )
 })
 
-test('enqueue rejects empty social references and snapshots every social input', () => {
-  for (const sql of [migration, baseline]) {
-    const enqueue = lastFunction(sql, 'enqueue_poster_generation')
-    const campaignLookup = enqueue.indexOf('SELECT *\n  INTO v_campaign')
-    const minimumCheck = enqueue.indexOf(
-      "IF v_campaign.use_case = 'social_cover'",
-    )
+test('historical social enqueue stays pinned while the baseline extends it', () => {
+  const historical = lastFunction(migration, 'enqueue_poster_generation')
+  assert.match(historical, /IF v_campaign\.use_case = 'social_cover'/)
+  assert.match(
+    historical,
+    /RAISE EXCEPTION 'Social cover generation requires at least one reference image\.'/,
+  )
+  assert.match(
+    historical,
+    /WHEN p_refresh_website OR v_campaign\.use_case = 'social_cover'\s+THEN 'website_refresh'/,
+  )
 
-    assert.ok(campaignLookup >= 0 && campaignLookup < minimumCheck)
-    assert.match(
-      enqueue,
-      /jsonb_array_length\(v_reference_images\) < 1[\s\S]*NULLIF\(BTRIM\(item\.value ->> 'url'\), ''\) IS NOT NULL/,
-    )
-    assert.match(
-      enqueue,
-      /RAISE EXCEPTION 'Social cover generation requires at least one reference image\.'\s+USING ERRCODE = '22023'/,
-    )
-    assert.match(
-      enqueue,
-      /WHEN p_refresh_website OR v_campaign\.use_case = 'social_cover'\s+THEN 'website_refresh'/,
-    )
+  const current = lastFunction(baseline, 'enqueue_poster_generation')
+  const campaignLookup = current.indexOf('SELECT *\n  INTO v_campaign')
+  const minimumCheck = current.indexOf(
+    "IF v_campaign.use_case IN ('social_cover', 'rednote_post')",
+  )
+  assert.ok(campaignLookup >= 0 && campaignLookup < minimumCheck)
+  assert.match(
+    current,
+    /jsonb_array_length\(v_reference_images\) < 1[\s\S]*NULLIF\(BTRIM\(item\.value ->> 'url'\), ''\) IS NOT NULL/,
+  )
+  assert.match(
+    current,
+    /RAISE EXCEPTION 'Social cover generation requires at least one reference image\.'/,
+  )
+  assert.match(
+    current,
+    /v_campaign\.use_case IN \('social_cover', 'rednote_post'\)[\s\S]*THEN 'website_refresh'/,
+  )
+
+  for (const enqueue of [historical, current]) {
     assert.match(
       enqueue,
       /WHEN v_campaign\.current_generation_id IS NULL THEN v_campaign\.use_case\s+ELSE v_parent\.use_case\s+END,\s+v_campaign\.platform_hint,/,
@@ -189,8 +200,11 @@ test('same-input retry copies the frozen platform hint instead of the mutable ta
   }
 })
 
-test('database triggers make no placements a social-cover invariant', () => {
-  for (const sql of [migration, baseline]) {
+test('historical tracking guards stay social-only while the baseline extends them', () => {
+  for (const [sql, useCaseCheck, message] of [
+    [migration, /v_use_case = 'social_cover'/, /Social cover campaigns cannot have placements\./],
+    [baseline, /v_use_case = 'social_cover'/, /Social cover campaigns cannot have placements\./],
+  ] as const) {
     const placementGuard = lastFunction(sql, 'guard_placement_tracking_policy')
     assert.match(placementGuard, /FROM public\.campaigns/)
     assert.match(
@@ -201,35 +215,35 @@ test('database triggers make no placements a social-cover invariant', () => {
       placementGuard,
       /IF NOT FOUND THEN\s+RAISE EXCEPTION 'placement campaign not found or not owned by placement user'\s+USING ERRCODE = '23503'/,
     )
-    assert.match(placementGuard, /v_use_case = 'social_cover'/)
-    assert.match(
-      placementGuard,
-      /Social cover campaigns cannot have placements\./,
-    )
+    assert.match(placementGuard, useCaseCheck)
+    assert.match(placementGuard, message)
     assert.match(
       sql,
       /BEFORE INSERT OR UPDATE OF campaign_id ON public\.placements/,
     )
 
     const campaignGuard = lastFunction(sql, 'guard_campaign_tracking_policy')
-    assert.match(campaignGuard, /NEW\.use_case = 'social_cover'/)
+    assert.match(
+      campaignGuard,
+      sql === migration
+        ? /NEW\.use_case = 'social_cover'/
+        : /NEW\.use_case IN \('social_cover', 'rednote_post'\)/,
+    )
     assert.match(campaignGuard, /FROM public\.placements/)
     assert.match(
       sql,
       /BEFORE UPDATE OF use_case ON public\.campaigns/,
     )
   }
-
-  assert.equal(
-    lastFunction(migration, 'guard_placement_tracking_policy'),
-    lastFunction(baseline, 'guard_placement_tracking_policy'),
-  )
 })
 
-test('visit attribution defensively rejects social and null destinations', () => {
-  for (const sql of [migration, baseline]) {
+test('visit attribution stays historically social-only and extends the baseline', () => {
+  for (const [sql, guardText] of [
+    [migration, "v_campaign.use_case = 'social_cover'"],
+    [baseline, "v_campaign.use_case IN ('social_cover', 'rednote_post')"],
+  ] as const) {
     const logVisit = lastFunction(sql, 'log_visit_attributed')
-    const guard = logVisit.indexOf("v_campaign.use_case = 'social_cover'")
+    const guard = logVisit.indexOf(guardText)
     const insert = logVisit.indexOf('INSERT INTO public.scans')
     assert.ok(guard >= 0 && guard < insert)
     assert.match(logVisit, /v_campaign\.destination_url IS NULL/)

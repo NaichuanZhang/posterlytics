@@ -5,11 +5,16 @@ export const USE_CASE_IDS = [
   'website_product',
   'amazon_listing',
   'social_cover',
+  'rednote_post',
   'event',
 ] as const
 
 export type UseCaseId = (typeof USE_CASE_IDS)[number]
 export type CreatableUseCaseId = Exclude<UseCaseId, 'event'>
+export type ReferenceOnlyUseCaseId = Extract<
+  UseCaseId,
+  'social_cover' | 'rednote_post'
+>
 export type UseCaseFieldRequirement = 'required' | 'optional' | 'hidden'
 export type UseCaseSourceKind = 'website' | 'amazon' | 'none'
 
@@ -112,6 +117,25 @@ export const USE_CASES = [
     trackingEnabled: false,
   },
   {
+    id: 'rednote_post',
+    label: catalogLabel('RedNote post'),
+    creationDescription: catalogLabel('Create a 3:4 RedNote cover from draft copy and creative references.'),
+    creationEnabled: true,
+    inputFields: {
+      productUrl: { requirement: 'hidden', sourceKind: 'none' },
+      productName: 'required',
+      tagline: 'optional',
+      ctaText: 'hidden',
+      destinationUrl: 'hidden',
+      referenceContext: 'required',
+      platformHint: 'optional',
+      referenceImages: { requirement: 'required', minimumCount: 1 },
+    },
+    allowedPosterFormats: ['rednote_cover_3x4'],
+    defaultPosterFormat: 'rednote_cover_3x4',
+    trackingEnabled: false,
+  },
+  {
     id: 'event',
     label: catalogLabel('Event'),
     creationDescription: null,
@@ -143,6 +167,12 @@ const DEFAULT_USE_CASE = USE_CASES[0]
 
 export function isUseCaseId(value: unknown): value is UseCaseId {
   return typeof value === 'string' && USE_CASE_BY_ID.has(value as UseCaseId)
+}
+
+export function isReferenceOnlyUseCaseId(
+  value: unknown,
+): value is ReferenceOnlyUseCaseId {
+  return value === 'social_cover' || value === 'rednote_post'
 }
 
 export function getUseCase(id: unknown): UseCaseDescriptor {

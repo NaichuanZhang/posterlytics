@@ -117,32 +117,34 @@ test('Amazon refresh preflight omits unavailable website evidence', () => {
   )
 })
 
-test('social refresh preflight contains only previous artwork and fresh references', () => {
-  const preflight = deriveGenerationPreflight({
-    campaign: {
-      ...CAMPAIGN,
-      product_url: null,
-      destination_url: null,
-      use_case: 'social_cover',
-    },
-    currentGeneration: CURRENT,
-    selectedGeneration: CURRENT,
-    instruction: 'Shift toward a kinetic editorial mood.',
-    pendingReferences: [{
-      id: 'social-reference',
-      kind: 'url',
-      url: 'https://assets.example/social-reference.png',
-      name: 'social-reference.png',
-      previewStatus: 'ready',
-    }],
-    refreshWebsite: true,
-  })
+test('reference-only refresh preflight contains only artwork and fresh references', () => {
+  for (const useCase of ['social_cover', 'rednote_post'] as const) {
+    const preflight = deriveGenerationPreflight({
+      campaign: {
+        ...CAMPAIGN,
+        product_url: null,
+        destination_url: null,
+        use_case: useCase,
+      },
+      currentGeneration: CURRENT,
+      selectedGeneration: CURRENT,
+      instruction: 'Shift toward a kinetic editorial mood.',
+      pendingReferences: [{
+        id: 'social-reference',
+        kind: 'url',
+        url: 'https://assets.example/social-reference.png',
+        name: 'social-reference.png',
+        previewStatus: 'ready',
+      }],
+      refreshWebsite: true,
+    })
 
-  assert.deepEqual(
-    preflight.assets.map((asset) => asset.source),
-    ['previous-poster', 'user-reference'],
-  )
-  assert.equal(preflight.assets.some((asset) => asset.runtime), false)
+    assert.deepEqual(
+      preflight.assets.map((asset) => asset.source),
+      ['previous-poster', 'user-reference'],
+    )
+    assert.equal(preflight.assets.some((asset) => asset.runtime), false)
+  }
 })
 
 test('preflight follows persisted use case instead of sniffing the source URL', () => {

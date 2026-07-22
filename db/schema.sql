@@ -54,6 +54,7 @@ CREATE TABLE public.campaigns (
         'website_product',
         'amazon_listing',
         'social_cover',
+        'rednote_post',
         'event'
       )
     ),
@@ -61,7 +62,7 @@ CREATE TABLE public.campaigns (
     CHECK ((scenario = 'event') = (use_case = 'event')),
   CONSTRAINT campaigns_source_urls_required
     CHECK (
-      use_case = 'social_cover'
+      use_case IN ('social_cover', 'rednote_post')
       OR (product_url IS NOT NULL AND destination_url IS NOT NULL)
     ),
   CONSTRAINT campaigns_platform_hint_valid
@@ -73,7 +74,7 @@ CREATE TABLE public.campaigns (
           AND char_length(platform_hint) BETWEEN 1 AND 80
         )
       )
-      AND (use_case = 'social_cover' OR platform_hint IS NULL)
+      AND (use_case IN ('social_cover', 'rednote_post') OR platform_hint IS NULL)
     ),
   CONSTRAINT campaigns_reference_context_length
     CHECK (reference_context IS NULL OR char_length(reference_context) <= 4000),
@@ -148,6 +149,7 @@ CREATE TABLE public.poster_generations (
         'website_product',
         'amazon_listing',
         'social_cover',
+        'rednote_post',
         'event'
       )
     ),
@@ -162,7 +164,7 @@ CREATE TABLE public.poster_generations (
           AND char_length(platform_hint) BETWEEN 1 AND 80
         )
       )
-      AND (use_case = 'social_cover' OR platform_hint IS NULL)
+      AND (use_case IN ('social_cover', 'rednote_post') OR platform_hint IS NULL)
     ),
   CONSTRAINT poster_generations_reference_images_shape
     CHECK (
@@ -599,6 +601,9 @@ BEGIN
   IF v_use_case = 'social_cover' THEN
     RAISE EXCEPTION 'Social cover campaigns cannot have placements.'
       USING ERRCODE = '23514';
+  ELSIF v_use_case = 'rednote_post' THEN
+    RAISE EXCEPTION 'RedNote post campaigns cannot have placements.'
+      USING ERRCODE = '23514';
   END IF;
 
   RETURN NEW;
@@ -617,15 +622,20 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF NEW.use_case = 'social_cover'
+  IF NEW.use_case IN ('social_cover', 'rednote_post')
     AND NEW.use_case IS DISTINCT FROM OLD.use_case
     AND EXISTS (
       SELECT 1
       FROM public.placements
       WHERE campaign_id = OLD.id
     ) THEN
-    RAISE EXCEPTION 'Remove campaign placements before switching to social cover.'
-      USING ERRCODE = '23514';
+    IF NEW.use_case = 'social_cover' THEN
+      RAISE EXCEPTION 'Remove campaign placements before switching to social cover.'
+        USING ERRCODE = '23514';
+    ELSE
+      RAISE EXCEPTION 'Remove campaign placements before switching to RedNote post.'
+        USING ERRCODE = '23514';
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -814,7 +824,7 @@ BEGIN
   WHERE id = v_placement.campaign_id;
 
   IF v_campaign.status <> 'published'
-    OR v_campaign.use_case = 'social_cover'
+    OR v_campaign.use_case IN ('social_cover', 'rednote_post')
     OR v_campaign.destination_url IS NULL THEN
     RETURN NULL;
   END IF;
@@ -4103,7 +4113,7 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  IF v_campaign.use_case = 'social_cover'
+  IF v_campaign.use_case IN ('social_cover', 'rednote_post')
     AND (
       jsonb_array_length(v_reference_images) < 1
       OR NOT EXISTS (
@@ -4113,7 +4123,17 @@ BEGIN
           AND NULLIF(BTRIM(item.value ->> 'url'), '') IS NOT NULL
       )
     ) THEN
-    RAISE EXCEPTION 'Social cover generation requires at least one reference image.'
+    IF v_campaign.use_case = 'social_cover' THEN
+      RAISE EXCEPTION 'Social cover generation requires at least one reference image.'
+        USING ERRCODE = '22023';
+    ELSE
+      RAISE EXCEPTION 'RedNote post generation requires at least one reference image.'
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
+
+  IF v_campaign.use_case = 'rednote_post' AND v_instruction IS NULL THEN
+    RAISE EXCEPTION 'RedNote post generation requires draft copy.'
       USING ERRCODE = '22023';
   END IF;
 
@@ -4150,7 +4170,8 @@ BEGIN
       RAISE EXCEPTION 'current poster generation is invalid'
         USING ERRCODE = '23503';
     END IF;
-  ELSIF NOT p_refresh_website AND v_campaign.use_case <> 'social_cover' THEN
+  ELSIF NOT p_refresh_website
+    AND v_campaign.use_case NOT IN ('social_cover', 'rednote_post') THEN
     RAISE EXCEPTION 'the first poster generation must re-read the website'
       USING ERRCODE = '23514';
   END IF;
@@ -4187,7 +4208,8 @@ BEGIN
     v_user_id,
     v_campaign.current_generation_id,
     CASE
-      WHEN p_refresh_website OR v_campaign.use_case = 'social_cover'
+      WHEN p_refresh_website
+        OR v_campaign.use_case IN ('social_cover', 'rednote_post')
         THEN 'website_refresh'
       ELSE 'iteration'
     END,
@@ -4311,11 +4333,45 @@ BEGIN
       USING ERRCODE = '23505';
   END IF;
 
+  IF v_previous_generation.use_case IN ('social_cover', 'rednote_post')
+    AND (
+      jsonb_array_length(v_previous_generation.reference_images) < 1
+      OR NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_previous_generation.reference_images) AS item(value)
+        WHERE jsonb_typeof(item.value) = 'object'
+          AND NULLIF(BTRIM(item.value ->> 'url'), '') IS NOT NULL
+      )
+    ) THEN
+    IF v_previous_generation.use_case = 'social_cover' THEN
+      RAISE EXCEPTION 'Social cover generation requires at least one reference image.'
+        USING ERRCODE = '22023';
+    ELSE
+      RAISE EXCEPTION 'RedNote post generation requires at least one reference image.'
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
+
+  IF v_previous_generation.use_case = 'rednote_post'
+    AND NULLIF(BTRIM(v_previous_generation.instruction), '') IS NULL THEN
+    RAISE EXCEPTION 'RedNote post generation requires draft copy.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF v_previous_generation.parent_generation_id IS NULL
+    AND v_previous_generation.generation_mode <> 'website_refresh'
+    AND v_previous_generation.use_case NOT IN ('social_cover', 'rednote_post') THEN
+    RAISE EXCEPTION 'the first poster generation must re-read the website'
+      USING ERRCODE = '23514';
+  END IF;
+
   v_reuse_selection := v_previous_generation.asset_selection_status = 'completed';
   v_resume_stage := CASE
     WHEN v_reuse_selection AND v_previous_job.stage IN ('designer', 'hero')
       THEN v_previous_job.stage
-    WHEN v_previous_generation.generation_mode = 'website_refresh' THEN 'analyze'
+    WHEN v_previous_generation.generation_mode = 'website_refresh'
+      OR v_previous_generation.use_case IN ('social_cover', 'rednote_post')
+      THEN 'analyze'
     ELSE 'assets'
   END;
 
@@ -4352,7 +4408,11 @@ BEGIN
     v_previous_generation.campaign_id,
     v_previous_generation.user_id,
     v_previous_generation.parent_generation_id,
-    v_previous_generation.generation_mode,
+    CASE
+      WHEN v_previous_generation.use_case IN ('social_cover', 'rednote_post')
+        THEN 'website_refresh'
+      ELSE v_previous_generation.generation_mode
+    END,
     v_previous_generation.instruction,
     v_previous_generation.reference_images,
     v_previous_generation.poster_format,

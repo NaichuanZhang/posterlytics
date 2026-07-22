@@ -80,7 +80,7 @@ export interface StageVocabulary {
 
 export interface ProductUseCaseRecipe {
   kind: 'product';
-  id: 'website_product' | 'amazon_listing' | 'social_cover';
+  id: 'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post';
   acquisitionMode: ProductSourceMode;
   analyze: AnalyzeBriefSet;
   references: ReferencePurposeVocabulary;
@@ -372,6 +372,11 @@ const SOCIAL_COVER_RECIPE: ProductUseCaseRecipe = {
   stages: SOCIAL_STAGE_VOCABULARY,
 };
 
+const REDNOTE_POST_RECIPE: ProductUseCaseRecipe = {
+  ...SOCIAL_COVER_RECIPE,
+  id: 'rednote_post',
+};
+
 const EVENT_RECIPE: EventUseCaseRecipe = {
   kind: 'event-bespoke',
   id: 'event',
@@ -381,6 +386,7 @@ const EVENT_RECIPE: EventUseCaseRecipe = {
 export function resolveUseCaseRecipe(useCase: unknown): UseCaseRecipe {
   if (useCase === 'amazon_listing') return AMAZON_RECIPE;
   if (useCase === 'social_cover') return SOCIAL_COVER_RECIPE;
+  if (useCase === 'rednote_post') return REDNOTE_POST_RECIPE;
   if (useCase === 'event') return EVENT_RECIPE;
   return WEBSITE_RECIPE;
 }
@@ -390,6 +396,12 @@ export function resolveProductUseCaseRecipe(
 ): ProductUseCaseRecipe {
   const recipe = resolveUseCaseRecipe(useCase);
   return recipe.kind === 'product' ? recipe : WEBSITE_RECIPE;
+}
+
+export function isReferenceOnlyProductRecipe(
+  recipe: ProductUseCaseRecipe,
+): boolean {
+  return recipe.acquisitionMode === 'reference-only';
 }
 
 export function useCaseSourceMismatch(

@@ -62,7 +62,7 @@ import {
   type PendingReference,
 } from '../lib/references'
 import type { PosterGeneration } from '../lib/types'
-import { getUseCase } from '../lib/useCases'
+import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
 import { buildViewUrl } from '../lib/viewUrl'
 
 type BusyAction =
@@ -250,8 +250,9 @@ export function PosterEditorPage() {
   const firstVersion = !campaign.current_generation_id
   const campaignUseCase = getUseCase(campaign.use_case)
   const amazonReferenceMode = campaignUseCase.id === 'amazon_listing'
-  const socialReferenceMode = campaignUseCase.id === 'social_cover'
-  const effectiveRefreshWebsite = socialReferenceMode || firstVersion || refreshWebsite
+  const referenceOnlyMode = isReferenceOnlyUseCaseId(campaignUseCase.id)
+  const redNotePost = campaignUseCase.id === 'rednote_post'
+  const effectiveRefreshWebsite = referenceOnlyMode || firstVersion || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
   const generationInputsDisabled = uploadingInputs || generating
@@ -272,6 +273,10 @@ export function PosterEditorPage() {
     campaignUseCase.inputFields.referenceImages.requirement === 'required' ? 1 : 0,
   )
   const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
+  const referenceContextRequirementMet = (
+    campaignUseCase.inputFields.referenceContext !== 'required'
+    || normalizeReferenceContext(instruction) !== null
+  )
   const useCaseReferenceProps = amazonReferenceMode
     ? {
         contextLabel: t('Listing copy and creative direction'),
@@ -280,22 +285,34 @@ export function PosterEditorPage() {
         referenceImagesLabel: t('Product and brand images'),
         referenceImagesHint: t('Seller-provided images are the primary visual source.'),
       }
-    : socialReferenceMode
+    : redNotePost
       ? {
+          contextLabel: t('Draft copy'),
+          contextPlaceholder: t('Paste the full draft copy for this RedNote post.'),
+          contextHint: t('The draft copy is interpreted together with the reference images.'),
+          referenceImagesLabel: t('Creative references'),
+          referenceImagesHint: t('Add at least one fresh reference for this version.'),
+        }
+      : referenceOnlyMode
+        ? {
           contextLabel: t('Creative direction'),
           contextPlaceholder: t('Describe the mood, visual hook, audience, and what should change.'),
           contextHint: t('The supplied references are re-analyzed for every new version.'),
           referenceImagesLabel: t('Creative references'),
           referenceImagesHint: t('Add at least one fresh reference for this version.'),
         }
-    : {
-        contextLabel: t('What should change?'),
-        contextPlaceholder: t('Make the headline larger, replace the product image, or adjust the mood.'),
-        contextHint: t('Everything else stays consistent.'),
-      }
+        : {
+            contextLabel: t('What should change?'),
+            contextPlaceholder: t('Make the headline larger, replace the product image, or adjust the mood.'),
+            contextHint: t('Everything else stays consistent.'),
+          }
 
   async function generateVersion() {
     if (!user || generating || uploadingInputs) return
+    if (!referenceContextRequirementMet) {
+      setGenerationError(t('RedNote post generation requires draft copy.'))
+      return
+    }
     if (!referenceMinimumMet) {
       setGenerationError(t('Add at least {count} images.', {
         count: minimumReferenceImages,
@@ -578,7 +595,7 @@ export function PosterEditorPage() {
         compact
         onChange={(assetSelectionMode) => updatePreferences({ assetSelectionMode })}
       />
-      {!socialReferenceMode && (
+      {!referenceOnlyMode && (
         <label className="check-control">
           <input
             type="checkbox"
@@ -599,6 +616,7 @@ export function PosterEditorPage() {
         disabled={
           generationInputsDisabled
           || !!busy
+          || !referenceContextRequirementMet
           || !referenceMinimumMet
           || !pendingReferencesReady(pendingReferences)
         }

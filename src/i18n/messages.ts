@@ -193,6 +193,8 @@ export const ENGLISH_MESSAGE_IDS = [
   'Create from an Amazon listing plus seller-provided copy and images.',
   'Social cover',
   'Create full-bleed artwork from creative references and direction.',
+  'RedNote post',
+  'Create a 3:4 RedNote cover from draft copy and creative references.',
   'Event',
   'The website supplies the visual and product context.',
   'Use a supported Amazon listing URL. Posterlytics will use seller-provided references instead of scraping the page.',
@@ -261,7 +263,16 @@ export const ENGLISH_MESSAGE_IDS = [
   'Reference images are the primary visual source.',
   'Add at least one fresh reference for this version.',
   'Social cover generation requires at least one reference image.',
+  'Reference-only generation requires at least one reference image.',
+  'RedNote post generation requires at least one reference image.',
+  'RedNote post generation requires draft copy.',
+  'Draft copy',
+  'Paste the full draft copy for this RedNote post.',
+  'The draft copy is interpreted together with the reference images.',
+  'Draft copy and creative references',
+  'Add the complete draft copy and at least one image for the post.',
   'Set artwork details, creative references, and an optional platform hint.',
+  'Set artwork details, draft copy, creative references, and an optional platform hint.',
   'Artwork details',
   'Name the artwork and choose its full-bleed output format.',
   'Artwork name',
@@ -416,6 +427,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Poster versions',
   'Version {number} poster thumbnail',
   'Site refreshed',
+  'References refreshed',
   'Iteration',
   'Current version',
   'Selected',
@@ -872,6 +884,9 @@ export const zhCN: Record<TranslationKey, string> = {
   'Social cover': '社交媒体封面',
   'Create full-bleed artwork from creative references and direction.':
     '根据创意参考图和方向创建满版画面。',
+  'RedNote post': '小红书笔记',
+  'Create a 3:4 RedNote cover from draft copy and creative references.':
+    '根据笔记草稿和创意参考图创建 3:4 小红书封面。',
   Event: '活动',
   'The website supplies the visual and product context.': '网站将提供视觉风格与产品信息。',
   'Use a supported Amazon listing URL. Posterlytics will use seller-provided references instead of scraping the page.':
@@ -958,8 +973,24 @@ export const zhCN: Record<TranslationKey, string> = {
   'Add at least one fresh reference for this version.': '请为此版本添加至少一张新的参考图。',
   'Social cover generation requires at least one reference image.':
     '社交媒体封面生成至少需要一张参考图片。',
+  'Reference-only generation requires at least one reference image.':
+    '仅使用参考素材生成时至少需要一张参考图片。',
+  'RedNote post generation requires at least one reference image.':
+    '生成小红书笔记至少需要一张参考图片。',
+  'RedNote post generation requires draft copy.':
+    '生成小红书笔记需要填写笔记草稿。',
+  'Draft copy': '笔记草稿',
+  'Paste the full draft copy for this RedNote post.':
+    '粘贴这篇小红书笔记的完整草稿。',
+  'The draft copy is interpreted together with the reference images.':
+    '笔记草稿会与参考图片一起解读。',
+  'Draft copy and creative references': '笔记草稿与创意参考图',
+  'Add the complete draft copy and at least one image for the post.':
+    '请添加完整的笔记草稿和至少一张图片。',
   'Set artwork details, creative references, and an optional platform hint.':
     '设置画面信息、创意参考素材和可选的平台提示。',
+  'Set artwork details, draft copy, creative references, and an optional platform hint.':
+    '设置画面信息、笔记草稿、创意参考素材和可选的平台提示。',
   'Artwork details': '画面信息',
   'Name the artwork and choose its full-bleed output format.':
     '为画面命名，并选择满版输出格式。',
@@ -1121,6 +1152,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Poster versions': '海报版本',
   'Version {number} poster thumbnail': '版本 {number} 海报缩略图',
   'Site refreshed': '已刷新网站',
+  'References refreshed': '已重新分析参考素材',
   Iteration: '迭代',
   'Current version': '当前版本',
   Selected: '已选择',

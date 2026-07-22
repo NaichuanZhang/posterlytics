@@ -75,7 +75,7 @@ test('enqueue inheritance and the frozen generation tuple remain byte-identical'
 
   assert.equal(
     sha256(enqueue),
-    '8f693c5d959f1a734c9e3a04709b1817b006bed1e3523b4adb3148f2ee274116',
+    '26ea6f19640d016da57a247e0071201985e6b4dabc9401d4994890e9c204e9a9',
   )
   assert.equal(
     sha256(frozenGuard),

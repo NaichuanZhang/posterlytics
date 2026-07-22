@@ -2,6 +2,7 @@ import { AlertTriangle, Check, History, ListTree, RotateCcw } from 'lucide-react
 import type { GenerationActivityItem, PosterGeneration } from '../lib/types'
 import { useI18n } from '../i18n/I18nProvider'
 import type { Translate } from '../lib/i18n'
+import { isReferenceOnlyUseCaseId } from '../lib/useCases'
 import { DurableGenerationStatus } from './DurableGenerationStatus'
 import { Skeleton } from './ui/Feedback'
 
@@ -119,7 +120,9 @@ export function PosterVersionHistory({
                   </time>
                   <span>
                     {generation.generation_mode === 'website_refresh'
-                      ? t('Site refreshed')
+                      ? t(isReferenceOnlyUseCaseId(generation.use_case)
+                        ? 'References refreshed'
+                        : 'Site refreshed')
                       : t('Iteration')}
                   </span>
                 </span>
@@ -143,7 +146,7 @@ export function PosterVersionHistory({
           <div className="selected-version-summary">
             <p>
               {selectedGeneration.instruction || t(
-                selectedGeneration.use_case === 'social_cover'
+                isReferenceOnlyUseCaseId(selectedGeneration.use_case)
                   ? 'Initial reference-based artwork'
                   : 'Initial website-based poster',
               )}

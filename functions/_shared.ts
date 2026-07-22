@@ -8,6 +8,7 @@ import {
   type PosterSize,
 } from '../src/lib/posterSize.ts';
 import {
+  isReferenceOnlyProductRecipe,
   resolveProductUseCaseRecipe,
   type ProductUseCaseRecipe,
 } from './_useCasePolicy.ts';
@@ -2078,7 +2079,7 @@ export function productPosterActionInstructions(
   painterRule: string;
   painterAvoid: string;
 } {
-  if (recipe.id === 'social_cover') {
+  if (isReferenceOnlyProductRecipe(recipe)) {
     return {
       designerRule:
         'CRITICAL: this is full-bleed artwork with no footer or tracking mechanics. Do NOT add a QR code, barcode, call-to-action, painted button, pill, badge, or platform interface. Use the "lower" zone for a closing visual or supporting detail instead. ',

@@ -11,6 +11,7 @@ import {
   translate,
   type SupportedLocale,
 } from './i18n'
+import { isReferenceOnlyUseCaseId } from './useCases'
 
 export const TRACE_SOURCE_LABEL_KEYS: Record<TraceImageSource, TranslationKey> = {
   'previous-poster': 'Previous poster',
@@ -162,7 +163,7 @@ export function deriveGenerationPreflight(args: {
         runtimeAsset('style-board', translate(locale, 'Website style board'), locale),
       )
     }
-  } else if (campaign.use_case !== 'social_cover') {
+  } else if (!isReferenceOnlyUseCaseId(campaign.use_case)) {
     if (snapshot.brand_assets?.logo_url) {
       assets.push({
         id: 'logo',

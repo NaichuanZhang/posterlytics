@@ -47,6 +47,7 @@ import {
   uploadStyleBoard,
 } from './_websiteEvidence.ts';
 import {
+  isReferenceOnlyProductRecipe,
   resolveProductUseCaseRecipe,
   type ProductUseCaseRecipe,
   useCaseSourceMismatch,
@@ -858,10 +859,10 @@ function normalize(
       body: capturedBody ?? capturedHeading ?? 'system-ui, sans-serif',
     },
     tone: 'modern',
-    imagery: recipe.id === 'social_cover'
+    imagery: isReferenceOnlyProductRecipe(recipe)
       ? 'reference-led imagery adapted to a full-bleed composition'
       : 'source-faithful product imagery adapted to a poster composition',
-    typography_treatment: recipe.id === 'social_cover'
+    typography_treatment: isReferenceOnlyProductRecipe(recipe)
       ? 'reference-led type character with a clear artwork-scale hierarchy'
       : 'source-derived type character with a clear poster-scale hierarchy',
     lighting: tokens?.colors.theme === 'dark'
@@ -869,12 +870,12 @@ function normalize(
       : tokens?.colors.theme === 'light'
         ? 'source-matched light-field lighting and contrast'
         : 'source-matched lighting and contrast',
-    texture: recipe.id === 'social_cover'
+    texture: isReferenceOnlyProductRecipe(recipe)
       ? 'preserve the references\' surface finish without adding an unrelated effect'
       : 'preserve the source page surface finish without adding an unrelated print effect',
     composition: typeof sp.layout_hint === 'string' && sp.layout_hint
       ? sp.layout_hint
-      : recipe.id === 'social_cover'
+      : isReferenceOnlyProductRecipe(recipe)
         ? 'full-bleed adaptation of the reference hierarchy and visual hook'
         : 'poster adaptation of the source page hierarchy',
     density: 'balanced',
@@ -882,7 +883,7 @@ function normalize(
 
   // The layout itself is designed later by the `designer` function; the product
   // poster_spec carries only what the SPA band reads (qr_label) + the urls line.
-  const qrLabel = recipe.id === 'social_cover'
+  const qrLabel = isReferenceOnlyProductRecipe(recipe)
     ? ''
     : String((o.qr_label as unknown) ?? '').slice(0, 40) || 'Scan to start';
   const poster_spec = { qr_label: qrLabel, urls: c.product_url || '' };
@@ -890,7 +891,7 @@ function normalize(
   const contentHeadline = (lc.headline as string) || product;
   const contentWhat = (lc.what_it_does as string) || tagline;
   const contentFeatures = asArray(lc.features).slice(0, 6);
-  const contentCta = recipe.id === 'social_cover'
+  const contentCta = isReferenceOnlyProductRecipe(recipe)
     ? String(lc.cta ?? '').slice(0, 80)
     : (lc.cta as string) || c.cta_text || 'Learn more';
 
@@ -916,7 +917,7 @@ function normalize(
     },
     brand_essence: String(
       o.brand_essence ?? (
-        recipe.id === 'social_cover'
+        isReferenceOnlyProductRecipe(recipe)
           ? `${product}: reference-led visual direction using the supplied mood, palette, and visual hook`
           : `${product}: source-faithful visual identity using its observed palette and type character`
       ),
