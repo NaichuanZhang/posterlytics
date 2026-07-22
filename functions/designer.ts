@@ -29,6 +29,10 @@ import {
 } from './_shared.ts';
 import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
 import type { ModelCopyPolicy } from './_copySanitizer.ts';
+import {
+  REDNOTE_BACKGROUND_RENDER_MODE,
+  deriveRedNoteBackgroundLayout,
+} from './_redNoteBackground.ts';
 
 // `designer` is the layout-design agent for the `designer` poster style. It runs
 // BETWEEN analyze and hero: given the brand context analyze produced
@@ -182,6 +186,38 @@ export async function runDesignerStage(
   const tokens = (c.design_tokens ?? null) as DesignTokens | null;
   const copy = (c.poster_copy ?? {}) as Record<string, unknown>;
   const content = (c.poster_content ?? {}) as Record<string, unknown>;
+  if (recipe.artworkMode === REDNOTE_BACKGROUND_RENDER_MODE) {
+    const layout = deriveRedNoteBackgroundLayout({
+      posterContent: c.poster_content,
+      styleProfile: c.style_profile,
+      posterFormat: c.poster_format,
+    });
+    const { error: upErr } = await client.database
+      .from('poster_generations')
+      .update({ poster_layout: layout, design_status: 'ready' })
+      .eq('id', generation.id)
+      .eq('user_id', userId);
+    if (upErr) {
+      if (finalizeFailure) {
+        await trace.fail(upErr, 'generation_persist_failed');
+        await markGenerationFailed(
+          client,
+          generation.id,
+          'designer',
+          upErr,
+          'generation_persist_failed',
+          userId,
+        );
+      }
+      return jsonResponse({ error: upErr.message }, 500);
+    }
+    await trace.addArtifact({ kind: 'layout', snapshot: layout });
+    await trace.succeed({
+      deterministic: true,
+      render_mode: REDNOTE_BACKGROUND_RENDER_MODE,
+    });
+    return jsonResponse({ poster_layout: layout });
+  }
   const assets = (c.brand_assets ?? {}) as {
     logo_url?: string;
     logo_key?: string;

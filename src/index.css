@@ -1090,7 +1090,8 @@ img {
   background: var(--canvas);
 }
 
-.campaign-thumbnail img {
+.campaign-thumbnail img,
+.poster-thumbnail > img {
   display: block;
   width: 100%;
   height: 100%;
@@ -1098,8 +1099,37 @@ img {
   transition: transform var(--content-transition);
 }
 
-.campaign-file:hover .campaign-thumbnail img {
+.campaign-file:hover .campaign-thumbnail > img,
+.campaign-file:hover .campaign-thumbnail > .poster-thumbnail {
   transform: scale(1.015);
+}
+
+.poster-thumbnail {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--canvas);
+  transition: transform var(--content-transition);
+}
+
+.poster-thumbnail-native {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.poster-thumbnail-error {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: center;
 }
 
 .campaign-thumbnail .status-badge {
@@ -1802,13 +1832,27 @@ img {
   align-items: start;
 }
 
-.generation-result-ready > img {
+.generation-result-ready > img,
+.generation-result-ready > .generation-result-poster {
   grid-column: 2;
   grid-row: 1 / span 2;
   width: 180px;
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   object-fit: contain;
+}
+
+.generation-result-poster {
+  width: 180px;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.generation-result-poster-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
 }
 
 .generation-result-copy {
@@ -2469,6 +2513,7 @@ img {
 }
 
 .version-row > img,
+.version-row > .poster-thumbnail,
 .version-image-placeholder {
   display: block;
   width: 52px;
@@ -4926,7 +4971,8 @@ table.stats tr.winner td:first-child {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .generation-result-ready > img {
+  .generation-result-ready > img,
+  .generation-result-ready > .generation-result-poster {
     grid-column: 1;
     grid-row: auto;
     width: min(220px, 100%);

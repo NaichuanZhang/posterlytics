@@ -6,6 +6,7 @@ import {
   REDNOTE_POST_MIN_PAGES,
   getRedNotePageComposition,
   normalizeRedNotePostPlan,
+  parseRedNotePostPlan,
   projectRedNotePostPlanToPosterContent,
   splitRedNoteSourceCopy,
   type RedNotePostPlan,
@@ -24,6 +25,39 @@ test('RedNote foundation is anchored to the registered full-bleed format and pag
   assert.equal(REDNOTE_POST_FORMAT, 'rednote_cover_3x4')
   assert.equal(REDNOTE_POST_MIN_PAGES, 2)
   assert.equal(REDNOTE_POST_MAX_PAGES, 9)
+})
+
+test('strict plan parsing clones valid plans and rejects malformed persisted data', () => {
+  const raw = {
+    schema_version: 1 as const,
+    pages: [
+      { kind: 'cover' as const, title: 'Field notes', subtitle: 'A clear hook' },
+      { kind: 'content' as const, heading: 'Start here', blocks: ['One idea'] },
+    ],
+  }
+  const snapshot = structuredClone(raw)
+  const parsed = parseRedNotePostPlan(raw)
+
+  assert.deepEqual(parsed, snapshot)
+  assert.notStrictEqual(parsed, raw)
+  assert.notStrictEqual(parsed?.pages, raw.pages)
+  assert.deepEqual(raw, snapshot)
+  assert.equal(parseRedNotePostPlan({ ...raw, schema_version: 2 }), null)
+  assert.equal(parseRedNotePostPlan({
+    schema_version: 1,
+    pages: [...raw.pages].reverse(),
+  }), null)
+  assert.equal(parseRedNotePostPlan({
+    schema_version: 1,
+    pages: [{ kind: 'cover', title: '' }, raw.pages[1]],
+  }), null)
+  assert.equal(parseRedNotePostPlan({
+    schema_version: 1,
+    pages: [
+      raw.pages[0],
+      { kind: 'content', heading: 'Body', blocks: 'invalid' },
+    ],
+  }), null)
 })
 
 test('malformed model output falls back to deterministic caller-supplied copy', () => {

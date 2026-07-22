@@ -1,12 +1,16 @@
 import { runAnalyzeStage } from '../../functions/analyze.ts'
+import { runAssetSelectionStage } from '../../functions/_assetSelection.ts'
 import { runDesignerStage } from '../../functions/designer.ts'
 import { runHeroStage } from '../../functions/hero.ts'
+import {
+  deriveRedNoteBackgroundLayout,
+} from '../../functions/_redNoteBackground.ts'
 import {
   isReferenceOnlyUseCaseId,
   type UseCaseId,
 } from '../../src/lib/useCases.ts'
 
-type PipelineStage = 'analyze' | 'designer' | 'hero'
+type PipelineStage = 'analyze' | 'assets' | 'designer' | 'hero'
 
 interface HarnessTrace {
   status: string
@@ -47,7 +51,10 @@ export interface PipelinePromptGoldens {
     website_product: { system: string; user: string }
     amazon_listing: { system: string; user: string }
     social_cover: { system: string; user: string }
-    rednote_post: { system: string; user: string }
+    rednote_post: {
+      prompt: null
+      layout: Record<string, unknown>
+    }
   }
   hero: {
     website_product: string
@@ -61,6 +68,8 @@ export interface PipelinePromptGoldens {
 export interface RedNotePipelineDiagnostics {
   analyzeChatCalls: number
   analyzeImageCalls: number
+  assetChatCalls: number
+  assetImageCalls: number
   designerChatCalls: number
   designerImageCalls: number
   heroChatCalls: number
@@ -69,6 +78,9 @@ export interface RedNotePipelineDiagnostics {
   persistedPosterContent: unknown
   redNoteSchemaVersion: unknown
   redNotePageCount: unknown
+  persistedRenderMode: unknown
+  designerArtifactRenderMode: unknown
+  campaignRenderMode: unknown
 }
 
 const USER_ID = 'user-fixture'
@@ -225,7 +237,7 @@ export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePro
       website_product: await captureDesignerPrompt('website_product'),
       amazon_listing: await captureDesignerPrompt('amazon_listing'),
       social_cover: await captureDesignerPrompt('social_cover'),
-      rednote_post: await captureDesignerPrompt('rednote_post'),
+      rednote_post: await captureRedNoteDesignerArtifact(),
     },
     hero: {
       website_product: await captureHeroPrompt('website_product', 'product'),
@@ -267,6 +279,25 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
     }),
   )
 
+  const assetState = createState('rednote_post', null, 'product')
+  assetState.generation.trace_schema_version = 2
+  assetState.generation.asset_selection_mode = 'yolo'
+  assetState.generation.asset_selection_status = 'pending'
+  await withHarnessGlobals(
+    assetState,
+    null,
+    () => runAssetSelectionStage({
+      client: createHarnessClient(assetState) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      jobId: 'job-fixture',
+      workerId: 'worker-fixture',
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+
   const heroState = createState('rednote_post', null, 'product')
   await withHarnessGlobals(
     heroState,
@@ -285,6 +316,8 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
   return {
     analyzeChatCalls: analyzeState.chatRequests,
     analyzeImageCalls: analyzeState.imageRequests,
+    assetChatCalls: assetState.chatRequests,
+    assetImageCalls: assetState.imageRequests,
     designerChatCalls: designerState.chatRequests,
     designerImageCalls: designerState.imageRequests,
     heroChatCalls: heroState.chatRequests,
@@ -296,6 +329,13 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
     ),
     redNoteSchemaVersion: analysisMetadata.rednote_schema_version,
     redNotePageCount: analysisMetadata.rednote_page_count,
+    persistedRenderMode: (
+      designerState.generation.poster_layout as Record<string, unknown>
+    ).render_mode,
+    designerArtifactRenderMode: layoutArtifactRenderMode(designerState),
+    campaignRenderMode: (
+      heroState.campaign.poster_layout as Record<string, unknown>
+    ).render_mode,
   }
 }
 
@@ -550,7 +590,7 @@ async function captureAnalyzePrompt(
 async function captureDesignerPrompt(
   useCase: Extract<
     UseCaseId,
-    'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post'
+    'website_product' | 'amazon_listing' | 'social_cover'
   >,
 ): Promise<{ system: string; user: string }> {
   const productUrl = isReferenceOnlyUseCaseId(useCase)
@@ -575,6 +615,37 @@ async function captureDesignerPrompt(
     prompt?: { system?: unknown; user?: unknown }
   }
   return requireChatPrompt(payload.prompt, `designer:${useCase}`)
+}
+
+async function captureRedNoteDesignerArtifact(): Promise<
+  PipelinePromptGoldens['designer']['rednote_post']
+> {
+  const state = createState('rednote_post', null, 'product')
+  const response = await withHarnessGlobals(
+    state,
+    null,
+    () => runDesignerStage({
+      client: createHarnessClient(state) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+  const payload = await response.json() as {
+    prompt?: unknown
+    poster_layout?: unknown
+  }
+  if (!payload.poster_layout || typeof payload.poster_layout !== 'object') {
+    throw new Error(`Missing deterministic RedNote layout: ${JSON.stringify(payload)}`)
+  }
+  return {
+    prompt: null,
+    layout: structuredClone(
+      payload.poster_layout as Record<string, unknown>,
+    ),
+  }
 }
 
 async function captureHeroPrompt(
@@ -643,7 +714,7 @@ function createState(
     eager_capture_color_scheme: null,
     eager_captured_at: null,
   }
-  const generation = {
+  const generation: Record<string, unknown> = {
     id: GENERATION_ID,
     campaign_id: CAMPAIGN_ID,
     user_id: USER_ID,
@@ -766,6 +837,22 @@ function createState(
     trace_schema_version: 1,
     asset_selection_status: 'completed',
   }
+  if (useCase === 'rednote_post') {
+    generation.poster_content = {
+      headline: 'Make the light the hook',
+      what_it_does: 'Keep the mood kinetic',
+      how_it_works: [],
+      why_use_it: [],
+      features: ['Lead with motion', 'Hold the focus'],
+      cta: '',
+      rednote_post: structuredClone(REDNOTE_MODEL_PLAN),
+    }
+    generation.poster_layout = deriveRedNoteBackgroundLayout({
+      posterContent: generation.poster_content,
+      styleProfile: generation.style_profile,
+      posterFormat: generation.poster_format,
+    })
+  }
   const trace = (): HarnessTrace => ({
     status: 'pending',
     started_at: null,
@@ -778,6 +865,7 @@ function createState(
     parent: null,
     traces: {
       analyze: trace(),
+      assets: trace(),
       designer: trace(),
       hero: trace(),
     },
@@ -807,7 +895,16 @@ function createHarnessClient(state: HarnessState) {
             hero_image_url: 'https://assets.example/poster.png',
             hero_image_key: 'poster/fixture/poster.png',
           })
+          Object.assign(state.campaign, {
+            poster_content: structuredClone(state.generation.poster_content),
+            poster_layout: structuredClone(state.generation.poster_layout),
+            hero_image_url: state.generation.hero_image_url,
+            hero_image_key: state.generation.hero_image_key,
+          })
           return { data: structuredClone(state.generation), error: null }
+        }
+        if (name === 'complete_generation_asset_selection_for_worker') {
+          state.generation.asset_selection_status = 'completed'
         }
         return { data: null, error: null }
       },
@@ -909,7 +1006,12 @@ class HarnessQuery {
     }
     if (this.table === 'generation_stage_traces') {
       const stage = this.filters.find(([column]) => column === 'stage')?.[1]
-      if (stage === 'analyze' || stage === 'designer' || stage === 'hero') {
+      if (
+        stage === 'analyze'
+        || stage === 'assets'
+        || stage === 'designer'
+        || stage === 'hero'
+      ) {
         return this.state.traces[stage]
       }
       return null
@@ -1056,6 +1158,14 @@ function analysisArtifactMetadata(
     metadata?: Record<string, unknown>
   }>).find((candidate) => candidate.kind === 'analysis')
   return artifact?.metadata ?? {}
+}
+
+function layoutArtifactRenderMode(state: HarnessState): unknown {
+  const artifact = (state.traces.designer.artifacts as Array<{
+    kind?: unknown
+    snapshot?: Record<string, unknown>
+  }>).find((candidate) => candidate.kind === 'layout')
+  return artifact?.snapshot?.render_mode
 }
 
 function sourceHtml(scenario: string): string {

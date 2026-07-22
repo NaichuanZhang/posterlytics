@@ -23,6 +23,7 @@ test('resolver exposes product recipes and an isolated event-bespoke sentinel', 
   assert.deepEqual(redNote, {
     ...social,
     id: 'rednote_post',
+    artworkMode: 'rednote-background-v1',
     analyze: {
       ...social.analyze,
       outputMode: 'rednote-post-v1',
@@ -117,13 +118,15 @@ test('social recipe is reference-only and contains no website or URL evidence la
   assert.doesNotMatch(materialized, /\bDOM\b/)
 })
 
-test('RedNote isolates its analyze output mode while reusing downstream social policy', () => {
+test('RedNote isolates its analyze output and background artwork modes', () => {
   const social = resolveProductUseCaseRecipe('social_cover')
   const redNote = resolveProductUseCaseRecipe('rednote_post')
 
   assert.notStrictEqual(redNote.analyze, social.analyze)
   assert.equal(social.analyze.outputMode, undefined)
   assert.equal(redNote.analyze.outputMode, 'rednote-post-v1')
+  assert.equal(social.artworkMode, undefined)
+  assert.equal(redNote.artworkMode, 'rednote-background-v1')
   assert.deepEqual(
     { ...redNote.analyze, outputMode: undefined },
     { ...social.analyze, outputMode: undefined },

@@ -15,6 +15,7 @@ import { activityForCampaign, generationActivityLabel } from '../lib/generationA
 import { useI18n } from '../i18n/I18nProvider'
 import { derivePosterTranscript } from '../lib/posterTranscript'
 import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
+import { PosterThumbnail } from '../components/posters/PosterThumbnail'
 
 export function CampaignsListPage() {
   const { t } = useI18n()
@@ -195,9 +196,10 @@ function CampaignFile({
     <Link to={`/campaigns/${campaign.id}`} className="campaign-file">
       <div className="campaign-thumbnail">
         {thumbnail ? (
-          <img
-            src={thumbnail}
-            alt={thumbnailAlt}
+          <PosterThumbnail
+            campaign={campaign}
+            imageAlt={thumbnailAlt}
+            fallbackImageUrl={thumbnail}
           />
         ) : (
           <span className="campaign-placeholder" aria-hidden="true">

@@ -58,12 +58,6 @@ assertChatUnchanged(
   redNoteAnalyze,
 )
 assertChatUnchanged('designer.social_cover', actual.designer.social_cover, social.designer)
-assertChatUnchanged('designer.rednote_post', actual.designer.rednote_post, social.designer)
-assert.equal(
-  actual.hero.rednote_post,
-  actual.hero.social_cover,
-  'hero.rednote_post drifted from hero.social_cover; refusing to rewrite fixtures',
-)
 
 const nextLegacy: LegacyPromptGoldens = {
   analyze: legacy.analyze,

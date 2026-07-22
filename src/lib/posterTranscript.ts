@@ -15,6 +15,8 @@ import type {
   PosterLayout,
   PosterSpec,
 } from './types'
+import type { UseCaseId } from './useCases'
+import { resolveRedNoteRenderState } from './redNoteRender'
 
 export type PosterTranscriptSource =
   | 'campaign'
@@ -39,6 +41,7 @@ export interface PosterTranscriptInput {
   product_name?: string | null
   tagline?: string | null
   scenario?: CampaignScenario | null
+  use_case?: UseCaseId | null
   poster_format?: PosterSizeSlug | null
   poster_copy?: Partial<PosterCopy> | null
   poster_content?: Partial<PosterContent> | null
@@ -113,6 +116,20 @@ function addProductArtworkBlocks(
   input: PosterTranscriptInput,
   add: (source: PosterTranscriptSource, value: unknown) => void,
 ) {
+  const redNoteRenderState = resolveRedNoteRenderState(input)
+  if (redNoteRenderState !== 'legacy') {
+    if (redNoteRenderState === 'invalid') {
+      add('campaign', input.product_name)
+      return
+    }
+    const cover = redNoteRenderState.plan.pages[0]
+    if (cover.kind === 'cover') {
+      add('poster-content', cover.title)
+      add('poster-content', cover.subtitle)
+    }
+    return
+  }
+
   const layoutBlocks = input.poster_layout
     ? groupZonesByBand(input.poster_layout)
         .flatMap((group) => group.zones)

@@ -348,6 +348,7 @@ export interface PosterLayoutZone {
 }
 
 export interface PosterLayout {
+  render_mode?: 'rednote-background-v1'
   composition: string
   mood: string
   art_style: string

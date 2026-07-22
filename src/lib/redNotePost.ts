@@ -76,6 +76,64 @@ const CONTENT_HEADING: RedNoteRect = { x: 144, y: 168, width: 954, height: 216 }
 const CONTENT_BODY: RedNoteRect = { x: 144, y: 432, width: 954, height: 896 }
 const PAGE_MARKER: RedNoteRect = { x: 1002, y: 1516, width: 144, height: 40 }
 
+export function parseRedNotePostPlan(raw: unknown): RedNotePostPlan | null {
+  const record = recordOf(raw)
+  if (record.schema_version !== 1 || !Array.isArray(record.pages)) return null
+  if (
+    record.pages.length < REDNOTE_POST_MIN_PAGES
+    || record.pages.length > REDNOTE_POST_MAX_PAGES
+  ) {
+    return null
+  }
+
+  const pages: RedNotePostPage[] = []
+  for (const [index, rawPage] of record.pages.entries()) {
+    const page = recordOf(rawPage)
+    if (index === 0) {
+      if (
+        page.kind !== 'cover'
+        || !boundedString(page.title, COVER_TITLE_MAX_CODE_POINTS)
+        || (
+          page.subtitle !== undefined
+          && !boundedString(page.subtitle, COVER_SUBTITLE_MAX_CODE_POINTS)
+        )
+      ) {
+        return null
+      }
+      pages.push({
+        kind: 'cover',
+        title: page.title as string,
+        ...(typeof page.subtitle === 'string'
+          ? { subtitle: page.subtitle }
+          : {}),
+      })
+      continue
+    }
+
+    if (
+      page.kind !== 'content'
+      || !boundedString(page.heading, CONTENT_HEADING_MAX_CODE_POINTS, true)
+      || !Array.isArray(page.blocks)
+      || page.blocks.length > CONTENT_BLOCK_MAX_COUNT
+      || !page.blocks.every((block) =>
+        boundedString(block, CONTENT_BLOCK_MAX_CODE_POINTS, true)
+      )
+    ) {
+      return null
+    }
+    pages.push({
+      kind: 'content',
+      heading: page.heading as string,
+      blocks: [...page.blocks] as string[],
+    })
+  }
+
+  return {
+    schema_version: 1,
+    pages,
+  }
+}
+
 export function normalizeRedNotePostPlan(
   raw: unknown,
   fallback: RedNoteSourceCopyInput,
@@ -376,6 +434,16 @@ function splitAtCodePoint(value: string, limit: number): [string, string] {
 function boundedText(value: unknown, limit: number): string {
   if (typeof value !== 'string') return ''
   return Array.from(normalizeWhitespace(value)).slice(0, limit).join('')
+}
+
+function boundedString(
+  value: unknown,
+  maxCodePoints: number,
+  allowEmpty = false,
+): value is string {
+  return typeof value === 'string'
+    && (allowEmpty || value.trim().length > 0)
+    && Array.from(value).length <= maxCodePoints
 }
 
 function boundedModelText(

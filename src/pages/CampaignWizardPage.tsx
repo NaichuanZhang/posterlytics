@@ -34,6 +34,7 @@ import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
 import { insforge } from '../lib/insforge'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
+import { useCampaign } from '../hooks/useCampaign'
 import { useDebouncedLocalDraft } from '../hooks/useDebouncedLocalDraft'
 import { materializeReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import {
@@ -85,6 +86,8 @@ import {
   type CreatableUseCaseId,
   type UseCaseFieldRequirement,
 } from '../lib/useCases'
+import { PosterThumbnail } from '../components/posters/PosterThumbnail'
+import { derivePosterTranscript } from '../lib/posterTranscript'
 
 type Phase = 'form' | 'uploading' | 'started' | 'error'
 type AmazonTitleLookupStatus = 'idle' | 'loading' | 'unavailable'
@@ -580,6 +583,20 @@ export function CampaignWizardPage() {
 
   const activity = activityItems.find((item) => item.job_id === jobId) ?? null
   const activityPosterSize = activity ? getPosterSize(activity.poster_format) : null
+  const completedRedNoteCampaignId = (
+    activity?.status === 'succeeded'
+    && activity.use_case === 'rednote_post'
+  )
+    ? activity.campaign_id
+    : undefined
+  const { campaign: completedRedNoteCampaign } = useCampaign(
+    completedRedNoteCampaignId,
+  )
+  const completedRedNotePreview = (
+    completedRedNoteCampaign?.id === completedRedNoteCampaignId
+  )
+    ? completedRedNoteCampaign
+    : null
   const working = phase === 'uploading' || (
     phase === 'started'
     && activity?.status !== 'succeeded'
@@ -795,7 +812,25 @@ export function CampaignWizardPage() {
               <p>{t("The completed poster is now the campaign's current version.")}</p>
             </div>
           </div>
-          {activity.hero_image_url && (
+          {activity.use_case === 'rednote_post' ? (
+            completedRedNotePreview ? (
+              <PosterThumbnail
+                className="generation-result-poster"
+                campaign={completedRedNotePreview}
+                imageAlt={derivePosterTranscript(completedRedNotePreview, {
+                  locale,
+                  includeCompositedFooter: false,
+                }).shortAlt}
+              />
+            ) : (
+              <div
+                className="generation-result-poster generation-result-poster-placeholder"
+                aria-label={t('Loading')}
+              >
+                <FileText size={24} aria-hidden="true" />
+              </div>
+            )
+          ) : activity.hero_image_url ? (
             <img
               src={activity.hero_image_url}
               alt={t('{name} poster', { name: activity.campaign_name })}
@@ -803,7 +838,7 @@ export function CampaignWizardPage() {
                 aspectRatio: `${activityPosterSize!.artwork.width} / ${activityPosterSize!.artwork.height}`,
               }}
             />
-          )}
+          ) : null}
           <Link to={`/campaigns/${activity.campaign_id}`} className="button button-primary">
             {t('Open editor')}
           </Link>

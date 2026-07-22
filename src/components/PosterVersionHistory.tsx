@@ -7,6 +7,7 @@ import { derivePosterTranscript } from '../lib/posterTranscript'
 import { isReferenceOnlyUseCaseId } from '../lib/useCases'
 import { DurableGenerationStatus } from './DurableGenerationStatus'
 import { Skeleton } from './ui/Feedback'
+import { PosterThumbnail } from './posters/PosterThumbnail'
 
 interface Props {
   campaign: Campaign
@@ -92,8 +93,9 @@ export function PosterVersionHistory({
           {generations.map((generation) => {
             const selected = selectedGeneration?.id === generation.id
             const current = currentGenerationId === generation.id
+            const versionCampaign = overlayGeneration(campaign, generation)
             const thumbnailAlt = derivePosterTranscript(
-              overlayGeneration(campaign, generation),
+              versionCampaign,
               {
                 locale,
                 includeCompositedFooter: false,
@@ -108,9 +110,9 @@ export function PosterVersionHistory({
                 onClick={() => onSelect(generation.id)}
               >
                 {generation.hero_image_url ? (
-                  <img
-                    src={generation.hero_image_url}
-                    alt={thumbnailAlt}
+                  <PosterThumbnail
+                    campaign={versionCampaign}
+                    imageAlt={thumbnailAlt}
                   />
                 ) : (
                   <span className="version-image-placeholder" aria-hidden="true" />

@@ -32,6 +32,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'From website to wall.',
   'Posterlytics reads the product website, carries in your references, turns the findings into a structured layout, and generates a poster ready for a real placement.',
   'Generated poster',
+  'This RedNote cover cannot be rendered because its page plan is invalid.',
   'Posterlytics poster editor showing a generated poster and version controls',
   'Sunlit cactus used as source imagery for a poster',
   'Website structure, copy, palette, type, and imagery.',
@@ -716,6 +717,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'Posterlytics reads the product website, carries in your references, turns the findings into a structured layout, and generates a poster ready for a real placement.':
     'Posterlytics 读取产品网站，结合你的参考素材，把信息梳理成清晰版式，生成可直接用于真实场景的海报。',
   'Generated poster': '生成的海报',
+  'This RedNote cover cannot be rendered because its page plan is invalid.':
+    '小红书封面无法渲染，因为页面方案无效。',
   'Posterlytics poster editor showing a generated poster and version controls':
     'Posterlytics 海报编辑器，展示生成的海报和版本控制',
   'Sunlit cactus used as source imagery for a poster': '作为海报源素材的阳光下仙人掌',

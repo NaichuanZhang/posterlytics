@@ -44,6 +44,13 @@ const redNoteAnalyzeExpected = JSON.parse(readFileSync(
   new URL('./fixtures/redNoteAnalyzePromptGolden.json', import.meta.url),
   'utf8',
 )) as PipelinePromptGoldens['analyze']['rednote_post']
+const redNoteBackgroundExpected = JSON.parse(readFileSync(
+  new URL('./fixtures/redNoteBackgroundGenerationGolden.json', import.meta.url),
+  'utf8',
+)) as {
+  designer: PipelinePromptGoldens['designer']['rednote_post']
+  hero: PipelinePromptGoldens['hero']['rednote_post']
+}
 const actualPromise = captureCurrentPipelinePromptGoldens()
 const redNoteDiagnosticsPromise = actualPromise.then(
   () => captureRedNotePipelineDiagnostics(),
@@ -105,21 +112,31 @@ test('social analyze, designer, and hero prompts match their own goldens', async
   assert.equal(actual.hero.social_cover, socialExpected.hero)
 })
 
-test('RedNote has its own analyze golden and preserves downstream social parity', async () => {
+test('RedNote pins its own analyze, deterministic designer, and background hero contracts', async () => {
   const actual = await actualPromise
 
   assert.deepEqual(actual.analyze.rednote_post, redNoteAnalyzeExpected)
-  assert.deepEqual(actual.designer.rednote_post, socialExpected.designer)
-  assert.equal(actual.hero.rednote_post, socialExpected.hero)
-  assert.deepEqual(actual.designer.rednote_post, actual.designer.social_cover)
-  assert.equal(actual.hero.rednote_post, actual.hero.social_cover)
+  assert.deepEqual(
+    actual.designer.rednote_post,
+    redNoteBackgroundExpected.designer,
+  )
+  assert.equal(actual.designer.rednote_post.prompt, null)
+  assert.equal(
+    actual.designer.rednote_post.layout.render_mode,
+    'rednote-background-v1',
+  )
+  assert.equal(actual.hero.rednote_post, redNoteBackgroundExpected.hero)
+  assert.notDeepEqual(actual.designer.rednote_post, actual.designer.social_cover)
+  assert.notEqual(actual.hero.rednote_post, actual.hero.social_cover)
 })
 
-test('RedNote keeps the single-call cover pipeline and persists its page plan', async () => {
+test('RedNote keeps the exact model-call budget and persists its page plan and marker', async () => {
   assert.deepEqual(await redNoteDiagnosticsPromise, {
     analyzeChatCalls: 1,
     analyzeImageCalls: 0,
-    designerChatCalls: 1,
+    assetChatCalls: 0,
+    assetImageCalls: 0,
+    designerChatCalls: 0,
     designerImageCalls: 0,
     heroChatCalls: 0,
     heroImageCalls: 1,
@@ -154,6 +171,9 @@ test('RedNote keeps the single-call cover pipeline and persists its page plan', 
     },
     redNoteSchemaVersion: 1,
     redNotePageCount: 3,
+    persistedRenderMode: 'rednote-background-v1',
+    designerArtifactRenderMode: 'rednote-background-v1',
+    campaignRenderMode: 'rednote-background-v1',
   })
 })
 
@@ -180,7 +200,7 @@ test('RedNote projects deterministic draft copy after both analyze attempts fail
   })
 
   assert.deepEqual(await redNoteFallbackPromise, {
-    analyzeChatCalls: 2,
+    analyzeChatCalls: 1,
     analyzeImageCalls: 0,
     usedFallback: true,
     posterContent: projectRedNotePostPlanToPosterContent(fallbackPlan),

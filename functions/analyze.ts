@@ -680,49 +680,16 @@ export async function runAnalyzeStage(
         );
       },
     );
-  } catch {
-    // One repair retry with a terse reminder.
-    try {
-      const repairSystem = sys + ' Return ONLY valid minified JSON.';
-      const messages = [
-        { role: 'system', content: repairSystem },
-        { role: 'user', content: userContent },
-      ];
-      parsed = await trace.runModelCall(
-        {
-          operation: 'chat',
-          modelId: resolvedChatModelId(),
-          prompt: { system: repairSystem, user },
-          providerSettings: { max_completion_tokens: 2200, timeout_ms: 30_000 },
-          contentManifest: buildTraceContentManifest(
-            messages,
-            preparedAnalysisImages.attachedImages,
-          ),
-        },
-        async () => {
-          const raw = await aiChat(messages, { maxTokens: 2200 });
-          return normalize(
-            extractJson(raw),
-            campaign as Record<string, string>,
-            siteColors,
-            design_tokens,
-            productRecipe,
-            copyPolicy,
-            redNoteFallback,
-          );
-        },
-      );
-    } catch (e) {
-      // Both AI-chat attempts failed → hardcoded fallback content. The poster still
-      // renders, but it's off-brand; record why so it's not invisible.
+  } catch (firstError) {
+    if (writesRedNotePost) {
       logPipelineEvent({
         source: 'analyze',
         campaignId: campaign.id,
         generationId: generation.id,
         status: 'degraded',
         code: 'analysis_ai_failed',
-        detail: 'AI chat failed twice — used hardcoded fallback content',
-        error: e,
+        detail: 'RedNote analysis chat failed once — used deterministic source-copy fallback',
+        error: firstError,
       });
       parsed = fallbackContent(
         campaign as Record<string, string>,
@@ -733,6 +700,60 @@ export async function runAnalyzeStage(
         redNoteFallback,
       );
       usedFallback = true;
+    } else {
+      // Existing use cases retain one repair retry with a terse reminder.
+      try {
+        const repairSystem = sys + ' Return ONLY valid minified JSON.';
+        const messages = [
+          { role: 'system', content: repairSystem },
+          { role: 'user', content: userContent },
+        ];
+        parsed = await trace.runModelCall(
+          {
+            operation: 'chat',
+            modelId: resolvedChatModelId(),
+            prompt: { system: repairSystem, user },
+            providerSettings: { max_completion_tokens: 2200, timeout_ms: 30_000 },
+            contentManifest: buildTraceContentManifest(
+              messages,
+              preparedAnalysisImages.attachedImages,
+            ),
+          },
+          async () => {
+            const raw = await aiChat(messages, { maxTokens: 2200 });
+            return normalize(
+              extractJson(raw),
+              campaign as Record<string, string>,
+              siteColors,
+              design_tokens,
+              productRecipe,
+              copyPolicy,
+              redNoteFallback,
+            );
+          },
+        );
+      } catch (e) {
+        // Both AI-chat attempts failed → hardcoded fallback content. The poster still
+        // renders, but it's off-brand; record why so it's not invisible.
+        logPipelineEvent({
+          source: 'analyze',
+          campaignId: campaign.id,
+          generationId: generation.id,
+          status: 'degraded',
+          code: 'analysis_ai_failed',
+          detail: 'AI chat failed twice — used hardcoded fallback content',
+          error: e,
+        });
+        parsed = fallbackContent(
+          campaign as Record<string, string>,
+          siteColors,
+          design_tokens,
+          productRecipe,
+          copyPolicy,
+          redNoteFallback,
+        );
+        usedFallback = true;
+      }
     }
   }
 

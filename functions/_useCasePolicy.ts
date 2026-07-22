@@ -83,6 +83,7 @@ export interface ProductUseCaseRecipe {
   kind: 'product';
   id: 'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post';
   acquisitionMode: ProductSourceMode;
+  artworkMode?: 'rednote-background-v1';
   analyze: AnalyzeBriefSet;
   references: ReferencePurposeVocabulary;
   stages: StageVocabulary;
@@ -376,6 +377,7 @@ const SOCIAL_COVER_RECIPE: ProductUseCaseRecipe = {
 const REDNOTE_POST_RECIPE: ProductUseCaseRecipe = {
   ...SOCIAL_COVER_RECIPE,
   id: 'rednote_post',
+  artworkMode: 'rednote-background-v1',
   analyze: {
     ...SOCIAL_COVER_RECIPE.analyze,
     outputMode: 'rednote-post-v1',

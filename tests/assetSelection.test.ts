@@ -117,6 +117,40 @@ test('social candidates use only previous artwork and fresh user references', ()
   )
 })
 
+test('RedNote candidates exclude legacy parents and prohibit copying reference text', () => {
+  const legacyParent = buildGenerationAssetCandidates({
+    ...generation,
+    generation_mode: 'website_refresh',
+    use_case: 'rednote_post',
+  }, {
+    hero_image_url: 'https://assets.example/legacy-cover.png',
+    hero_image_key: 'poster/legacy-cover.png',
+    poster_layout: {},
+  })
+  const markedParent = buildGenerationAssetCandidates({
+    ...generation,
+    generation_mode: 'website_refresh',
+    use_case: 'rednote_post',
+  }, {
+    hero_image_url: 'https://assets.example/background.png',
+    hero_image_key: 'poster/background.png',
+    poster_layout: { render_mode: 'rednote-background-v1' },
+  })
+
+  assert.deepEqual(
+    legacyParent.map((candidate) => candidate.kind),
+    ['user-reference'],
+  )
+  assert.deepEqual(
+    markedParent.map((candidate) => candidate.kind),
+    ['previous-poster', 'user-reference'],
+  )
+  assert.match(
+    markedParent.map((candidate) => candidate.purpose).join('\n'),
+    /do not copy or render any visible text/i,
+  )
+})
+
 test('candidate validation retains unavailable rows with auditable reasons', async () => {
   const candidates = buildGenerationAssetCandidates(generation, null).slice(0, 2)
   const validated = await validateGenerationAssetCandidates(

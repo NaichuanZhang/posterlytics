@@ -153,7 +153,7 @@ test('social cover uses localized alt framing and never adds a footer to a bandl
   assert.equal(transcript.shortAlt, 'Lumen 海报：Bold cover')
 })
 
-test('RedNote transcript describes only the currently rendered layout surface', () => {
+test('legacy RedNote transcript preserves the text-baked layout surface', () => {
   const transcript = derivePosterTranscript({
     product_name: 'City Notes',
     scenario: 'product',
@@ -187,6 +187,54 @@ test('RedNote transcript describes only the currently rendered layout surface', 
     ['Walk Shanghai slowly', 'Five quiet streets'],
   )
   assert.doesNotMatch(transcript.plainText, /Second page|Deferred copy/)
+})
+
+test('marked RedNote transcript exposes only the DOM-composited cover', () => {
+  const transcript = derivePosterTranscript({
+    product_name: 'City Notes',
+    scenario: 'product',
+    use_case: 'rednote_post',
+    poster_format: 'rednote_cover_3x4',
+    poster_content: {
+      headline: 'Projected title',
+      what_it_does: 'Projected subtitle',
+      how_it_works: [],
+      why_use_it: [],
+      features: ['Second page'],
+      cta: '',
+      rednote_post: {
+        schema_version: 1,
+        pages: [
+          {
+            kind: 'cover',
+            title: 'Walk Shanghai slowly',
+            subtitle: 'Five quiet streets',
+          },
+          {
+            kind: 'content',
+            heading: 'Second page',
+            blocks: ['Deferred copy'],
+          },
+        ],
+      },
+    },
+    poster_layout: {
+      ...layout([]),
+      render_mode: 'rednote-background-v1',
+    },
+  }, {
+    locale: 'en-US',
+    includeCompositedFooter: false,
+  })
+
+  assert.deepEqual(transcript.blocks, [
+    { source: 'poster-content', text: 'Walk Shanghai slowly' },
+    { source: 'poster-content', text: 'Five quiet streets' },
+  ])
+  assert.doesNotMatch(
+    transcript.plainText,
+    /Projected title|Projected subtitle|Second page|Deferred copy/,
+  )
 })
 
 test('scaled event artwork and footer use only poster_spec provenance', () => {

@@ -1,0 +1,65 @@
+{
+  "designer": {
+    "prompt": null,
+    "layout": {
+      "render_mode": "rednote-background-v1",
+      "composition": "full-bleed diagonal editorial sweep",
+      "mood": "kinetic, luminous",
+      "art_style": "fine photographic grain",
+      "imagery": "silhouetted figure crossing a luminous field",
+      "lighting": "hard side light with a saturated glow",
+      "texture": "fine photographic grain",
+      "motifs": [
+        "cropped circles",
+        "diagonal light bands"
+      ],
+      "density": "balanced",
+      "palette_roles": {
+        "bg": "#f7f4ed",
+        "text": "#152238",
+        "primary": "#235789",
+        "accent": "#f45b69",
+        "supporting": [
+          "#70c1b3"
+        ],
+        "proportions": [
+          {
+            "color": "#f7f4ed",
+            "proportion": 0.68
+          },
+          {
+            "color": "#235789",
+            "proportion": 0.2
+          }
+        ]
+      },
+      "zones": [
+        {
+          "band": "top",
+          "role": "text-free visual atmosphere and edge-to-edge background",
+          "content": "",
+          "emphasis": "low"
+        },
+        {
+          "band": "upper",
+          "role": "primary text-free imagery focal area",
+          "content": "",
+          "emphasis": "high"
+        },
+        {
+          "band": "mid",
+          "role": "supporting depth, texture, and visual transition",
+          "content": "",
+          "emphasis": "med"
+        },
+        {
+          "band": "lower",
+          "role": "quiet text-safe reserve at x 96, y 852, width 1050, height 636",
+          "content": "",
+          "emphasis": "low"
+        }
+      ]
+    }
+  },
+  "hero": "Create one clean, text-free PORTRAIT 3:4 full-bleed background image for a multi-page RedNote post.\nComposition: full-bleed diagonal editorial sweep.\nMood: kinetic, luminous.\nVisual treatment: fine photographic grain.\nImagery: silhouetted figure crossing a luminous field.\nLighting: hard side light with a saturated glow.\nTexture and material finish: fine photographic grain.\nMotifs: cropped circles, diagonal light bands.\n\nFill the complete frame with an intentional editorial composition. Keep the lower cover-copy reserve quiet and readable: x 96 to 1146, y 852 to 1488 in a 1242 by 1656 frame. Preserve useful negative space there while keeping the surrounding image visually complete. Do not draw a panel, card, textbox, label, placeholder, or interface in the reserve.\n\nUse the palette as area fills and image color direction: background cream; primary slate gray; accent coral; supporting turquoise; keep accents restrained and preserve the reference-led hierarchy. Approximate color-area proportions: cream about 68%, slate gray about 20%.\n\nAttached references are visual evidence only. Use their mood, imagery, lighting, texture, palette, motifs, and composition without copying any visible writing or identity marks.\n\nABSOLUTE TEXT EXCLUSION: render no letters, words, numbers, punctuation, symbols, captions, logos, wordmarks, watermarks, signatures, labels, UI, buttons, badges, QR codes, barcodes, faux typography, or text-like glyphs anywhere. Do not imitate writing in any language. Remove or abstract any writing visible in references.\n\nHigh quality, sharp, cohesive, professional editorial background. The result must remain useful behind programmatically composited DOM text."
+}

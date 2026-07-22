@@ -16,6 +16,11 @@ import {
   type TypedImageReference,
 } from './_shared.ts';
 import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
+import {
+  REDNOTE_BACKGROUND_PREVIOUS_PURPOSE,
+  REDNOTE_BACKGROUND_REFERENCE_PURPOSE,
+  hasCompatibleRedNoteBackgroundParent,
+} from './_redNoteBackground.ts';
 
 const MAX_SELECTED_ASSETS = 6;
 const MAX_CANDIDATE_ASSETS = 50;
@@ -47,6 +52,7 @@ interface AssetSnapshot {
 interface ParentSnapshot {
   hero_image_url: string | null;
   hero_image_key: string | null;
+  poster_layout?: unknown;
 }
 
 export interface GenerationAssetCandidate extends TypedImageReference {
@@ -92,6 +98,8 @@ export function buildGenerationAssetCandidates(
   parent: ParentSnapshot | null,
 ): GenerationAssetCandidate[] {
   const recipe = resolveProductUseCaseRecipe(generation.use_case);
+  const buildsRedNoteBackground =
+    recipe.artworkMode === 'rednote-background-v1';
   const usesSourceAssets = recipe.acquisitionMode !== 'reference-only';
   const assets = generation.brand_assets ?? {};
   const productImages = generation.scenario === 'event' || !usesSourceAssets
@@ -108,16 +116,21 @@ export function buildGenerationAssetCandidates(
         ),
       ];
   const references: TypedImageReference[] = [
-    ...(parent?.hero_image_url
+    ...(parent?.hero_image_url && (
+      !buildsRedNoteBackground
+      || hasCompatibleRedNoteBackgroundParent(parent.poster_layout)
+    )
       ? [{
           kind: 'previous-poster' as const,
           url: parent.hero_image_url,
           key: parent.hero_image_key ?? undefined,
           filename: 'Previous poster',
           storageSource: 'poster-version',
-          purpose: generation.generation_mode === 'website_refresh'
-            ? recipe.references.assetPreviousRefresh
-            : recipe.references.assetPreviousIteration,
+          purpose: buildsRedNoteBackground
+            ? REDNOTE_BACKGROUND_PREVIOUS_PURPOSE
+            : generation.generation_mode === 'website_refresh'
+              ? recipe.references.assetPreviousRefresh
+              : recipe.references.assetPreviousIteration,
         }]
       : []),
     ...generation.reference_images
@@ -130,7 +143,9 @@ export function buildGenerationAssetCandidates(
         mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
         sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
         storageSource: 'user-upload',
-        purpose: recipe.references.assetUserReference(index + 1),
+        purpose: buildsRedNoteBackground
+          ? REDNOTE_BACKGROUND_REFERENCE_PURPOSE
+          : recipe.references.assetUserReference(index + 1),
       })),
     ...(usesSourceAssets && assets.logo_url
       ? [{
@@ -366,7 +381,10 @@ export async function runAssetSelectionStage(
   let aiAttempts = 0;
   let fallbackDetail: string | null = null;
   const available = validated.filter((asset) => asset.availability === 'available');
-  if (available.length > 0) {
+  const deterministicArtworkSelection =
+    resolveProductUseCaseRecipe(generation.use_case).artworkMode
+      === 'rednote-background-v1';
+  if (available.length > 0 && !deterministicArtworkSelection) {
     try {
       selection = await selectAssetsWithAi(trace, generation, available, false);
       method = 'ai';
@@ -382,7 +400,7 @@ export async function runAssetSelectionStage(
         fallbackDetail = errorDetails(secondError).message.slice(0, 500);
       }
     }
-  } else {
+  } else if (available.length === 0) {
     fallbackDetail = 'No validated image candidates were available.';
   }
 
@@ -400,10 +418,11 @@ export async function runAssetSelectionStage(
   await trace.succeed({
     selection_mode: 'yolo',
     selection_method: method,
+    selection_policy: deterministicArtworkSelection ? 'deterministic' : 'ai_with_fallback',
     selected_count: selection.assetIds.length,
     zero_selection: selection.assetIds.length === 0,
     ai_attempts: aiAttempts,
-    fallback: method === 'rules_fallback',
+    fallback: !deterministicArtworkSelection && method === 'rules_fallback',
     ...(fallbackDetail ? { fallback_detail: fallbackDetail } : {}),
   });
   return jsonResponse({
@@ -496,7 +515,7 @@ async function loadParent(
   if (!generation.parent_generation_id) return null;
   const { data, error } = await client.database
     .from('poster_generations')
-    .select('hero_image_url, hero_image_key')
+    .select('hero_image_url, hero_image_key, poster_layout')
     .eq('id', generation.parent_generation_id)
     .eq('campaign_id', generation.campaign_id)
     .eq('user_id', generation.user_id)

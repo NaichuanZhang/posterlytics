@@ -7,6 +7,7 @@ import {
   hasPosterQrBand,
   type PosterSize,
 } from '../lib/posterSize'
+import { resolveRedNoteRenderState } from '../lib/redNoteRender'
 import {
   AiPoster,
   type PosterRenderReady,
@@ -61,6 +62,8 @@ export function PosterExportButton({
   const { notify } = useToast()
   const { t } = useI18n()
   const includesQrBand = hasPosterQrBand(posterSize)
+  const redNoteRenderState = resolveRedNoteRenderState(campaign)
+  const redNoteExportDeferred = redNoteRenderState !== 'legacy'
   const formatLabel = t(posterSize.label)
   const buttonLabel = variant === 'icon' && includesQrBand && placement
     ? t('Download {name} poster as {format} PNG', {
@@ -91,7 +94,11 @@ export function PosterExportButton({
   }, [renderAttemptId, resolveRenderReady])
 
   async function handleExport() {
-    if (busy || (includesQrBand && !placement)) return
+    if (
+      busy
+      || redNoteExportDeferred
+      || (includesQrBand && !placement)
+    ) return
     setBusy(true)
     try {
       // Pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
@@ -176,7 +183,11 @@ export function PosterExportButton({
         type="button"
         className={variant === 'icon' ? 'icon-button' : 'button button-secondary button-small'}
         onClick={handleExport}
-        disabled={busy || (includesQrBand && !placement)}
+        disabled={
+          busy
+          || redNoteExportDeferred
+          || (includesQrBand && !placement)
+        }
         aria-label={variant === 'icon' ? buttonLabel : undefined}
         data-tooltip={variant === 'icon' ? buttonLabel : undefined}
       >

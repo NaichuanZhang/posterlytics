@@ -1,7 +1,7 @@
 import { forwardRef } from 'react'
 import type { Campaign } from '../lib/types'
 import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
-import { AiPoster } from './posters/AiPoster'
+import { PosterSurface } from './posters/PosterSurface'
 
 interface Props {
   campaign: Campaign
@@ -50,13 +50,14 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
           transformOrigin: 'top left',
         }}
       >
-        <AiPoster
+        <PosterSurface
           ref={ref}
           campaign={campaign}
           code={code}
           imageAlt={imageAlt}
           compositedFooterAriaHidden
           posterSize={posterSize}
+          pageIndex={0}
         />
       </div>
     </div>

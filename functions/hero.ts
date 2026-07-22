@@ -31,6 +31,13 @@ import {
   colorNameForHex,
   replacePainterHexColors,
 } from './_painterColors.ts';
+import {
+  REDNOTE_BACKGROUND_PREVIOUS_PURPOSE,
+  REDNOTE_BACKGROUND_REFERENCE_PURPOSE,
+  REDNOTE_BACKGROUND_RENDER_MODE,
+  buildRedNoteBackgroundPrompt,
+  hasCompatibleRedNoteBackgroundParent,
+} from './_redNoteBackground.ts';
 
 // `hero` renders the registered artwork frame as a single AI image. Products
 // compile the LLM-designed poster_layout (produced by the `designer` agent) into
@@ -176,6 +183,15 @@ export async function runHeroStage(
   const posterSize = getPosterSize(
     (generation as Record<string, unknown>).poster_format,
   );
+  const buildsRedNoteBackground =
+    recipe.artworkMode === REDNOTE_BACKGROUND_RENDER_MODE;
+  const redNoteBackgroundPrompt = buildsRedNoteBackground
+    ? buildRedNoteBackgroundPrompt(
+        generationSnapshot.poster_layout as PosterLayout,
+        posterSize.slug,
+        generationSnapshot.poster_content,
+      )
+    : null;
   const parentPosterSize = parent
     ? getPosterSize((parent as Record<string, unknown>).poster_format)
     : null;
@@ -201,7 +217,12 @@ export async function runHeroStage(
         .filter((image) => typeof image.url === 'string' && image.url)
         .slice(0, 5)
     : [];
-  const previousPosterUrl = typeof (parent as Record<string, unknown> | null)?.hero_image_url === 'string'
+  const compatibleParent = !buildsRedNoteBackground
+    || hasCompatibleRedNoteBackgroundParent(
+      (parent as Record<string, unknown> | null)?.poster_layout,
+    );
+  const previousPosterUrl = compatibleParent
+    && typeof (parent as Record<string, unknown> | null)?.hero_image_url === 'string'
     ? String((parent as Record<string, unknown>).hero_image_url)
     : '';
   const screenshotUrl = typeof generationSnapshot.screenshot_url === 'string'
@@ -230,7 +251,9 @@ export async function runHeroStage(
             : undefined,
           filename: 'Previous poster',
           storageSource: 'poster-version',
-          purpose: recipe.references.heroPrevious,
+          purpose: buildsRedNoteBackground
+            ? REDNOTE_BACKGROUND_PREVIOUS_PURPOSE
+            : recipe.references.heroPrevious,
         }]
       : []),
     ...userReferences.map((image, index) => ({
@@ -241,7 +264,9 @@ export async function runHeroStage(
       mimeType: typeof image.mime_type === 'string' ? image.mime_type : undefined,
       sizeBytes: typeof image.size_bytes === 'number' ? image.size_bytes : undefined,
       storageSource: 'user-upload',
-      purpose: recipe.references.heroUserReference(index + 1),
+      purpose: buildsRedNoteBackground
+        ? REDNOTE_BACKGROUND_REFERENCE_PURPOSE
+        : recipe.references.heroUserReference(index + 1),
     })),
     ...(usesSourceAssets && assets.logo_url
       ? [{
@@ -278,9 +303,21 @@ export async function runHeroStage(
   if (usesFrozenAssets && generationSnapshot.asset_selection_status !== 'completed') {
     return jsonResponse({ error: 'generation assets have not been confirmed' }, 409);
   }
-  const candidates = usesFrozenAssets
+  const loadedCandidates = usesFrozenAssets
     ? await loadFrozenGenerationImageReferences(context)
     : legacyCandidates;
+  const candidates = buildsRedNoteBackground
+    ? loadedCandidates
+        .filter((reference) =>
+          reference.kind !== 'previous-poster' || compatibleParent
+        )
+        .map((reference) => ({
+          ...reference,
+          purpose: reference.kind === 'previous-poster'
+            ? REDNOTE_BACKGROUND_PREVIOUS_PURPOSE
+            : REDNOTE_BACKGROUND_REFERENCE_PURPOSE,
+        }))
+    : loadedCandidates;
   const preparedImages = await prepareImageReferences(candidates, {
     maxImages: 6,
     maxCandidates: usesFrozenAssets ? 6 : 14,
@@ -333,7 +370,7 @@ export async function runHeroStage(
       detail: 'The style board could not be attached or fell beyond the six-image painter limit.',
     });
   }
-  const prompt = buildPosterPrompt(
+  const prompt = redNoteBackgroundPrompt ?? buildPosterPrompt(
     {
       ...generationSnapshot,
       reference_images: referenceImages.filter(

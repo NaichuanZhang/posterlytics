@@ -34,8 +34,13 @@ const legacy = readJson<LegacyPromptGoldens>(
 const social = readJson<SocialPromptGoldens>(
   new URL('../fixtures/socialCoverPromptGoldens.json', import.meta.url),
 )
-const redNoteAnalyzeUrl = new URL(
-  '../fixtures/redNoteAnalyzePromptGolden.json',
+const redNoteAnalyze = readJson<
+  PipelinePromptGoldens['analyze']['rednote_post']
+>(
+  new URL('../fixtures/redNoteAnalyzePromptGolden.json', import.meta.url),
+)
+const redNoteBackgroundUrl = new URL(
+  '../fixtures/redNoteBackgroundGenerationGolden.json',
   import.meta.url,
 )
 const actual = await captureCurrentPipelinePromptGoldens()
@@ -49,7 +54,7 @@ for (const useCase of ['website_product', 'amazon_listing', 'event'] as const) {
   assert.equal(
     actual.hero[useCase],
     legacy.hero[useCase],
-    `hero.${useCase} changed; refusing to write the RedNote analyze fixture`,
+    `hero.${useCase} changed; refusing to write the RedNote background fixture`,
   )
 }
 for (const useCase of ['website_product', 'amazon_listing'] as const) {
@@ -59,7 +64,6 @@ for (const useCase of ['website_product', 'amazon_listing'] as const) {
     legacy.designer[useCase],
   )
 }
-
 assertChatUnchanged(
   'analyze.social_cover',
   actual.analyze.social_cover,
@@ -73,20 +77,33 @@ assertChatUnchanged(
 assert.equal(
   actual.hero.social_cover,
   social.hero,
-  'hero.social_cover changed; refusing to write the RedNote analyze fixture',
+  'hero.social_cover changed; refusing to write the RedNote background fixture',
 )
-assert.notDeepEqual(
+assertChatUnchanged(
+  'analyze.rednote_post',
   actual.analyze.rednote_post,
-  actual.analyze.social_cover,
-  'analyze.rednote_post did not diverge from social_cover',
+  redNoteAnalyze,
+)
+assert.equal(
+  actual.designer.rednote_post.prompt,
+  null,
+  'RedNote designer unexpectedly exposed a chat prompt',
+)
+assert.equal(
+  actual.designer.rednote_post.layout.render_mode,
+  'rednote-background-v1',
+  'RedNote designer layout is missing its render marker',
 )
 
 writeFileSync(
-  redNoteAnalyzeUrl,
-  `${JSON.stringify(actual.analyze.rednote_post, null, 2)}\n`,
+  redNoteBackgroundUrl,
+  `${JSON.stringify({
+    designer: actual.designer.rednote_post,
+    hero: actual.hero.rednote_post,
+  }, null, 2)}\n`,
 )
 console.log(
-  'Updated only the RedNote analyze prompt golden; all unaffected prompts were unchanged.',
+  'Updated only the RedNote background-generation golden; all unaffected prompts were unchanged.',
 )
 
 function assertChatUnchanged(
@@ -97,12 +114,12 @@ function assertChatUnchanged(
   assert.equal(
     actualPrompt.system,
     expectedPrompt.system,
-    `${label}.system changed; refusing to write the RedNote analyze fixture`,
+    `${label}.system changed; refusing to write the RedNote background fixture`,
   )
   assert.equal(
     actualPrompt.user,
     expectedPrompt.user,
-    `${label}.user changed; refusing to write the RedNote analyze fixture`,
+    `${label}.user changed; refusing to write the RedNote background fixture`,
   )
 }
 

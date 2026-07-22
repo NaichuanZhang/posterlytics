@@ -1857,6 +1857,7 @@ export interface PosterLayoutZone {
 }
 
 export interface PosterLayout {
+  render_mode?: 'rednote-background-v1';
   composition: string; // e.g. "asymmetric, oversized hero top-left"
   mood: string; // e.g. "editorial, calm, premium"
   art_style: string; // visual medium/treatment, e.g. "flat vector + soft gradients"
