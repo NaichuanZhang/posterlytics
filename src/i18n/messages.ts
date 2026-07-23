@@ -89,6 +89,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Dismiss notification',
   'Authentication failed.',
   'Invalid email or password.',
+  'Your session ended. Sign in to continue.',
   'Connection interrupted',
   'Something went wrong',
   'Posterlytics could not connect. Check your internet connection and try again.',
@@ -802,6 +803,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Dismiss notification': '关闭通知',
   'Authentication failed.': '登录验证失败。',
   'Invalid email or password.': '邮箱或密码不正确。',
+  'Your session ended. Sign in to continue.': '登录已过期，请重新登录后继续。',
   'Connection interrupted': '连接出现问题',
   'Something went wrong': '出现了一些问题',
   'Posterlytics could not connect. Check your internet connection and try again.':

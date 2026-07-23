@@ -21,14 +21,14 @@ export function CampaignsListPage() {
   const { t } = useI18n()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<CampaignStatusFilter>('all')
   const { items: generationActivity } = useGenerationActivity()
 
   const loadCampaigns = useCallback(async () => {
     setLoading(true)
-    setError(null)
+    setFailed(false)
     try {
       const { data, error: queryError } = await insforge.database
         .from('campaigns')
@@ -36,12 +36,12 @@ export function CampaignsListPage() {
         .order('created_at', { ascending: false })
 
       if (queryError) {
-        setError(queryError.message)
+        setFailed(true)
       } else {
         setCampaigns((data ?? []) as Campaign[])
       }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('The campaign query failed.'))
+    } catch {
+      setFailed(true)
     } finally {
       setLoading(false)
     }
@@ -89,7 +89,7 @@ export function CampaignsListPage() {
           <h1>{t('Campaigns')}</h1>
           <p>{t('Poster files and placement performance in one workspace.')}</p>
         </div>
-        {!loading && !error && (
+        {!loading && !failed && (
           <span className="page-count">{t('{count} total', { count: campaigns.length })}</span>
         )}
       </header>
@@ -120,10 +120,9 @@ export function CampaignsListPage() {
         </div>
       </div>
 
-      {error ? (
+      {failed ? (
         <InlineNotice tone="error">
           <strong>{t('Campaigns could not be loaded.')}</strong>
-          <span>{error}</span>
           <button type="button" className="text-button" onClick={() => void loadCampaigns()}>
             {t('Try again')}
           </button>

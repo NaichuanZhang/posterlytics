@@ -8,7 +8,11 @@ import { useI18n } from '../i18n/I18nProvider'
 import { useFocusOnChange } from '../hooks/useViewFocus'
 import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
-import { parseAuthMode, safeNextPath } from '../lib/authRouting'
+import {
+  parseAuthMode,
+  parseSignInReason,
+  safeNextPath,
+} from '../lib/authRouting'
 import {
   classifySignInError,
   type SignInErrorKind,
@@ -24,10 +28,19 @@ export function SignInPage() {
   const [busy, setBusy] = useState(false)
   const [recoveringPassword, setRecoveringPassword] = useState(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const sessionReasonSeededRef = useRef(false)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { user, loading, refresh } = useAuth()
+  const {
+    user,
+    loading,
+    refresh,
+    signInReason,
+    clearSignInReason,
+  } = useAuth()
   const mode = parseAuthMode(searchParams.get('mode'))
+  const querySignInReason = parseSignInReason(searchParams.get('reason'))
+  const noticeReason = querySignInReason ?? signInReason
   const nextPath = safeNextPath(searchParams.get('next'))
 
   useFocusOnChange(headingRef, recoveringPassword, {
@@ -38,6 +51,23 @@ export function SignInPage() {
   useEffect(() => {
     if (!loading && user) navigate(nextPath, { replace: true })
   }, [loading, navigate, nextPath, user])
+
+  useEffect(() => {
+    if (!signInReason || sessionReasonSeededRef.current) return
+    sessionReasonSeededRef.current = true
+    if (!querySignInReason) {
+      const params = new URLSearchParams(searchParams)
+      params.set('reason', signInReason)
+      setSearchParams(params, { replace: true })
+    }
+    clearSignInReason()
+  }, [
+    clearSignInReason,
+    querySignInReason,
+    searchParams,
+    setSearchParams,
+    signInReason,
+  ])
 
   function changeMode(nextMode: 'signin' | 'signup') {
     const params = new URLSearchParams(searchParams)
@@ -169,6 +199,12 @@ export function SignInPage() {
                   {t('Create account')}
                 </button>
               </div>
+
+              {noticeReason === 'session_expired' && (
+                <InlineNotice tone="warning">
+                  {t('Your session ended. Sign in to continue.')}
+                </InlineNotice>
+              )}
 
               {loading || user ? (
                 <div className="public-auth-loading" aria-label={t('Loading account')} aria-busy="true">

@@ -6,12 +6,17 @@ import { signInPath } from '../lib/authRouting'
 
 // Gate protected routes on the cold-load auth state.
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth()
+  const { user, loading, signInReason } = useAuth()
   const location = useLocation()
   if (loading) return <Spinner full />
   if (!user) {
     const nextPath = `${location.pathname}${location.search}${location.hash}`
-    return <Navigate to={signInPath(nextPath)} replace />
+    return (
+      <Navigate
+        to={signInPath(nextPath, 'signin', signInReason ?? undefined)}
+        replace
+      />
+    )
   }
   return <>{children}</>
 }

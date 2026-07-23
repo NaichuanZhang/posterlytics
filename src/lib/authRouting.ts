@@ -1,10 +1,17 @@
 export type AuthMode = 'signin' | 'signup'
+export type SignInReason = 'session_expired'
 
 const INTERNAL_ORIGIN = 'https://posterlytics.invalid'
 const CSRF_COOKIE = 'insforge_csrf_token'
 
 export function parseAuthMode(value: string | null | undefined): AuthMode {
   return value === 'signup' ? 'signup' : 'signin'
+}
+
+export function parseSignInReason(
+  value: string | null | undefined,
+): SignInReason | null {
+  return value === 'session_expired' ? value : null
 }
 
 export function safeNextPath(
@@ -35,10 +42,12 @@ export function safeNextPath(
 export function signInPath(
   nextPath: string,
   mode: AuthMode = 'signin',
+  reason?: SignInReason,
 ): string {
   const params = new URLSearchParams()
   if (mode === 'signup') params.set('mode', mode)
   params.set('next', safeNextPath(nextPath))
+  if (reason) params.set('reason', reason)
   return `/signin?${params.toString()}`
 }
 

@@ -8,6 +8,16 @@ const HOST = '127.0.0.1'
 const PORT = 4176
 const BASE_URL = `http://${HOST}:${PORT}`
 const OUTPUT_DIR = 'test-results/marketing'
+const SESSION_EXPIRY_NOTICE = 'Your session ended. Sign in to continue.'
+const SESSION_EXPIRY_RAW_ERROR = 'No refresh token provided'
+const SESSION_EXPIRY_RPC_ERROR = 'Raw InsForgeError text must remain hidden.'
+const SESSION_EXPIRY_DRAFT_KEY = 'posterlytics.campaignDraft.v1:sample-user'
+const SESSION_EXPIRY_DRAFT_VALUE = JSON.stringify({
+  version: 1,
+  ownerId: 'sample-user',
+  updatedAt: '2026-07-23T20:00:00.000Z',
+  data: { productName: 'Unsaved expiry recovery draft' },
+})
 
 await mkdir(OUTPUT_DIR, { recursive: true })
 
@@ -49,6 +59,7 @@ try {
   await testFirstPaintLifecycle(browser)
   await testGuestHome(browser)
   await testAuthenticatedHome(browser)
+  await testColdLoadSessionExpiry(browser)
   await testOnlineLazyChunkRetry(browser)
   await testOfflineLazyChunkReconnect(browser)
   await testHeroMotionImportFailure(browser)
@@ -156,6 +167,7 @@ async function testGuestHome(browserInstance) {
   await page.goto(`${BASE_URL}/`)
   await page.getByRole('heading', { name: 'Posterlytics', exact: true }).waitFor()
   assert.equal(new URL(page.url()).pathname, '/')
+  assert.equal(new URL(page.url()).searchParams.get('reason'), null)
   assert.equal(await page.getByRole('heading', { name: 'Campaigns' }).count(), 0)
 
   await context.close()
@@ -167,7 +179,8 @@ async function testAuthenticatedHome(browserInstance) {
     viewport: { width: 1440, height: 960 },
     reducedMotion: 'reduce',
   })
-  await installBackendMock(context, { authenticated: true })
+  const authState = { authenticated: true, expired: false }
+  await installBackendMock(context, authState)
   const page = await context.newPage()
   const pageErrors = []
   page.on('pageerror', (error) => pageErrors.push(error.message))
@@ -175,6 +188,101 @@ async function testAuthenticatedHome(browserInstance) {
   await page.goto(`${BASE_URL}/`)
   await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor()
   assert.equal(await page.getByRole('heading', { name: 'Posterlytics', exact: true }).count(), 0)
+  await page.evaluate(({ key, value }) => {
+    localStorage.setItem(key, value)
+  }, {
+    key: SESSION_EXPIRY_DRAFT_KEY,
+    value: SESSION_EXPIRY_DRAFT_VALUE,
+  })
+
+  authState.expired = true
+  const activityFailure = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/database/rpc/generation_activity'
+      && response.status() === 401
+  })
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await activityFailure
+
+  await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+  await page.getByText(SESSION_EXPIRY_NOTICE, { exact: true }).waitFor()
+  const expiredUrl = new URL(page.url())
+  assert.equal(expiredUrl.pathname, '/signin')
+  assert.equal(expiredUrl.searchParams.get('next'), '/')
+  assert.equal(expiredUrl.searchParams.get('reason'), 'session_expired')
+  assert.equal(
+    await page.locator('body').getByText(SESSION_EXPIRY_RAW_ERROR, {
+      exact: true,
+    }).count(),
+    0,
+  )
+  assert.equal(await page.getByText('AUTH_TOKEN_EXPIRED', { exact: true }).count(), 0)
+  assert.equal(await page.getByText(SESSION_EXPIRY_RPC_ERROR, { exact: true }).count(), 0)
+  assert.equal(await page.locator('.rail-avatar').count(), 0)
+  assert.equal(await page.getByRole('button', { name: 'Sign out' }).count(), 0)
+  assert.equal(
+    await page.evaluate((key) => localStorage.getItem(key), SESSION_EXPIRY_DRAFT_KEY),
+    SESSION_EXPIRY_DRAFT_VALUE,
+  )
+
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/campaigns/new')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await page.waitForFunction(() => {
+    const url = new URL(window.location.href)
+    return url.pathname === '/signin'
+      && url.searchParams.get('next') === '/campaigns/new'
+  })
+  const blockedUrl = new URL(page.url())
+  assert.equal(blockedUrl.pathname, '/signin')
+  assert.equal(blockedUrl.searchParams.get('next'), '/campaigns/new')
+  assert.deepEqual(pageErrors, [])
+
+  await context.close()
+}
+
+async function testColdLoadSessionExpiry(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1024, height: 768 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, {
+    authenticated: true,
+    expired: true,
+  })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.addInitScript(({ key, value }) => {
+    localStorage.setItem(key, value)
+  }, {
+    key: SESSION_EXPIRY_DRAFT_KEY,
+    value: SESSION_EXPIRY_DRAFT_VALUE,
+  })
+  const destination = '/campaigns/new?resume=website#source'
+
+  await page.goto(`${BASE_URL}${destination}`)
+  await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+  await page.getByText(SESSION_EXPIRY_NOTICE, { exact: true }).waitFor()
+
+  const expiredUrl = new URL(page.url())
+  assert.equal(expiredUrl.pathname, '/signin')
+  assert.equal(expiredUrl.searchParams.get('next'), destination)
+  assert.equal(expiredUrl.searchParams.get('reason'), 'session_expired')
+  assert.equal(
+    await page.evaluate((key) => localStorage.getItem(key), SESSION_EXPIRY_DRAFT_KEY),
+    SESSION_EXPIRY_DRAFT_VALUE,
+  )
+  assert.equal(
+    await page.locator('body').getByText(SESSION_EXPIRY_RAW_ERROR, {
+      exact: true,
+    }).count(),
+    0,
+  )
+  assert.equal(await page.locator('.rail-avatar').count(), 0)
+  assert.equal(await page.getByRole('button', { name: 'Sign out' }).count(), 0)
   assert.deepEqual(pageErrors, [])
 
   await context.close()
@@ -794,6 +902,7 @@ async function testProtectedReturnPath(browserInstance) {
   const signInUrl = new URL(page.url())
   assert.equal(signInUrl.pathname, '/signin')
   assert.equal(signInUrl.searchParams.get('next'), returnPath)
+  assert.equal(signInUrl.searchParams.get('reason'), null)
 
   await page.getByLabel('Email').fill('sample@posterlytics.test')
   await page.getByLabel('Password').fill('sample-password')
@@ -928,6 +1037,13 @@ async function installBackendMock(context, authState) {
     const path = new URL(request.url()).pathname
 
     if (path === '/api/auth/refresh') {
+      if (authState.expired) {
+        return json(route, {
+          error: 'AUTH_TOKEN_EXPIRED',
+          message: SESSION_EXPIRY_RAW_ERROR,
+          statusCode: 401,
+        }, 401)
+      }
       return json(route, authState.authenticated
         ? { accessToken: 'marketing-ui-access-token', user: fixtures.user }
         : { user: null })
@@ -944,6 +1060,7 @@ async function installBackendMock(context, authState) {
         return route.abort('internetdisconnected')
       }
       authState.authenticated = true
+      authState.expired = false
       return json(route, {
         accessToken: 'marketing-ui-access-token',
         user: fixtures.user,
@@ -984,6 +1101,13 @@ async function installBackendMock(context, authState) {
     }
 
     if (path === '/api/database/rpc/generation_activity') {
+      if (authState.expired) {
+        return json(route, {
+          error: 'AUTH_UNAUTHORIZED',
+          message: SESSION_EXPIRY_RPC_ERROR,
+          statusCode: 401,
+        }, 401)
+      }
       return json(route, {
         items: [],
         unread_count: 0,

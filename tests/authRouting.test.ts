@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   hasAuthHydrationSignal,
   parseAuthMode,
+  parseSignInReason,
   safeNextPath,
   shouldLoadSessionApp,
   signInPath,
@@ -13,6 +14,14 @@ test('auth mode accepts signup and defaults every other value to signin', () => 
   assert.equal(parseAuthMode('signin'), 'signin')
   assert.equal(parseAuthMode('SIGNUP'), 'signin')
   assert.equal(parseAuthMode(null), 'signin')
+})
+
+test('sign in reason accepts only the session expiry allowlist value', () => {
+  assert.equal(parseSignInReason('session_expired'), 'session_expired')
+  assert.equal(parseSignInReason('SESSION_EXPIRED'), null)
+  assert.equal(parseSignInReason('signed_out'), null)
+  assert.equal(parseSignInReason(''), null)
+  assert.equal(parseSignInReason(null), null)
 })
 
 test('safe next paths preserve internal path, query, and hash values', () => {
@@ -51,6 +60,32 @@ test('sign in paths encode the validated internal destination', () => {
     '/signin?mode=signup&next=%2Fcampaigns%2Fnew',
   )
   assert.equal(signInPath('https://example.com'), '/signin?next=%2F')
+})
+
+test('sign in paths append an optional reason after mode and encoded next', () => {
+  assert.equal(
+    signInPath(
+      '/campaigns/launch/analytics?range=30d#countries',
+      'signin',
+      'session_expired',
+    ),
+    '/signin?next=%2Fcampaigns%2Flaunch%2Fanalytics%3Frange%3D30d%23countries&reason=session_expired',
+  )
+  assert.equal(
+    signInPath('/campaigns/new', 'signup', 'session_expired'),
+    '/signin?mode=signup&next=%2Fcampaigns%2Fnew&reason=session_expired',
+  )
+})
+
+test('sign in paths without a reason remain byte-compatible', () => {
+  assert.equal(
+    signInPath('/campaigns/launch/placements?view=grid'),
+    '/signin?next=%2Fcampaigns%2Flaunch%2Fplacements%3Fview%3Dgrid',
+  )
+  assert.equal(
+    signInPath('/campaigns/new', 'signup'),
+    '/signin?mode=signup&next=%2Fcampaigns%2Fnew',
+  )
 })
 
 test('auth hydration runs only when a session or OAuth callback is present', () => {

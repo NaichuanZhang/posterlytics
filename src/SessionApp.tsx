@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthProvider'
 import { RequireAuth } from './auth/RequireAuth'
 import { FirstPaintLoadingShell } from './components/ui/FirstPaintLoadingShell'
@@ -7,6 +7,7 @@ import { Spinner } from './components/ui/Spinner'
 import { ToastProvider } from './components/ui/Toast'
 import { RouteFocusManager } from './components/RouteFocusManager'
 import { PublicLandingShell } from './marketing/PublicLandingShell'
+import { signInPath } from './lib/authRouting'
 
 const SignInPage = lazy(() =>
   import('./pages/SignInPage').then((module) => ({ default: module.SignInPage }))
@@ -39,13 +40,21 @@ const AuthenticatedActivityScope = lazy(
 )
 
 function HomeRoute() {
-  const { user, loading } = useAuth()
+  const { user, loading, signInReason } = useAuth()
   if (loading) return <Spinner full />
   if (user) {
     return (
       <AuthenticatedPage>
         <CampaignsListPage />
       </AuthenticatedPage>
+    )
+  }
+  if (signInReason === 'session_expired') {
+    return (
+      <Navigate
+        to={signInPath('/', 'signin', signInReason)}
+        replace
+      />
     )
   }
   return <PublicLandingShell />
