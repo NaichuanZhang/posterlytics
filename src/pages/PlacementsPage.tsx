@@ -181,7 +181,7 @@ export function PlacementsPage() {
         <EmptyState
           icon={<MapPin size={23} />}
           title={t('No placements')}
-          description={t('Add a channel above to mint its tracked QR and link.')}
+          description={t('Add a channel above to create its tracked QR and link.')}
         />
       ) : (
         <section className="placement-list" aria-label={t('Campaign placements')}>

@@ -46,7 +46,7 @@ export function AssetSelectionModeControl({
           onClick={() => onChange('yolo')}
         >
           <Bot size={13} aria-hidden="true" />
-          {t('Yolo')}
+          {t('Automatic')}
         </button>
       </div>
       <span id={editorDescriptionId} className="sr-only">{editorDescription}</span>

@@ -270,7 +270,7 @@ export function WebsiteCapturePreview({
             <div className="website-evidence-candidate-copy">
               <strong>{t('Captured image candidates')}</strong>
               <p>
-                {t('Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Yolo may omit or reorder images within the included set.')}
+                {t('Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Automatic may omit or reorder images within the included set.')}
               </p>
             </div>
           )}

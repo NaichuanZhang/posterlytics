@@ -1256,13 +1256,13 @@ async function testCampaignWizardPreference(browserInstance) {
   let mode = page.getByRole('group', { name: 'Asset selection mode' })
   assert.equal(await mode.getByRole('button', { name: 'Editor' }).getAttribute('aria-pressed'), 'true')
 
-  await mode.getByRole('button', { name: 'Yolo' }).click()
+  await mode.getByRole('button', { name: 'Automatic' }).click()
   await page.reload()
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
   await page.getByText('Local draft restored.', { exact: true }).waitFor()
   await page.locator('#product-url').waitFor()
   mode = page.getByRole('group', { name: 'Asset selection mode' })
-  assert.equal(await mode.getByRole('button', { name: 'Yolo' }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await mode.getByRole('button', { name: 'Automatic' }).getAttribute('aria-pressed'), 'true')
   await context.close()
 }
 
@@ -2131,7 +2131,7 @@ async function testBothEntryModes(browserInstance) {
   const mode = page.getByRole('group', { name: 'Asset selection mode' })
   assert.equal(await mode.getByRole('button', { name: 'Editor' }).getAttribute('aria-pressed'), 'true')
 
-  await mode.getByRole('button', { name: 'Yolo' }).click()
+  await mode.getByRole('button', { name: 'Automatic' }).click()
   await page.getByRole('button', { name: 'Generate version' }).click()
   await waitFor(() => state.enqueueModes.length === 1)
   assert.deepEqual(state.enqueueModes, ['yolo'])
@@ -2178,7 +2178,7 @@ async function submitWizardAndWaitForEnqueue(page, state, expectedRequestCount) 
 
 async function assertModeTooltipBehavior(page, mode, container, action) {
   const editor = mode.getByRole('button', { name: 'Editor' })
-  const yolo = mode.getByRole('button', { name: 'Yolo' })
+  const yolo = mode.getByRole('button', { name: 'Automatic' })
   const editorDescriptionId = await assertModeDescription(editor, EDITOR_MODE_DESCRIPTION)
   const yoloDescriptionId = await assertModeDescription(yolo, YOLO_MODE_DESCRIPTION)
   assert.notEqual(editorDescriptionId, yoloDescriptionId)

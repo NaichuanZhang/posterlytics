@@ -315,7 +315,7 @@ export function GenerationAssetReviewPage() {
           </section>
         ) : generation.asset_selection_mode !== 'editor' ? (
           <InlineNotice tone="warning">
-            {t('This generation uses Yolo asset selection and cannot be edited.')}
+            {t('This generation uses Automatic asset selection and cannot be edited.')}
           </InlineNotice>
         ) : generation.asset_selection_status === 'completed' ? (
           <InlineNotice tone="success">
