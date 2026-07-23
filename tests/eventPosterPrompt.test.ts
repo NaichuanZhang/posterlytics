@@ -3,6 +3,9 @@ import { test } from 'node:test'
 import { buildEventPrompt } from '../functions/hero.ts'
 import { getPosterSize } from '../src/lib/posterSize.ts'
 
+const TEXT_BEARING_PAINTER_ARTIFACT_EXCLUSION =
+  'PAINTER ARTIFACT EXCLUSION: Do not paint decorative emoji, emoticons, or pictographs. Do not render placeholder or slot-label words such as "Logo", "Headline", or "CTA"; do not add a brand name as unquoted text or append "Logo" to a brand name. These items may appear only when they occur verbatim inside an exact quoted string below.'
+
 const EVENT = {
   product_name: 'Founders Mixer',
   brand_essence: 'An energetic founder community',
@@ -21,6 +24,16 @@ const EVENT = {
     location_line: 'The Grand Hall - San Francisco',
   },
 }
+
+test('event prompt includes the exact painter artifact exclusion', () => {
+  const prompt = buildEventPrompt(EVENT)
+
+  assert.ok(prompt.includes(TEXT_BEARING_PAINTER_ARTIFACT_EXCLUSION))
+  assert.ok(
+    prompt.indexOf(TEXT_BEARING_PAINTER_ARTIFACT_EXCLUSION)
+      < prompt.indexOf('Arrange it top to bottom'),
+  )
+})
 
 test('scaled event prompt leaves authoritative logistics for the external footer', () => {
   const prompt = buildEventPrompt(EVENT, false, getPosterSize('a4_2x3'))

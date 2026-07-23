@@ -37,6 +37,13 @@ test('replacePainterHexColors replaces 3, 6, and 8 digit colors completely', () 
   assert.doesNotMatch(replaced, /charcoal88/)
 })
 
+test('replacePainterHexColors consumes 4 digit RGBA colors completely', () => {
+  const replaced = replacePainterHexColors('#abcd')
+
+  assert.equal(replaced, 'silver')
+  assert.doesNotMatch(replaced, /[#d]/i)
+})
+
 test('replacePainterHexColors leaves non-color hash text alone', () => {
   assert.equal(
     replacePainterHexColors('Use #launch_day and issue#123 in the caption.'),

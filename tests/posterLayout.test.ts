@@ -17,6 +17,8 @@ import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
 import { buildPosterPrompt } from '../functions/hero.ts'
 
 const PALETTE = { bg: '#0b1020', text: '#e8ecf5', primary: '#3b82f6', accent: '#f97316' }
+const TEXT_BEARING_PAINTER_ARTIFACT_EXCLUSION =
+  'PAINTER ARTIFACT EXCLUSION: Do not paint decorative emoji, emoticons, or pictographs. Do not render placeholder or slot-label words such as "Logo", "Headline", or "CTA"; do not add a brand name as unquoted text or append "Logo" to a brand name. These items may appear only when they occur verbatim inside an exact quoted string below.'
 
 test('normalizePosterLayout fills defaults from palette when fields are missing', () => {
   const l = normalizePosterLayout({}, PALETTE)
@@ -134,6 +136,29 @@ test('compileLayoutPrompt orders zones top→lower regardless of input order', (
   const iLower = prompt.indexOf('Start free today')
   assert.ok(iTop > -1 && iUpper > -1 && iLower > -1)
   assert.ok(iTop < iUpper && iUpper < iLower, 'top must come before upper before lower')
+})
+
+test('product and social prompts include the exact painter artifact exclusion', () => {
+  const prompts = [
+    compileLayoutPrompt(
+      LAYOUT,
+      { product: 'Acme', essence: 'a crisp blue data brand' },
+    ),
+    compileLayoutPrompt(
+      LAYOUT,
+      { product: 'Acme', essence: 'a crisp blue data brand' },
+      getPosterSize('yt_thumb_16x9'),
+      resolveProductUseCaseRecipe('social_cover'),
+    ),
+  ]
+
+  for (const prompt of prompts) {
+    assert.ok(prompt.includes(TEXT_BEARING_PAINTER_ARTIFACT_EXCLUSION))
+    assert.ok(
+      prompt.indexOf(TEXT_BEARING_PAINTER_ARTIFACT_EXCLUSION)
+        < prompt.indexOf('Arrange the poster top to bottom'),
+    )
+  }
 })
 
 for (const size of POSTER_SIZES) {

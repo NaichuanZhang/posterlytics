@@ -76,11 +76,15 @@ export function colorNameForHex(value: unknown, fallback: string): string {
 
 // Match the longest CSS hex forms first so an alpha suffix is consumed, not leaked.
 const PAINTER_HEX =
-  /(^|[^\p{L}\p{N}_])#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})(?![\p{L}\p{N}_])/giu;
+  /(^|[^\p{L}\p{N}_])#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![\p{L}\p{N}_])/giu;
 
 export function replacePainterHexColors(text: string): string {
   return text.replace(PAINTER_HEX, (_match, prefix: string, digits: string) => {
-    const opaqueHex = digits.length === 8 ? digits.slice(0, 6) : digits;
+    const opaqueHex = digits.length === 8
+      ? digits.slice(0, 6)
+      : digits.length === 4
+        ? digits.slice(0, 3)
+        : digits;
     return `${prefix}${colorNameForHex(`#${opaqueHex}`, 'source-matched color')}`;
   });
 }

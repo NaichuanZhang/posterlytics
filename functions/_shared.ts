@@ -2137,6 +2137,17 @@ export function buildParentContextPrompt(args: {
 // proven conventions: registered framing, brand-honoring, "render only these
 // exact quoted strings", and an Avoid list. The artwork fills the complete frame;
 // the descriptor decides whether the SPA adds a QR footer outside it.
+export function painterArtifactExclusion(
+  mode: 'exact-quoted-only' | 'no-text',
+): string {
+  const sharedClause =
+    'PAINTER ARTIFACT EXCLUSION: Do not paint decorative emoji, emoticons, or pictographs. Do not render placeholder or slot-label words such as "Logo", "Headline", or "CTA"; do not add a brand name as unquoted text or append "Logo" to a brand name.';
+  const suffix = mode === 'exact-quoted-only'
+    ? 'These items may appear only when they occur verbatim inside an exact quoted string below.'
+    : 'This text-free background has no exception.';
+  return `${sharedClause} ${suffix}`;
+}
+
 export function productPosterActionInstructions(
   posterSize: PosterSize,
   recipe: ProductUseCaseRecipe = resolveProductUseCaseRecipe(undefined),
@@ -2261,6 +2272,8 @@ ${recipe.stages.heroIdentityRule}
 ${ctx.essence || ctx.product}
 
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings listed below, and they must all be in ENGLISH. Do NOT print any of the layout/section descriptions, role names, position words, or instruction words as visible text — those are directions, not content.
+
+${painterArtifactExclusion('exact-quoted-only')}
 
 Arrange the poster top to bottom using these zones — together they fill the complete frame:
 `;

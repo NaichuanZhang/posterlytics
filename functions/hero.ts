@@ -16,6 +16,7 @@ import {
   loadFrozenGenerationImageReferences,
   logPipelineEvent,
   markGenerationFailed,
+  painterArtifactExclusion,
   prepareImageReferences,
   recordGenerationAssetProviderSkips,
   resolvedImageModelId,
@@ -746,6 +747,8 @@ this palette plus neutrals. If the brand is monochrome, add tasteful ${accentNam
 ${logoLine}
 CRITICAL: the ONLY words rendered anywhere on the poster are the exact quoted strings below, all in ENGLISH. Do NOT
 print any layout/section descriptions, position words, or instruction words as visible text.
+
+${painterArtifactExclusion('exact-quoted-only')}
 `;
 
   const quotedZones = `

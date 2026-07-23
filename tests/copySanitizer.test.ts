@@ -69,9 +69,15 @@ test('sanitizeModelCopy protects embedded doubled source names', () => {
 })
 
 test('sanitizeModelCopy collapses genuine adjacent Latin duplication', () => {
-  assert.equal(sanitizeModelCopy('Fast Fast checkout'), 'Fast checkout')
-  assert.equal(sanitizeModelCopy('Very Fast Fast checkout'), 'Very Fast checkout')
-  assert.equal(sanitizeModelCopy('Fast Fast Fast checkout'), 'Fast checkout')
+  assert.equal(sanitizeModelCopy('fast fast checkout'), 'fast checkout')
+  assert.equal(sanitizeModelCopy('very fast fast checkout'), 'very fast checkout')
+  assert.equal(sanitizeModelCopy('fast fast fast checkout'), 'fast checkout')
+})
+
+test('sanitizeModelCopy preserves unsourced proper-name and all-caps pairs', () => {
+  assert.equal(sanitizeModelCopy('Bora Bora escapes'), 'Bora Bora escapes')
+  assert.equal(sanitizeModelCopy('Duran Duran plays'), 'Duran Duran plays')
+  assert.equal(sanitizeModelCopy('API API'), 'API API')
 })
 
 test('sanitizeModelCopy collapses repeated separators and trims trailing ones', () => {
@@ -86,9 +92,17 @@ test('sanitizeModelCopy preserves CJK-adjacent punctuation', () => {
     sanitizeModelCopy('秋日限定——现磨咖啡'),
     '秋日限定——现磨咖啡',
   )
+  assert.equal(sanitizeModelCopy('值得一试—'), '值得一试—')
   assert.equal(sanitizeModelCopy('值得一试——'), '值得一试——')
   assert.equal(sanitizeModelCopy('乔治·华盛顿'), '乔治·华盛顿')
   assert.equal(sanitizeModelCopy('好看·好用·好价'), '好看·好用·好价')
+})
+
+test('sanitizeModelCopy trims non-CJK and impure trailing separators', () => {
+  assert.equal(sanitizeModelCopy('Worth a try—'), 'Worth a try')
+  assert.equal(sanitizeModelCopy('Worth a try·'), 'Worth a try')
+  assert.equal(sanitizeModelCopy('Worth a try|'), 'Worth a try')
+  assert.equal(sanitizeModelCopy('值得一试—|'), '值得一试')
 })
 
 const PLACEHOLDERS = [
@@ -141,14 +155,63 @@ test('sanitizeModelCopy rejects sole-content placeholders after NFKC', () => {
   assert.equal(sanitizeModelCopy('Learn more'), 'Learn more')
 })
 
+test('sanitizeModelCopy allows only sourced actionable CTA placeholders', () => {
+  assert.equal(
+    sanitizeModelCopy('Sign Up', 280, {
+      verbatimTexts: ['Use a Sign Up CTA'],
+    }),
+    'Sign Up',
+  )
+  assert.equal(sanitizeModelCopy('Sign Up'), '')
+  assert.equal(
+    sanitizeModelCopy('Get Started', 280, {
+      verbatimTexts: ['The button should say Get Started today'],
+    }),
+    'Get Started',
+  )
+  assert.equal(sanitizeModelCopy('Get Started'), '')
+
+  for (const source of ['signup', 'assign up', 'sign upper']) {
+    assert.equal(
+      sanitizeModelCopy('Sign Up', 280, { verbatimTexts: [source] }),
+      '',
+      `expected token boundaries to reject source ${source}`,
+    )
+  }
+  assert.equal(
+    sanitizeModelCopy('[Sign Up]', 280, {
+      verbatimTexts: ['Use a Sign Up CTA'],
+    }),
+    '',
+  )
+  assert.equal(
+    sanitizeModelCopy('{Get Started}', 280, {
+      verbatimTexts: ['Use Get Started as the CTA'],
+    }),
+    '',
+  )
+})
+
+test('sanitizeModelCopy rejects sourced structural placeholders', () => {
+  for (const placeholder of ['Headline', 'Logo', 'TBD', 'CTA']) {
+    assert.equal(
+      sanitizeModelCopy(placeholder, 280, {
+        verbatimTexts: [placeholder, `Use ${placeholder} in the source`],
+      }),
+      '',
+      `expected structural placeholder rejection for ${placeholder}`,
+    )
+  }
+})
+
 test('sanitizeModelCopyList drops rejected items and bounds each item', () => {
   assert.deepEqual(
     sanitizeModelCopyList(
-      ['[headline]', 'Ready 🚀', 'Fast Fast setup', 'Third item'],
+      ['[headline]', 'Ready 🚀', 'fast fast setup', 'Third item'],
       3,
       10,
     ),
-    ['Ready', 'Fast setup', 'Third item'],
+    ['Ready', 'fast setup', 'Third item'],
   )
 })
 

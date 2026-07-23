@@ -6,6 +6,7 @@ import {
 } from '../src/lib/redNotePost.ts';
 import {
   normalizeStyleProfile,
+  painterArtifactExclusion,
   type NormalizedStyleProfile,
   type PosterLayout,
 } from './_shared.ts';
@@ -157,6 +158,8 @@ Use the palette as area fills and image color direction: background ${colorNameF
 Attached references are visual evidence only. Use their mood, imagery, lighting, texture, palette, motifs, and composition without copying any visible writing or identity marks.
 
 ABSOLUTE TEXT EXCLUSION: render no letters, words, numbers, punctuation, symbols, captions, logos, wordmarks, watermarks, signatures, labels, UI, buttons, badges, QR codes, barcodes, faux typography, or text-like glyphs anywhere. Do not imitate writing in any language. Remove or abstract any writing visible in references.
+
+${painterArtifactExclusion('no-text')}
 
 High quality, sharp, cohesive, professional editorial background. The result must remain useful behind programmatically composited DOM text.`,
   );

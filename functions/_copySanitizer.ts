@@ -5,7 +5,12 @@ export interface ModelCopyPolicy {
 
 const DEFAULT_MAX_CODE_POINTS = 280;
 
-const PLACEHOLDER_WORDS = new Set([
+const SOURCEABLE_CTA = new Set([
+  'sign up',
+  'get started',
+]);
+
+const STRUCTURAL_PLACEHOLDERS = new Set([
   'body',
   'body copy',
   'brand logo',
@@ -19,13 +24,11 @@ const PLACEHOLDER_WORDS = new Set([
   'description',
   'feature',
   'features',
-  'get started',
   'headline',
   'insert headline',
   'logo',
   'placeholder',
   'product name',
-  'sign up',
   'subhead',
   'subheadline',
   'subtitle',
@@ -36,6 +39,17 @@ const PLACEHOLDER_WORDS = new Set([
   'todo',
   'your headline',
   'your logo',
+]);
+
+const SOURCEABLE_CTA_PATTERNS = new Map([
+  [
+    'sign up',
+    /(?:^|[^\p{L}\p{N}_])sign\s+up(?=$|[^\p{L}\p{N}_])/iu,
+  ],
+  [
+    'get started',
+    /(?:^|[^\p{L}\p{N}_])get\s+started(?=$|[^\p{L}\p{N}_])/iu,
+  ],
 ]);
 
 const CJK_CHARACTER =
@@ -66,10 +80,10 @@ export function sanitizeModelCopy(
   if (!normalized) return '';
 
   const protectedTexts = normalizedPolicyTexts(policy.verbatimTexts);
+  if (isSolePlaceholder(normalized, protectedTexts)) return '';
   if (protectedTexts.has(normalized)) {
     return finalizeBoundedCopy(normalized, maxCodePoints);
   }
-  if (isSolePlaceholder(normalized)) return '';
 
   const allowedEmoji = collectAllowedEmoji(policy.emojiSourceTexts);
   let sanitized = normalized.replace(
@@ -79,9 +93,9 @@ export function sanitizeModelCopy(
   sanitized = collapseAdjacentLatinDuplicates(sanitized, protectedTexts);
   sanitized = collapseSeparators(sanitized);
   sanitized = sanitized.replace(/[ \t]{2,}/g, ' ').trim().normalize('NFC');
-  if (!sanitized || isSolePlaceholder(sanitized)) return '';
+  if (!sanitized || isSolePlaceholder(sanitized, protectedTexts)) return '';
   sanitized = finalizeBoundedCopy(sanitized, maxCodePoints);
-  if (!sanitized || isSolePlaceholder(sanitized)) return '';
+  if (!sanitized || isSolePlaceholder(sanitized, protectedTexts)) return '';
   return sanitized;
 }
 
@@ -145,8 +159,12 @@ function collapseAdjacentLatinDuplicates(
   while (true) {
     const next = result.replace(
       ADJACENT_LATIN_DUPLICATE,
-      (doubled, word: string) =>
-        protectedPairs.has(caseFold(`${word} ${word}`)) ? doubled : word,
+      (doubled, word: string) => {
+        if (protectedPairs.has(caseFold(`${word} ${word}`))) return doubled;
+        return /\p{Ll}/u.test(doubled) && !/[\p{Lu}\p{Lt}]/u.test(doubled)
+          ? word
+          : doubled;
+      },
     );
     if (next === result) return result;
     result = next;
@@ -158,7 +176,7 @@ function caseFold(value: string): string {
 }
 
 function collapseSeparators(value: string): string {
-  const collapsed = value.replace(
+  const collapsed = trimTrailingSeparators(value).replace(
     /(?:\s*([·|—])\s*)(?:[·|—]\s*)+/gu,
     (match: string, separator: string, offset: number, source: string) =>
       isCjkAdjacentEmDashRun(match, offset, source)
@@ -185,7 +203,7 @@ function isCjkAdjacentEmDashRun(
     (character) => character === '·' || character === '|' || character === '—',
   );
   if (
-    separators.length < 2 ||
+    separators.length < 1 ||
     separators.some((separator) => separator !== '—')
   ) {
     return false;
@@ -203,8 +221,12 @@ function isCjkCharacter(value: string | undefined): boolean {
   return value !== undefined && CJK_CHARACTER.test(value);
 }
 
-function isSolePlaceholder(value: string): boolean {
+function isSolePlaceholder(
+  value: string,
+  protectedTexts: ReadonlySet<string>,
+): boolean {
   let candidate = value.normalize('NFKC').trim().replace(/\s+/g, ' ');
+  let wrapped = false;
   const wrappers: Record<string, string> = {
     '[': ']',
     '{': '}',
@@ -215,13 +237,26 @@ function isSolePlaceholder(value: string): boolean {
     candidate.length >= 2 &&
     wrappers[candidate[0]] === candidate[candidate.length - 1]
   ) {
+    wrapped = true;
     candidate = candidate.slice(1, -1).trim();
   }
   const folded = candidate
     .toLocaleLowerCase('en-US')
     .replace(/[.!?]+$/u, '')
     .trim();
-  return PLACEHOLDER_WORDS.has(folded) || /^lorem ipsum(?:\b[\p{L}\s,.;:'"-]*)?$/iu.test(folded);
+  if (
+    STRUCTURAL_PLACEHOLDERS.has(folded) ||
+    /^lorem ipsum(?:\b[\p{L}\s,.;:'"-]*)?$/iu.test(folded)
+  ) {
+    return true;
+  }
+  if (!SOURCEABLE_CTA.has(folded)) return false;
+  if (wrapped) return true;
+
+  const matcher = SOURCEABLE_CTA_PATTERNS.get(folded);
+  return !matcher || !Array.from(protectedTexts).some(
+    (source) => matcher.test(source.normalize('NFKC')),
+  );
 }
 
 function boundCodePoints(value: string, maxCodePoints: number): string {

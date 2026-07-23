@@ -7,6 +7,9 @@ import {
   hasCompatibleRedNoteBackgroundParent,
 } from '../functions/_redNoteBackground.ts'
 
+const NO_TEXT_PAINTER_ARTIFACT_EXCLUSION =
+  'PAINTER ARTIFACT EXCLUSION: Do not paint decorative emoji, emoticons, or pictographs. Do not render placeholder or slot-label words such as "Logo", "Headline", or "CTA"; do not add a brand name as unquoted text or append "Logo" to a brand name. This text-free background has no exception.'
+
 const posterContent = {
   headline: 'Forbidden projected title',
   rednote_post: {
@@ -97,6 +100,11 @@ test('background prompt excludes every plan/campaign string and bans all glyphs'
   assert.match(prompt, /logos, wordmarks, watermarks/)
   assert.match(prompt, /faux typography, or text-like glyphs/)
   assert.match(prompt, /Do not imitate writing in any language/)
+  assert.ok(prompt.includes(NO_TEXT_PAINTER_ARTIFACT_EXCLUSION))
+  assert.ok(
+    prompt.indexOf('ABSOLUTE TEXT EXCLUSION')
+      < prompt.indexOf(NO_TEXT_PAINTER_ARTIFACT_EXCLUSION),
+  )
 })
 
 test('background generation rejects missing contracts before image generation', () => {
