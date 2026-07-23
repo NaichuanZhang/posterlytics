@@ -57,6 +57,13 @@ export interface RedNoteRenderPalette {
   coverScrim: string
 }
 
+const DARK_COVER_TEXT = '#111111' as const
+const LIGHT_COVER_TEXT = '#ffffff' as const
+const COVER_TEXT_MINIMUM_CONTRAST = 4.5
+const COVER_SCRIM_MID_STOP = 34
+const COVER_SCRIM_TEXT_BAND_STOP = 50
+const COVER_SCRIM_END_STOP = 100
+
 export function resolveRedNoteRenderState(
   input: RedNoteRenderInput,
 ): RedNoteRenderState {
@@ -119,6 +126,50 @@ export function getRedNotePageRenderModel(
       }
 }
 
+export function resolveRedNoteCoverContrast(
+  background: string,
+): {
+  text: typeof DARK_COVER_TEXT | typeof LIGHT_COVER_TEXT
+  scrim: RGB
+  textBandAlpha: number
+} {
+  const backgroundRgb = parseColor(
+    normalizedColor(background, '#f4f5f1'),
+  ) ?? [244, 245, 241]
+  const darkText: RGB = [17, 17, 17]
+  const lightText: RGB = [255, 255, 255]
+  const text = contrastRatio(darkText, backgroundRgb)
+      >= contrastRatio(lightText, backgroundRgb)
+    ? DARK_COVER_TEXT
+    : LIGHT_COVER_TEXT
+  const textRgb = text === LIGHT_COVER_TEXT ? lightText : darkText
+  const scrim: RGB = text === LIGHT_COVER_TEXT
+    ? [0, 0, 0]
+    : [255, 255, 255]
+  // The opposite extreme bounds contrast for every possible underlying pixel.
+  const adversePixel: RGB = text === LIGHT_COVER_TEXT
+    ? [255, 255, 255]
+    : [0, 0, 0]
+  const requiredAlpha = minimumScrimAlpha(
+    textRgb,
+    scrim,
+    [backgroundRgb, adversePixel],
+  )
+  const legacyAlpha = legacyCoverScrimAlpha(text)
+  const legacyTextBandAlpha = legacyAlpha.mid
+    + (legacyAlpha.end - legacyAlpha.mid)
+      * (
+        (COVER_SCRIM_TEXT_BAND_STOP - COVER_SCRIM_MID_STOP)
+        / (COVER_SCRIM_END_STOP - COVER_SCRIM_MID_STOP)
+      )
+
+  return {
+    text,
+    scrim,
+    textBandAlpha: Math.max(requiredAlpha, legacyTextBandAlpha),
+  }
+}
+
 export function resolveRedNotePalette(
   layout: PosterLayout | null | undefined,
 ): RedNoteRenderPalette {
@@ -133,19 +184,22 @@ export function resolveRedNotePalette(
     text,
     3,
   )
-  const preferredCoverText = normalizedColor(roles?.text, '#ffffff')
-  const coverTextIsLight = luminance(parseColor(preferredCoverText) ?? [255, 255, 255]) >= 0.5
-  const coverText = coverTextIsLight ? '#ffffff' : '#111111'
+  const cover = resolveRedNoteCoverContrast(background)
+  const scrimChannels = cover.scrim.join(',')
+  const legacyAlpha = legacyCoverScrimAlpha(cover.text)
+  const endAlpha = Math.max(legacyAlpha.end, cover.textBandAlpha)
 
   return {
     background,
     panel,
     text,
     accent,
-    coverText,
-    coverScrim: coverTextIsLight
-      ? 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.22) 34%, rgba(0,0,0,0.78) 100%)'
-      : 'linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.3) 34%, rgba(255,255,255,0.9) 100%)',
+    coverText: cover.text,
+    coverScrim:
+      `linear-gradient(180deg, rgba(${scrimChannels},0) 0%, `
+      + `rgba(${scrimChannels},${legacyAlpha.mid}) ${COVER_SCRIM_MID_STOP}%, `
+      + `rgba(${scrimChannels},${cover.textBandAlpha}) ${COVER_SCRIM_TEXT_BAND_STOP}%, `
+      + `rgba(${scrimChannels},${endAlpha}) ${COVER_SCRIM_END_STOP}%)`,
   }
 }
 
@@ -180,6 +234,36 @@ export function contrastRatio(foreground: RGB, background: RGB): number {
   const lighter = Math.max(luminance(foreground), luminance(background))
   const darker = Math.min(luminance(foreground), luminance(background))
   return (lighter + 0.05) / (darker + 0.05)
+}
+
+function minimumScrimAlpha(
+  text: RGB,
+  scrim: RGB,
+  backgroundPixels: readonly RGB[],
+): number {
+  for (let percent = 0; percent <= 100; percent += 1) {
+    const alpha = percent / 100
+    const allPixelsPass = backgroundPixels.every((pixel) =>
+      contrastRatio(text, compositeScrim(scrim, pixel, alpha))
+        >= COVER_TEXT_MINIMUM_CONTRAST
+    )
+    if (allPixelsPass) return alpha
+  }
+  return 1
+}
+
+function legacyCoverScrimAlpha(
+  text: typeof DARK_COVER_TEXT | typeof LIGHT_COVER_TEXT,
+): { mid: number; end: number } {
+  return text === LIGHT_COVER_TEXT
+    ? { mid: 0.22, end: 0.78 }
+    : { mid: 0.3, end: 0.9 }
+}
+
+function compositeScrim(scrim: RGB, pixel: RGB, alpha: number): RGB {
+  return pixel.map((channel, index) =>
+    scrim[index] * alpha + channel * (1 - alpha)
+  ) as RGB
 }
 
 export function redNoteCodePointLength(value: string): number {

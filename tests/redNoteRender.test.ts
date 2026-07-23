@@ -7,12 +7,13 @@ import {
   contrastRatio,
   getRedNotePageRenderModel,
   redNoteCodePointLength,
+  resolveRedNoteCoverContrast,
   resolveRedNotePalette,
   resolveRedNoteRenderState,
 } from '../src/lib/redNoteRender.ts'
 import type { RedNotePostPlan } from '../src/lib/redNotePost.ts'
 import type { PosterLayout } from '../src/lib/types.ts'
-import { parseColor } from '../src/lib/colorUtils.ts'
+import { parseColor, type RGB } from '../src/lib/colorUtils.ts'
 
 const plan: RedNotePostPlan = {
   schema_version: 1,
@@ -44,6 +45,12 @@ const layout: PosterLayout = {
   },
   zones: [],
 }
+
+const LIGHT_BACKGROUND = '#f7f4ed'
+const DARK_BACKGROUND = '#152238'
+const BLACK: RGB = [0, 0, 0]
+const WHITE: RGB = [255, 255, 255]
+const DARK_TEXT: RGB = [17, 17, 17]
 
 test('render-state resolution isolates legacy, composite, and invalid marked rows', () => {
   assert.equal(resolveRedNoteRenderState({
@@ -193,16 +200,181 @@ test('contrast helpers retain compliant colors and choose a readable fallback', 
 
   const palette = resolveRedNotePalette(layout)
   assert.equal(palette.text, '#111111')
-  assert.equal(palette.coverText, '#ffffff')
-  assert.match(palette.coverScrim, /rgba\(0,0,0,0\.78\)/)
+})
 
-  const darkCover = resolveRedNotePalette({
+test('light backgrounds use dark cover text and an AA-safe white scrim', () => {
+  const palette = resolveRedNotePalette(layout)
+  const cover = resolveRedNoteCoverContrast(LIGHT_BACKGROUND)
+
+  assert.equal(palette.coverText, '#111111')
+  assert.equal(
+    palette.coverScrim,
+    'linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.3) 34%, rgba(255,255,255,0.49) 50%, rgba(255,255,255,0.9) 100%)',
+  )
+  assert.deepEqual(cover.scrim, WHITE)
+  assert.equal(cover.textBandAlpha, 0.49)
+  assertCoverContrastAtLeastAa(cover, [
+    colorOf(LIGHT_BACKGROUND),
+    BLACK,
+    WHITE,
+  ])
+  assert.ok(
+    renderedContrast(DARK_TEXT, WHITE, BLACK, 0.48) < 4.5,
+    'the preceding alpha step must remain below AA',
+  )
+})
+
+test('dark backgrounds use light cover text and an AA-safe black scrim', () => {
+  const darkBackgroundLayout: PosterLayout = {
     ...layout,
     palette_roles: {
       ...layout.palette_roles,
-      text: '#152238',
+      bg: DARK_BACKGROUND,
+    },
+  }
+  const palette = resolveRedNotePalette(darkBackgroundLayout)
+  const cover = resolveRedNoteCoverContrast(DARK_BACKGROUND)
+
+  assert.equal(palette.coverText, '#ffffff')
+  assert.equal(
+    palette.coverScrim,
+    'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.22) 34%, rgba(0,0,0,0.54) 50%, rgba(0,0,0,0.78) 100%)',
+  )
+  assert.deepEqual(cover.scrim, BLACK)
+  assert.equal(cover.textBandAlpha, 0.54)
+  assertCoverContrastAtLeastAa(cover, [
+    colorOf(DARK_BACKGROUND),
+    BLACK,
+    WHITE,
+  ])
+  assert.ok(
+    renderedContrast(WHITE, BLACK, WHITE, 0.53) < 4.5,
+    'the preceding alpha step must remain below AA',
+  )
+})
+
+test('background stays authoritative over palette proportions', () => {
+  const palette = resolveRedNotePalette({
+    ...layout,
+    palette_roles: {
+      ...layout.palette_roles,
+      proportions: [{ color: DARK_BACKGROUND, proportion: 1 }],
     },
   })
-  assert.equal(darkCover.coverText, '#111111')
-  assert.match(darkCover.coverScrim, /rgba\(255,255,255,0\.9\)/)
+
+  assert.equal(palette.coverText, '#111111')
+  assert.match(palette.coverScrim, /rgba\(255,255,255,0\.49\) 50%/)
 })
+
+test('invalid cover backgrounds use the deterministic light fallback', () => {
+  const cover = resolveRedNoteCoverContrast('not-a-color')
+  const palette = resolveRedNotePalette({
+    ...layout,
+    palette_roles: {
+      ...layout.palette_roles,
+      bg: 'not-a-color',
+    },
+  })
+
+  assert.equal(palette.background, '#f4f5f1')
+  assert.equal(palette.coverText, '#111111')
+  assert.equal(cover.text, '#111111')
+  assert.deepEqual(cover.scrim, WHITE)
+  assert.equal(cover.textBandAlpha, 0.49)
+})
+
+test('cover contrast is never worse than the legacy ramp', () => {
+  const cases = [
+    {
+      label: 'light background and light legacy text',
+      background: LIGHT_BACKGROUND,
+      legacyLightText: true,
+    },
+    {
+      label: 'light background and dark legacy text',
+      background: LIGHT_BACKGROUND,
+      legacyLightText: false,
+    },
+    {
+      label: 'dark background and light legacy text',
+      background: DARK_BACKGROUND,
+      legacyLightText: true,
+    },
+    {
+      label: 'dark background and dark legacy text',
+      background: DARK_BACKGROUND,
+      legacyLightText: false,
+    },
+  ] as const
+
+  for (const fixture of cases) {
+    const background = colorOf(fixture.background)
+    const cover = resolveRedNoteCoverContrast(fixture.background)
+    const text = colorOf(cover.text)
+    const endAlpha = cover.text === '#ffffff' ? 0.78 : 0.9
+
+    for (const stop of [50, 100] as const) {
+      const newAlpha = stop === 50 ? cover.textBandAlpha : endAlpha
+      const nextContrast = renderedContrast(
+        text,
+        cover.scrim,
+        background,
+        newAlpha,
+      )
+      const previousContrast = legacyCoverContrast(
+        background,
+        fixture.legacyLightText,
+        stop,
+      )
+      assert.ok(
+        nextContrast >= previousContrast,
+        `${fixture.label} regressed at ${stop}%: ${nextContrast} < ${previousContrast}`,
+      )
+    }
+  }
+})
+
+function assertCoverContrastAtLeastAa(
+  cover: ReturnType<typeof resolveRedNoteCoverContrast>,
+  pixels: readonly RGB[],
+): void {
+  const text = colorOf(cover.text)
+  for (const pixel of pixels) {
+    assert.ok(
+      renderedContrast(text, cover.scrim, pixel, cover.textBandAlpha) >= 4.5,
+    )
+  }
+}
+
+function legacyCoverContrast(
+  background: RGB,
+  usesLightText: boolean,
+  stop: 50 | 100,
+): number {
+  const text = usesLightText ? WHITE : DARK_TEXT
+  const scrim = usesLightText ? BLACK : WHITE
+  const midAlpha = usesLightText ? 0.22 : 0.3
+  const endAlpha = usesLightText ? 0.78 : 0.9
+  const alpha = stop === 100
+    ? endAlpha
+    : midAlpha + (endAlpha - midAlpha) * ((stop - 34) / (100 - 34))
+  return renderedContrast(text, scrim, background, alpha)
+}
+
+function renderedContrast(
+  text: RGB,
+  scrim: RGB,
+  pixel: RGB,
+  alpha: number,
+): number {
+  const composited = pixel.map((channel, index) =>
+    scrim[index] * alpha + channel * (1 - alpha)
+  ) as RGB
+  return contrastRatio(text, composited)
+}
+
+function colorOf(value: string): RGB {
+  const color = parseColor(value)
+  if (!color) throw new TypeError(`Expected a valid color, received ${value}.`)
+  return color
+}
