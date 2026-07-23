@@ -174,7 +174,6 @@ export function PosterExportButton({
       height: posterSize.sheet.height,
       pixelRatio: posterSize.export.pixelRatio,
       cacheBust: true,
-      skipFonts: true,
     })
   }
 

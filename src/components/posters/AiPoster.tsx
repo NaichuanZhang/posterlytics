@@ -279,10 +279,24 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           {/* Footer copy. For events: RSVP label + the real date/time/location/host
               lines (accurate, composited — never AI-painted). For products: the
               CTA caption + a "point your camera" nudge. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: scaled(isEvent ? 5 : 8), minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              flex: '1 1 0',
+              flexDirection: 'column',
+              gap: scaled(isEvent ? 5 : 8),
+              minWidth: 0,
+            }}
+          >
             <span
               data-poster-footer-primary
               style={{
+                display: 'block',
+                width: '100%',
+                minWidth: 0,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
                 fontSize: scaled(isEvent ? 36 : 44),
                 fontWeight: 800,
                 lineHeight: 1.05,
@@ -309,7 +323,18 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             ) : (
               <span
                 data-poster-footer-secondary
-                style={{ fontSize: scaled(26), fontWeight: 500, lineHeight: 1.2, color: footerTextDim }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  minWidth: 0,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  fontSize: scaled(26),
+                  fontWeight: 500,
+                  lineHeight: 1.2,
+                  color: footerTextDim,
+                }}
               >
                 Point your camera here
               </span>

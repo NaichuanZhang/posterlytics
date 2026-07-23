@@ -61,6 +61,7 @@ try {
   await testPosterTranscriptVersionSwitch(browser)
   await testSocialCoverFrozenHint(browser)
   await testQrBandEdgeSamplingAndExport(browser)
+  await testQrFooterRasterFontParity(browser)
   await testQrBandSamplingFallback(browser)
   await testRedNoteCoverFormat(browser)
   await testRedNotePostPagerAndCurrentPageExport(browser)
@@ -1603,6 +1604,123 @@ async function testQrBandEdgeSamplingAndExport(browserInstance) {
   await context.close()
 }
 
+async function testQrFooterRasterFontParity(browserInstance) {
+  const context = await browserInstance.newContext({
+    acceptDownloads: true,
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installPosterExportSvgAudit(context)
+  const state = createState({ editorReady: true })
+  const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  state.campaign.hero_image_url = edgePosterUrl
+  state.currentGeneration.hero_image_url = edgePosterUrl
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  const normalCaption = 'Explore Notion'
+  const overlongCaption =
+    'Explore Notion with your entire distributed product team from every campaign surface'
+  const formats = [
+    {
+      slug: 'a4_2x3',
+      exportButtonName: 'Export A4 poster (2:3 artwork) PNG',
+      exportSize: { width: 2480, height: 3508 },
+    },
+    {
+      slug: 'rednote_3x4',
+      exportButtonName: 'Export Portrait 3:4 with QR footer PNG',
+      exportSize: { width: 1242, height: 1656 },
+    },
+    {
+      slug: 'yt_thumb_16x9',
+      exportButtonName: 'Export Landscape 16:9 PNG',
+      exportSize: { width: 1280, height: 720 },
+    },
+    {
+      slug: 'luma_1x1',
+      exportButtonName: 'Export Square 1:1 PNG',
+      exportSize: { width: 1080, height: 1080 },
+    },
+  ]
+
+  for (const format of formats) {
+    state.campaign.poster_format = format.slug
+    state.currentGeneration.poster_format = format.slug
+    setQrFooterCaption(state, normalCaption)
+    await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+    await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+    let sheet = page.locator(
+      `.canvas-stage [data-poster-size="${format.slug}"][data-qr-band="scaled"]`,
+    ).first()
+    await sheet.locator('[data-poster-footer]').waitFor()
+    await page.evaluate(() => document.fonts.ready)
+    await assertQrFooterLayout(sheet, {
+      caption: normalCaption,
+      expectHorizontalOverflow: false,
+    })
+
+    setQrFooterCaption(state, overlongCaption)
+    await page.reload()
+    await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+    sheet = page.locator(
+      `.canvas-stage [data-poster-size="${format.slug}"][data-qr-band="scaled"]`,
+    ).first()
+    await sheet.locator('[data-poster-footer]').waitFor()
+    await page.evaluate(() => document.fonts.ready)
+    await assertQrFooterLayout(sheet, {
+      caption: overlongCaption,
+      expectHorizontalOverflow: true,
+    })
+
+    await page.evaluate(() => {
+      window.__posterExportSvgAudits.length = 0
+    })
+    const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
+    await page.getByRole('button', {
+      name: format.exportButtonName,
+      exact: true,
+    }).click()
+    const download = await downloadPromise
+    const artifactPath = `${OUTPUT_DIR}/qr-footer-font-${format.slug}.png`
+    await download.saveAs(artifactPath)
+    const png = await readFile(artifactPath)
+    assert.deepEqual(
+      await probePngDimensions(page, png),
+      format.exportSize,
+      `${format.slug} export must retain its registered raster dimensions`,
+    )
+
+    const audits = await page.evaluate(() => window.__posterExportSvgAudits)
+    const formatAudits = audits.filter((audit) => audit.posterSize === format.slug)
+    const auditDetails = JSON.stringify(formatAudits)
+    assert.ok(
+      formatAudits.length > 0,
+      `${format.slug} export did not serialize a poster foreignObject: ${auditDetails}`,
+    )
+    assert.equal(
+      formatAudits.some((audit) => audit.hasBareRelativeFontUrl),
+      false,
+      `${format.slug} export retained a bare relative font URL: ${auditDetails}`,
+    )
+    assert.ok(
+      formatAudits.some((audit) =>
+        audit.hasSpaceGrotesk && audit.hasEmbeddedFontData
+      ),
+      `${format.slug} export did not embed Space Grotesk as a data URL: ${auditDetails}`,
+    )
+
+    await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+  }
+
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testQrBandSamplingFallback(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
@@ -2906,6 +3024,147 @@ async function posterSamplingCount(page) {
   return page.evaluate(() => window.__posterEdgeSampleCount)
 }
 
+async function installPosterExportSvgAudit(context) {
+  await context.addInitScript(() => {
+    window.__posterExportSvgAudits = []
+    const serializeToString = XMLSerializer.prototype.serializeToString
+    XMLSerializer.prototype.serializeToString = function (node) {
+      const serialized = serializeToString.call(this, node)
+      try {
+        if (!(node instanceof SVGElement)) return serialized
+        const foreignObject = node.querySelector('foreignObject')
+        const poster = foreignObject?.querySelector('[data-poster-size]')
+        if (!poster) return serialized
+
+        const fontStyle = Array.from(poster.querySelectorAll('style'))
+          .map((style) => style.textContent ?? '')
+          .find((css) => css.includes('@font-face') && css.includes('Space Grotesk'))
+        const fontUrlIndex = fontStyle?.indexOf('url(') ?? -1
+        window.__posterExportSvgAudits.push({
+          posterSize: poster.getAttribute('data-poster-size'),
+          hasSpaceGrotesk: !!fontStyle,
+          hasEmbeddedFontData: !!fontStyle
+            && /url\(\s*["']?data:/i.test(fontStyle),
+          hasBareRelativeFontUrl: !!fontStyle
+            && /url\(\s*["']?\.\.?\//i.test(fontStyle),
+          fontSource: fontStyle && fontUrlIndex >= 0
+            ? fontStyle.slice(fontUrlIndex, fontUrlIndex + 160)
+            : null,
+        })
+      } catch (error) {
+        window.__posterExportSvgAudits.push({
+          posterSize: null,
+          auditError: error instanceof Error ? error.message : String(error),
+        })
+      }
+      return serialized
+    }
+  })
+}
+
+function setQrFooterCaption(state, caption) {
+  state.campaign.poster_spec = { qr_label: caption }
+  state.currentGeneration.poster_spec = { qr_label: caption }
+}
+
+async function assertQrFooterLayout(
+  sheet,
+  { caption, expectHorizontalOverflow },
+) {
+  const metrics = await sheet.evaluate((poster, expectedCaption) => {
+    const footer = poster.querySelector('[data-poster-footer]')
+    const primary = poster.querySelector('[data-poster-footer-primary]')
+    const secondary = poster.querySelector('[data-poster-footer-secondary]')
+    if (
+      !(footer instanceof HTMLElement)
+      || !(primary instanceof HTMLElement)
+      || !(secondary instanceof HTMLElement)
+      || !(primary.parentElement instanceof HTMLElement)
+    ) {
+      throw new Error('QR footer text elements are missing.')
+    }
+
+    const rectOf = (rect) => ({
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+    })
+    const footerRect = footer.getBoundingClientRect()
+    const primaryRect = primary.getBoundingClientRect()
+    const secondaryRect = secondary.getBoundingClientRect()
+    const primaryStyle = getComputedStyle(primary)
+    const copyStyle = getComputedStyle(primary.parentElement)
+    const textRange = document.createRange()
+    textRange.selectNodeContents(primary)
+    const lineTops = []
+    for (const rect of textRange.getClientRects()) {
+      if (rect.width <= 0 || rect.height <= 0) continue
+      if (!lineTops.some((top) => Math.abs(top - rect.top) < 1)) {
+        lineTops.push(rect.top)
+      }
+    }
+
+    return {
+      caption: primary.textContent?.trim() ?? '',
+      copy: {
+        flexGrow: copyStyle.flexGrow,
+        minWidth: copyStyle.minWidth,
+      },
+      fontReady: document.fonts?.check('700 16px "Space Grotesk"') ?? true,
+      footer: rectOf(footerRect),
+      intersects: (
+        primaryRect.left < secondaryRect.right
+        && primaryRect.right > secondaryRect.left
+        && primaryRect.top < secondaryRect.bottom
+        && primaryRect.bottom > secondaryRect.top
+      ),
+      lineCount: lineTops.length,
+      primary: {
+        ...rectOf(primaryRect),
+        clientHeight: primary.clientHeight,
+        clientWidth: primary.clientWidth,
+        display: primaryStyle.display,
+        fontFamily: primaryStyle.fontFamily,
+        lineHeight: Number.parseFloat(primaryStyle.lineHeight),
+        overflowX: primaryStyle.overflowX,
+        scrollWidth: primary.scrollWidth,
+        textOverflow: primaryStyle.textOverflow,
+        whiteSpace: primaryStyle.whiteSpace,
+      },
+      secondary: rectOf(secondaryRect),
+      expectedCaption,
+    }
+  }, caption)
+  const details = JSON.stringify(metrics)
+
+  assert.equal(metrics.caption, caption, details)
+  assert.equal(metrics.expectedCaption, caption, details)
+  assert.equal(metrics.fontReady, true, details)
+  assert.match(metrics.primary.fontFamily, /Space Grotesk/, details)
+  assert.equal(metrics.copy.flexGrow, '1', details)
+  assert.equal(metrics.copy.minWidth, '0px', details)
+  assert.equal(metrics.primary.display, 'block', details)
+  assert.equal(metrics.primary.whiteSpace, 'nowrap', details)
+  assert.equal(metrics.primary.overflowX, 'hidden', details)
+  assert.equal(metrics.primary.textOverflow, 'ellipsis', details)
+  assert.equal(metrics.lineCount, 1, details)
+  assert.ok(
+    Math.abs(metrics.primary.clientHeight - metrics.primary.lineHeight) <= 1,
+    details,
+  )
+  if (expectHorizontalOverflow) {
+    assert.ok(metrics.primary.scrollWidth > metrics.primary.clientWidth + 1, details)
+  } else {
+    assert.ok(metrics.primary.scrollWidth <= metrics.primary.clientWidth + 1, details)
+  }
+  assert.equal(metrics.intersects, false, details)
+  assert.ok(metrics.primary.top >= metrics.footer.top - 1, details)
+  assert.ok(metrics.primary.bottom <= metrics.footer.bottom + 1, details)
+  assert.ok(metrics.secondary.top >= metrics.footer.top - 1, details)
+  assert.ok(metrics.secondary.bottom <= metrics.footer.bottom + 1, details)
+}
+
 async function waitForAnimationFrames(page, count) {
   await page.evaluate(async (frameCount) => {
     for (let index = 0; index < frameCount; index += 1) {
@@ -3037,6 +3296,19 @@ async function probePngPixel(page, png, point) {
     const y = Math.floor(sample.y * image.naturalHeight / sample.sheetHeight)
     return Array.from(context.getImageData(x, y, 1, 1).data)
   }, { dataUrl, point })
+}
+
+async function probePngDimensions(page, png) {
+  const dataUrl = `data:image/png;base64,${png.toString('base64')}`
+  return page.evaluate(async (src) => {
+    const image = new Image()
+    image.src = src
+    await image.decode()
+    return {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    }
+  }, dataUrl)
 }
 
 function cssRgbChannels(color) {
