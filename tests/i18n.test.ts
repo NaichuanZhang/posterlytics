@@ -107,6 +107,12 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Page {number} of {count}': '第 {number} / {count} 页',
     'Export page {number} of {count} as {format} PNG':
       '将第 {number} / {count} 页导出为 {format} PNG',
+    'Export all {count} pages as {format} ZIP':
+      '将全部 {count} 页导出为 {format} ZIP',
+    'Exporting page {number} of {count}...':
+      '正在导出第 {number} / {count} 页…',
+    'All pages are ready in one ZIP.': '全部页面已打包为 ZIP。',
+    'All-page export failed. Please try again.': '全部页面导出失败，请重试。',
     'Create an account': '创建新账户',
     'Reset code': '验证码',
     'Verify code': '验证',

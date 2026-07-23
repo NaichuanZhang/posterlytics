@@ -8,9 +8,15 @@ import {
   type PosterSize,
 } from '../lib/posterSize'
 import {
+  buildPosterExportArchiveFilename,
   buildPosterExportFilename,
   type PosterExportPage,
 } from '../lib/posterExport'
+import {
+  buildStoredZip,
+  pngDataUrlToBytes,
+  type StoredZipEntry,
+} from '../lib/posterZip'
 import {
   clampRedNotePageIndex,
   resolveRedNoteRenderState,
@@ -27,6 +33,7 @@ interface Props {
   variant?: 'button' | 'icon'
   posterSize?: PosterSize
   pageIndex?: number
+  showAllPagesExport?: boolean
 }
 
 interface ExportRenderAttempt {
@@ -44,9 +51,20 @@ interface PendingRenderReady {
   readonly timeoutId: number
 }
 
+type ExportActivity =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'current-page' }
+  | {
+      readonly kind: 'all-pages'
+      readonly number: number
+      readonly count: number
+    }
+
 const RENDER_READY_TIMEOUT_ERROR = 'Poster render readiness timed out.'
 const RENDER_CANCELLED_ERROR = 'Poster render was cancelled.'
 const POSTER_IMAGE_TIMEOUT_ERROR = 'Timed out waiting for a poster image.'
+const POSTER_RENDER_MISSING_ERROR = 'Poster export render was not mounted.'
+const POSTER_HERO_FETCH_ERROR = 'Poster hero could not be prepared for ZIP export.'
 
 // Exports at the descriptor's native sheet dimensions and pixel ratio. A scaled
 // QR band binds the export to a placement; an artwork-only descriptor does not.
@@ -62,11 +80,12 @@ export function PosterExportButton({
   variant = 'button',
   posterSize = DEFAULT_POSTER_SIZE,
   pageIndex = 0,
+  showAllPagesExport = false,
 }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const renderSequence = useRef(0)
   const pendingRenderReady = useRef<PendingRenderReady | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [activity, setActivity] = useState<ExportActivity>({ kind: 'idle' })
   const [renderAttempt, setRenderAttempt] = useState<ExportRenderAttempt | null>(null)
   const { notify } = useToast()
   const { t } = useI18n()
@@ -76,6 +95,12 @@ export function PosterExportButton({
   const redNotePageCount = typeof redNoteRenderState === 'object'
     ? redNoteRenderState.plan.pages.length
     : null
+  const busy = activity.kind !== 'idle'
+  const showAllPagesButton = (
+    showAllPagesExport
+    && variant === 'button'
+    && redNotePageCount !== null
+  )
   const exportPageIndex = redNotePageCount === null
     ? 0
     : clampRedNotePageIndex(pageIndex, redNotePageCount)
@@ -92,6 +117,12 @@ export function PosterExportButton({
           format: formatLabel,
         })
       : t('Export {format} PNG', { format: formatLabel })
+  const allPagesButtonLabel = redNotePageCount === null
+    ? ''
+    : t('Export all {count} pages as {format} ZIP', {
+        count: redNotePageCount,
+        format: formatLabel,
+      })
   const resolveRenderReady = useCallback((
     attemptId: number,
     result: PosterRenderReady,
@@ -114,13 +145,46 @@ export function PosterExportButton({
     resolveRenderReady(renderAttemptId, result)
   }, [renderAttemptId, resolveRenderReady])
 
+  async function capturePageToPng(
+    page: PosterExportPage | undefined,
+    imageSrcOverride: string | undefined,
+  ): Promise<string | null> {
+    const attempt: ExportRenderAttempt = {
+      id: renderSequence.current + 1,
+      imageSrcOverride,
+      pageIndex: page?.pageIndex ?? 0,
+      page,
+    }
+    renderSequence.current = attempt.id
+    const renderReady = createRenderReadyPromise(
+      attempt.id,
+      imageSrcOverride ?? campaign.hero_image_url,
+    )
+    setRenderAttempt(attempt)
+    await renderReady
+
+    if (!offscreenRef.current) return null
+    if (document.fonts?.ready) await document.fonts.ready
+    await waitForPosterImages(
+      offscreenRef.current,
+      includesQrBand && !!placement,
+    )
+    return toPng(offscreenRef.current, {
+      width: posterSize.sheet.width,
+      height: posterSize.sheet.height,
+      pixelRatio: posterSize.export.pixelRatio,
+      cacheBust: true,
+      skipFonts: true,
+    })
+  }
+
   async function handleExport() {
     if (
       busy
       || redNoteExportUnavailable
       || (includesQrBand && !placement)
     ) return
-    setBusy(true)
+    setActivity({ kind: 'current-page' })
     try {
       const page: PosterExportPage | undefined = redNotePageCount === null
         ? undefined
@@ -132,33 +196,8 @@ export function PosterExportButton({
       const imageSrcOverride = campaign.hero_image_url
         ? await fetchAsDataUrl(campaign.hero_image_url) ?? undefined
         : undefined
-      const attempt: ExportRenderAttempt = {
-        id: renderSequence.current + 1,
-        imageSrcOverride,
-        pageIndex: page?.pageIndex ?? 0,
-        page,
-      }
-      renderSequence.current = attempt.id
-      const renderReady = createRenderReadyPromise(
-        attempt.id,
-        imageSrcOverride ?? campaign.hero_image_url,
-      )
-      setRenderAttempt(attempt)
-      await renderReady
-
-      if (!offscreenRef.current) return
-      if (document.fonts?.ready) await document.fonts.ready
-      await waitForPosterImages(
-        offscreenRef.current,
-        includesQrBand && !!placement,
-      )
-      const dataUrl = await toPng(offscreenRef.current, {
-        width: posterSize.sheet.width,
-        height: posterSize.sheet.height,
-        pixelRatio: posterSize.export.pixelRatio,
-        cacheBust: true,
-        skipFonts: true,
-      })
+      const dataUrl = await capturePageToPng(page, imageSrcOverride)
+      if (!dataUrl) return
       const a = document.createElement('a')
       a.href = dataUrl
       a.download = buildPosterExportFilename({
@@ -168,7 +207,7 @@ export function PosterExportButton({
           ? placement.label
           : undefined,
         filenameSuffix: posterSize.export.filenameSuffix,
-        page: attempt.page,
+        page,
       })
       a.click()
       notify(t('Poster export is ready.'), 'success')
@@ -177,8 +216,69 @@ export function PosterExportButton({
       notify(t('Poster export failed. Please try again.'), 'error')
     } finally {
       cancelPendingRenderReady()
-      setBusy(false)
+      setActivity({ kind: 'idle' })
       setRenderAttempt(null) // unmount the full-size clone and release its data URL
+    }
+  }
+
+  async function handleAllPagesExport() {
+    if (busy || !showAllPagesButton || redNotePageCount === null) return
+    setActivity({
+      kind: 'all-pages',
+      number: 1,
+      count: redNotePageCount,
+    })
+    let entries: StoredZipEntry[] = []
+    try {
+      if (!campaign.hero_image_url) throw new Error(POSTER_HERO_FETCH_ERROR)
+      const imageSrcOverride = await fetchAsDataUrl(campaign.hero_image_url)
+      if (!imageSrcOverride) throw new Error(POSTER_HERO_FETCH_ERROR)
+
+      for (let pageIndex = 0; pageIndex < redNotePageCount; pageIndex += 1) {
+        setActivity({
+          kind: 'all-pages',
+          number: pageIndex + 1,
+          count: redNotePageCount,
+        })
+        const page: PosterExportPage = {
+          pageIndex,
+          pageCount: redNotePageCount,
+        }
+        const dataUrl = await capturePageToPng(page, imageSrcOverride)
+        if (!dataUrl) throw new Error(POSTER_RENDER_MISSING_ERROR)
+        entries = [
+          ...entries,
+          {
+            filename: buildPosterExportFilename({
+              productName: campaign.product_name,
+              versionNumber,
+              filenameSuffix: posterSize.export.filenameSuffix,
+              page,
+            }),
+            bytes: pngDataUrlToBytes(dataUrl),
+          },
+        ]
+      }
+
+      const archive = buildStoredZip(entries)
+      entries = []
+      downloadZip(
+        archive,
+        buildPosterExportArchiveFilename({
+          productName: campaign.product_name,
+          versionNumber,
+          filenameSuffix: posterSize.export.filenameSuffix,
+        }),
+      )
+      notify(t('All pages are ready in one ZIP.'), 'success')
+    } catch (e) {
+      console.error('all-page export failed', e)
+      notify(t('All-page export failed. Please try again.'), 'error')
+    } finally {
+      entries = []
+      cancelPendingRenderReady()
+      setActivity({ kind: 'idle' })
+      setRenderAttempt(null)
     }
   }
 
@@ -225,8 +325,28 @@ export function PosterExportButton({
         data-tooltip={variant === 'icon' ? buttonLabel : undefined}
       >
         <Download size={15} aria-hidden="true" />
-        {variant === 'button' && (busy ? t('Exporting...') : buttonLabel)}
+        {variant === 'button' && (
+          activity.kind === 'current-page' ? t('Exporting...') : buttonLabel
+        )}
       </button>
+      {showAllPagesButton && (
+        <button
+          type="button"
+          className="button button-secondary button-small"
+          onClick={handleAllPagesExport}
+          disabled={busy}
+        >
+          <Download size={15} aria-hidden="true" />
+          <span aria-live="polite">
+            {activity.kind === 'all-pages'
+              ? t('Exporting page {number} of {count}...', {
+                  number: activity.number,
+                  count: activity.count,
+                })
+              : allPagesButtonLabel}
+          </span>
+        </button>
+      )}
       {renderAttempt && (
         <div
           data-poster-export-render={renderAttempt.id}
@@ -248,6 +368,28 @@ export function PosterExportButton({
       )}
     </>
   )
+}
+
+function downloadZip(bytes: Uint8Array, filename: string) {
+  const blobBytes = new Uint8Array(bytes)
+  const objectUrl = URL.createObjectURL(new Blob(
+    [blobBytes],
+    { type: 'application/zip' },
+  ))
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename
+  anchor.style.display = 'none'
+  try {
+    document.body.append(anchor)
+    anchor.click()
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl)
+    throw error
+  } finally {
+    anchor.remove()
+  }
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
 }
 
 // Fetch a (possibly cross-origin) image and convert it to a same-origin data URL.

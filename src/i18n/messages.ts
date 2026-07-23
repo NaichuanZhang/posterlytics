@@ -462,6 +462,10 @@ export const ENGLISH_MESSAGE_IDS = [
   'Poster export failed. Please try again.',
   'Export {format} PNG',
   'Export page {number} of {count} as {format} PNG',
+  'Export all {count} pages as {format} ZIP',
+  'Exporting page {number} of {count}...',
+  'All pages are ready in one ZIP.',
+  'All-page export failed. Please try again.',
   'Download {name} poster as {format} PNG',
   'A4 poster (2:3 artwork)',
   'Portrait 3:4 with QR footer',
@@ -1210,6 +1214,12 @@ export const zhCN: Record<TranslationKey, string> = {
   'Export {format} PNG': '导出 {format} PNG',
   'Export page {number} of {count} as {format} PNG':
     '将第 {number} / {count} 页导出为 {format} PNG',
+  'Export all {count} pages as {format} ZIP':
+    '将全部 {count} 页导出为 {format} ZIP',
+  'Exporting page {number} of {count}...':
+    '正在导出第 {number} / {count} 页…',
+  'All pages are ready in one ZIP.': '全部页面已打包为 ZIP。',
+  'All-page export failed. Please try again.': '全部页面导出失败，请重试。',
   'Download {name} poster as {format} PNG': '将 {name} 海报下载为 {format} PNG',
   'A4 poster (2:3 artwork)': 'A4 海报（2:3 画面）',
   'Portrait 3:4 with QR footer': '竖版 3:4（带二维码页脚）',

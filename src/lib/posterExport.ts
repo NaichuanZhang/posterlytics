@@ -11,6 +11,12 @@ interface PosterExportFilenameInput {
   readonly page?: PosterExportPage
 }
 
+interface PosterExportArchiveFilenameInput {
+  readonly productName: string
+  readonly versionNumber?: number
+  readonly filenameSuffix: string
+}
+
 export function buildPosterExportFilename({
   productName,
   versionNumber,
@@ -26,6 +32,17 @@ export function buildPosterExportFilename({
   return `${
     sanitizeFilenamePart(productName)
   }${version}${placement}-${filenameSuffix}${pageSuffix}.png`
+}
+
+export function buildPosterExportArchiveFilename({
+  productName,
+  versionNumber,
+  filenameSuffix,
+}: PosterExportArchiveFilenameInput): string {
+  const version = versionNumber ? `-v${versionNumber}` : ''
+  return `${
+    sanitizeFilenamePart(productName)
+  }${version}-${filenameSuffix}-all-pages.zip`
 }
 
 function orderedPageSuffix({

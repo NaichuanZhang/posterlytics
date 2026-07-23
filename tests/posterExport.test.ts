@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildPosterExportFilename } from '../src/lib/posterExport.ts'
+import {
+  buildPosterExportArchiveFilename,
+  buildPosterExportFilename,
+} from '../src/lib/posterExport.ts'
 
 test('poster export filename remains unchanged when no page is supplied', () => {
   assert.equal(
@@ -26,6 +29,17 @@ test('poster export filename appends an ordered composite page suffix', () => {
       },
     }),
     'Signal-Studio-v1-FullBleed-3x4-page-02-of-05.png',
+  )
+})
+
+test('poster export archive filename identifies the all-pages ZIP', () => {
+  assert.equal(
+    buildPosterExportArchiveFilename({
+      productName: 'Signal Studio',
+      versionNumber: 1,
+      filenameSuffix: 'FullBleed-3x4',
+    }),
+    'Signal-Studio-v1-FullBleed-3x4-all-pages.zip',
   )
 })
 

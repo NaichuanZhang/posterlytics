@@ -924,6 +924,7 @@ export function PosterEditorPage() {
                 versionNumber={selectedGeneration?.version_number ?? undefined}
                 posterSize={previewPosterSize}
                 pageIndex={effectivePageIndex}
+                showAllPagesExport
               />
             )}
             {campaignTrackingEnabled && previewIncludesQrBand && selectedPlacement && (

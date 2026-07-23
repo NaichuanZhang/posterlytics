@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdir, readFile } from 'node:fs/promises'
 import process from 'node:process'
 import { chromium } from 'playwright'
@@ -1826,6 +1826,12 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
     }).isEnabled(),
     true,
   )
+  assert.equal(
+    await page.getByRole('button', {
+      name: /Export all .* pages .* ZIP/,
+    }).count(),
+    0,
+  )
   await versions.locator('.version-row').filter({ hasText: 'Version 1' }).click()
   await page.getByRole('group', { name: 'Page navigation' }).waitFor()
   await page.getByText('Page 1 of 3', { exact: true }).waitFor()
@@ -1855,6 +1861,52 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
     { width: 1242, height: 1656 },
   )
   await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+
+  const allPagesExportButton = page.getByRole('button', {
+    name: 'Export all 3 pages as Portrait 3:4 full bleed ZIP',
+  })
+  const zipDownloadPromise = page.waitForEvent('download', { timeout: 90_000 })
+  await allPagesExportButton.click()
+  await page.locator(
+    '[data-poster-export-render] [data-rednote-page-index="0"]',
+  ).waitFor()
+  const zipDownload = await zipDownloadPromise
+  const zipDownloadPath = await zipDownload.path()
+  assert.ok(zipDownloadPath)
+  assert.equal(
+    zipDownload.suggestedFilename(),
+    'Signal-Studio-v1-FullBleed-3x4-all-pages.zip',
+  )
+  const expectedZipEntries = [
+    'Signal-Studio-v1-FullBleed-3x4-page-01-of-03.png',
+    'Signal-Studio-v1-FullBleed-3x4-page-02-of-03.png',
+    'Signal-Studio-v1-FullBleed-3x4-page-03-of-03.png',
+  ]
+  const zipEntries = execFileSync(
+    '/usr/bin/unzip',
+    ['-Z1', zipDownloadPath],
+    { encoding: 'utf8' },
+  ).trim().split('\n')
+  assert.deepEqual(zipEntries, expectedZipEntries)
+  for (const filename of zipEntries) {
+    const pagePng = execFileSync(
+      '/usr/bin/unzip',
+      ['-p', zipDownloadPath, filename],
+      { maxBuffer: 64 * 1024 * 1024 },
+    )
+    assert.equal(pagePng.subarray(1, 4).toString('ascii'), 'PNG')
+    assert.deepEqual(
+      {
+        width: pagePng.readUInt32BE(16),
+        height: pagePng.readUInt32BE(20),
+      },
+      { width: 1242, height: 1656 },
+      filename,
+    )
+  }
+  await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+  await resetPager.getByText('Page 2 of 3', { exact: true }).waitFor()
+  await canvas.locator('[data-rednote-page-index="1"]').waitFor()
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/rednote-post-page-export-desktop.png`,
