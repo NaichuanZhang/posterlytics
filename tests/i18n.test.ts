@@ -95,6 +95,10 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     Placement: '投放点',
     Versions: '版本',
     Analytics: '数据分析',
+    'Visits grouped by device, operating system, and available country data.':
+      '按设备、操作系统和可用的国家或地区数据汇总访问。',
+    'Location unavailable': '无法确定位置',
+    'Location could not be determined for some visits.': '部分访问无法确定地理位置。',
     'Images provided': '提供的图片',
     'Images used for the poster': '海报使用的图片',
     'Tracked link': '追踪链接',

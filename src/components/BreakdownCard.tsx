@@ -1,13 +1,22 @@
 import type { BreakdownBucket } from '../lib/types'
 import { useI18n } from '../i18n/I18nProvider'
 
-export function BreakdownCard({ title, buckets }: { title: string; buckets: BreakdownBucket[] }) {
+export function BreakdownCard({
+  title,
+  buckets,
+  description,
+}: {
+  title: string
+  buckets: BreakdownBucket[]
+  description?: string
+}) {
   const { formatNumber, t } = useI18n()
   const total = buckets.reduce((sum, bucket) => sum + bucket.visits, 0)
 
   return (
     <section className="breakdown-section">
       <h3>{title}</h3>
+      {description && <p className="breakdown-description">{description}</p>}
       {buckets.length === 0 ? (
         <p className="panel-empty">{t('No data yet.')}</p>
       ) : (
@@ -17,7 +26,7 @@ export function BreakdownCard({ title, buckets }: { title: string; buckets: Brea
             return (
               <div key={bucket.key} className="breakdown-row">
                 <div>
-                  <span>{bucket.key}</span>
+                  <span>{bucket.label ?? bucket.key}</span>
                   <strong>{formatNumber(bucket.visits)} / {formatNumber(percentage)}%</strong>
                 </div>
                 <span className="breakdown-track" aria-hidden="true">

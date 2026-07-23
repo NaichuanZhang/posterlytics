@@ -119,6 +119,23 @@ export interface CoarseGeo {
   city: string | null;
 }
 
+export type RequestGeoSource = 'header' | 'ipwhois' | 'none';
+export type RequestGeoOutcome =
+  | 'resolved'
+  | 'missing_ip'
+  | 'timeout'
+  | 'http_error'
+  | 'invalid_response'
+  | 'request_error';
+
+export interface RequestGeoResolution {
+  geo: CoarseGeo;
+  source: RequestGeoSource;
+  outcome: RequestGeoOutcome;
+  durationMs: number;
+  upstreamStatus?: number;
+}
+
 export const GEO_LOOKUP_TIMEOUT_MS = 800;
 
 type GeoFetcher = (input: string, init?: RequestInit) => Promise<Response>;
@@ -208,45 +225,85 @@ export function geoFromProviderPayload(payload: unknown): CoarseGeo | null {
 
 // Prefer location metadata already supplied by the hosting CDN. When it is
 // absent, briefly resolve the forwarded address and discard it immediately.
-// All failures return null geo fields; none are logged or allowed to escape.
+// Diagnostics deliberately exclude the address and provider payload.
+export async function resolveRequestGeoDetailed(
+  headers: Headers,
+  fetcher: GeoFetcher = fetch,
+  timeoutMs = GEO_LOOKUP_TIMEOUT_MS,
+): Promise<RequestGeoResolution> {
+  const startedAt = Date.now();
+  const finish = (
+    geo: CoarseGeo | null,
+    source: RequestGeoSource,
+    outcome: RequestGeoOutcome,
+    upstreamStatus?: number,
+  ): RequestGeoResolution => ({
+    geo: geo ?? { country: null, city: null },
+    source,
+    outcome,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+  });
+
+  const headerGeo = geoFromHeaders(headers);
+  if (headerGeo) return finish(headerGeo, 'header', 'resolved');
+
+  const clientIp = forwardedClientIp(headers);
+  if (!clientIp) return finish(null, 'none', 'missing_ip');
+
+  const controller = new AbortController();
+  const boundedTimeout = Math.min(Math.max(timeoutMs, 1), 2000);
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<RequestGeoResolution>((resolve) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      resolve(finish(null, 'ipwhois', 'timeout'));
+    }, boundedTimeout);
+  });
+  const lookup = (async (): Promise<RequestGeoResolution> => {
+    try {
+      const response = await fetcher(
+        `https://ipwho.is/${encodeURIComponent(clientIp)}?fields=success,country_code,city`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok) {
+        return finish(null, 'ipwhois', 'http_error', response.status);
+      }
+
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        return finish(null, 'ipwhois', 'invalid_response');
+      }
+      const geo = geoFromProviderPayload(payload);
+      return geo
+        ? finish(geo, 'ipwhois', 'resolved')
+        : finish(null, 'ipwhois', 'invalid_response');
+    } catch {
+      return finish(null, 'ipwhois', timedOut ? 'timeout' : 'request_error');
+    }
+  })();
+
+  try {
+    return await Promise.race([lookup, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+// Compatibility surface for callers that need only the coarse location.
 export async function resolveRequestGeo(
   headers: Headers,
   fetcher: GeoFetcher = fetch,
   timeoutMs = GEO_LOOKUP_TIMEOUT_MS,
 ): Promise<CoarseGeo> {
-  const headerGeo = geoFromHeaders(headers);
-  if (headerGeo) return headerGeo;
-
-  const clientIp = forwardedClientIp(headers);
-  if (!clientIp) return { country: null, city: null };
-
-  const controller = new AbortController();
-  const boundedTimeout = Math.min(Math.max(timeoutMs, 1), 2000);
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<null>((resolve) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      resolve(null);
-    }, boundedTimeout);
-  });
-  const lookup = fetcher(
-    `https://ipwho.is/${encodeURIComponent(clientIp)}?fields=success,country_code,city`,
-    {
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    },
-  )
-    .then(async (response) => {
-      if (!response.ok) return null;
-      return geoFromProviderPayload(await response.json());
-    })
-    .catch(() => null);
-
-  try {
-    return (await Promise.race([lookup, timeout])) ?? { country: null, city: null };
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  return (await resolveRequestGeoDetailed(headers, fetcher, timeoutMs)).geo;
 }
 
 // SHA-256 hex of (salt | visitorId). Stable visitor identity from a first-party
@@ -2314,6 +2371,31 @@ export function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS, 'Content-Type': 'application/json' },
   });
+}
+
+export function logRequestGeoEvent(entry: {
+  status: 'resolved' | 'unavailable';
+  source: RequestGeoSource;
+  outcome: RequestGeoOutcome;
+  durationMs: number;
+  upstreamStatus?: number;
+}): void {
+  try {
+    const line = JSON.stringify({
+      event: 'request_geo',
+      timestamp: new Date().toISOString(),
+      severity: entry.status === 'resolved' ? 'info' : 'warning',
+      status: entry.status,
+      source: entry.source,
+      outcome: entry.outcome,
+      duration_ms: entry.durationMs,
+      upstream_status: entry.upstreamStatus,
+    });
+    if (entry.status === 'resolved') console.info(line);
+    else console.warn(line);
+  } catch {
+    // Request logging must never affect a tracked redirect.
+  }
 }
 
 export function logPipelineEvent(entry: {

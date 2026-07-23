@@ -11,10 +11,11 @@ import { useCampaign } from '../hooks/useCampaign'
 import { useCampaignBreakdowns } from '../hooks/useCampaignBreakdowns'
 import { usePlacementStats } from '../hooks/usePlacementStats'
 import { useI18n } from '../i18n/I18nProvider'
+import { countryBreakdownsForDisplay } from '../lib/countryBreakdowns'
 import { getUseCase } from '../lib/useCases'
 
 export function AnalyticsPage() {
-  const { formatNumber, t } = useI18n()
+  const { formatNumber, locale, t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
@@ -76,6 +77,11 @@ export function AnalyticsPage() {
   const returnRate = totals.visits > 0
     ? Math.max(0, Math.round(((totals.visits - totals.unique) / totals.visits) * 100))
     : 0
+  const countryBreakdown = countryBreakdownsForDisplay(
+    breakdowns.countries,
+    locale,
+    t('Location unavailable'),
+  )
 
   return (
     <AppShell
@@ -150,7 +156,7 @@ export function AnalyticsPage() {
         <div className="section-heading">
           <div>
             <h2 id="audience-heading">{t('Audience breakdown')}</h2>
-            <p>{t('Visits grouped by device, operating system, and country.')}</p>
+            <p>{t('Visits grouped by device, operating system, and available country data.')}</p>
           </div>
         </div>
         {breakdownsLoading ? (
@@ -172,7 +178,13 @@ export function AnalyticsPage() {
           <div className="breakdown-grid">
             <BreakdownCard title={t('Device')} buckets={breakdowns.devices} />
             <BreakdownCard title={t('Operating system')} buckets={breakdowns.os} />
-            <BreakdownCard title={t('Country')} buckets={breakdowns.countries} />
+            <BreakdownCard
+              title={t('Country')}
+              buckets={countryBreakdown.buckets}
+              description={countryBreakdown.unavailableVisits > 0
+                ? t('Location could not be determined for some visits.')
+                : undefined}
+            />
           </div>
         )}
       </section>

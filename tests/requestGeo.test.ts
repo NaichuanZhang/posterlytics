@@ -6,6 +6,7 @@ import {
   geoFromHeaders,
   geoFromProviderPayload,
   resolveRequestGeo,
+  resolveRequestGeoDetailed,
 } from '../functions/_shared.ts'
 
 test('geoFromHeaders prefers hosting geo and decodes the paired city', () => {
@@ -72,7 +73,7 @@ test('resolveRequestGeo skips the provider when CDN geo is available', async () 
 
 test('resolveRequestGeo requests only country and city for the forwarded address', async () => {
   let requestedUrl = ''
-  const geo = await resolveRequestGeo(
+  const resolution = await resolveRequestGeoDetailed(
     new Headers({ 'x-forwarded-for': '8.8.4.4, 10.0.0.1' }),
     async (input) => {
       requestedUrl = input
@@ -84,13 +85,81 @@ test('resolveRequestGeo requests only country and city for the forwarded address
     },
   )
 
-  assert.deepEqual(geo, { country: 'US', city: 'Mountain View' })
+  assert.deepEqual(resolution.geo, { country: 'US', city: 'Mountain View' })
+  assert.equal(resolution.source, 'ipwhois')
+  assert.equal(resolution.outcome, 'resolved')
+  assert.ok(resolution.durationMs >= 0)
   assert.match(requestedUrl, /^https:\/\/ipwho\.is\/8\.8\.4\.4\?fields=success,country_code,city$/)
+  assert.doesNotMatch(JSON.stringify(resolution), /8\.8\.4\.4/)
+  assert.deepEqual(Object.keys(resolution).sort(), [
+    'durationMs',
+    'geo',
+    'outcome',
+    'source',
+  ])
+})
+
+test('resolveRequestGeoDetailed reports a missing forwarded address without fetching', async () => {
+  let calls = 0
+  const resolution = await resolveRequestGeoDetailed(
+    new Headers(),
+    async () => {
+      calls += 1
+      throw new Error('provider should not be called')
+    },
+  )
+
+  assert.deepEqual(resolution.geo, { country: null, city: null })
+  assert.equal(resolution.source, 'none')
+  assert.equal(resolution.outcome, 'missing_ip')
+  assert.equal(calls, 0)
+})
+
+test('resolveRequestGeoDetailed classifies provider HTTP failures', async () => {
+  const resolution = await resolveRequestGeoDetailed(
+    new Headers({ 'x-forwarded-for': '8.8.8.8' }),
+    async () => new Response(null, { status: 429 }),
+  )
+
+  assert.deepEqual(resolution.geo, { country: null, city: null })
+  assert.equal(resolution.source, 'ipwhois')
+  assert.equal(resolution.outcome, 'http_error')
+  assert.equal(resolution.upstreamStatus, 429)
+})
+
+test('resolveRequestGeoDetailed classifies invalid provider payloads', async () => {
+  const resolution = await resolveRequestGeoDetailed(
+    new Headers({ 'x-forwarded-for': '8.8.8.8' }),
+    async () => new Response(JSON.stringify({
+      success: true,
+      country_code: 'Unknown',
+      ip: '8.8.8.8',
+    })),
+  )
+
+  assert.deepEqual(resolution.geo, { country: null, city: null })
+  assert.equal(resolution.source, 'ipwhois')
+  assert.equal(resolution.outcome, 'invalid_response')
+  assert.doesNotMatch(JSON.stringify(resolution), /8\.8\.8\.8/)
+})
+
+test('resolveRequestGeoDetailed classifies provider request failures', async () => {
+  const resolution = await resolveRequestGeoDetailed(
+    new Headers({ 'x-forwarded-for': '8.8.8.8' }),
+    async () => {
+      throw new Error('network unavailable')
+    },
+  )
+
+  assert.deepEqual(resolution.geo, { country: null, city: null })
+  assert.equal(resolution.source, 'ipwhois')
+  assert.equal(resolution.outcome, 'request_error')
 })
 
 test('resolveRequestGeo fails open when the provider exceeds its deadline', async () => {
+  assert.equal(GEO_LOOKUP_TIMEOUT_MS, 800)
   assert.ok(GEO_LOOKUP_TIMEOUT_MS <= 2000)
-  const geo = await resolveRequestGeo(
+  const resolution = await resolveRequestGeoDetailed(
     new Headers({ 'x-forwarded-for': '8.8.8.8' }),
     (_input, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
@@ -98,5 +167,16 @@ test('resolveRequestGeo fails open when the provider exceeds its deadline', asyn
     5,
   )
 
+  assert.deepEqual(resolution.geo, { country: null, city: null })
+  assert.equal(resolution.source, 'ipwhois')
+  assert.equal(resolution.outcome, 'timeout')
+
+  const geo = await resolveRequestGeo(
+    new Headers({ 'x-forwarded-for': '8.8.8.8' }),
+    (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+    }),
+    5,
+  )
   assert.deepEqual(geo, { country: null, city: null })
 })

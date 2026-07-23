@@ -3977,6 +3977,13 @@ table.stats tr.winner td:first-child {
   font-weight: 600;
 }
 
+.breakdown-description {
+  margin: -5px 0 13px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .breakdown-list {
   display: grid;
   gap: 12px;

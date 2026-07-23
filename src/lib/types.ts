@@ -572,6 +572,7 @@ export interface PlacementStat {
 // One row of an audience breakdown (a device type, OS, or country).
 export interface BreakdownBucket {
   key: string
+  label?: string
   visits: number
 }
 

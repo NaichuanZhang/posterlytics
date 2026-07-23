@@ -2,8 +2,9 @@ import {
   CORS,
   decorateDestinationUrl,
   env,
+  logRequestGeoEvent,
   parseUA,
-  resolveRequestGeo,
+  resolveRequestGeoDetailed,
   visitorHash,
   readCookie,
   createAnonClient,
@@ -148,14 +149,16 @@ interface ViewRuntime {
   createClient: typeof createAnonClient;
   getVisitorSalt: () => string;
   hashVisitor: typeof visitorHash;
-  resolveGeo: typeof resolveRequestGeo;
+  resolveGeo: typeof resolveRequestGeoDetailed;
+  logGeo: typeof logRequestGeoEvent;
 }
 
 const VIEW_RUNTIME: ViewRuntime = {
   createClient: createAnonClient,
   getVisitorSalt: () => env('VISITOR_SALT'),
   hashVisitor: visitorHash,
-  resolveGeo: resolveRequestGeo,
+  resolveGeo: resolveRequestGeoDetailed,
+  logGeo: logRequestGeoEvent,
 };
 
 export default function (req: Request): Promise<Response> {
@@ -183,10 +186,11 @@ export async function handleViewRequest(
     setCookie = `plv=${visitorId}; Path=/; Max-Age=31536000; SameSite=Lax; Secure; HttpOnly`;
   }
   const { device, os } = parseUA(req.headers.get('user-agent') ?? '');
-  const [vhash, geo] = await Promise.all([
+  const [vhash, geoResolution] = await Promise.all([
     runtime.hashVisitor(runtime.getVisitorSalt(), visitorId),
     runtime.resolveGeo(req.headers),
   ]);
+  const geo = geoResolution.geo;
 
   // Log the visit and get the destination plus attribution in one round-trip.
   // The published-check lives inside the RPC; a null/missing result means the
@@ -223,6 +227,18 @@ export async function handleViewRequest(
   }
 
   if (!destination) return await statusResponse(client, code, locale, setCookie);
+
+  try {
+    runtime.logGeo({
+      status: geo.country ? 'resolved' : 'unavailable',
+      source: geoResolution.source,
+      outcome: geoResolution.outcome,
+      durationMs: geoResolution.durationMs,
+      upstreamStatus: geoResolution.upstreamStatus,
+    });
+  } catch {
+    // Observability is best-effort and must not block the redirect.
+  }
 
   const location = attribution
     ? decorateDestinationUrl(destination, attribution)

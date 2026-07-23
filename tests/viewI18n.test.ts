@@ -5,6 +5,7 @@ import view, {
   resolveViewLocale,
   statusHtml,
 } from '../functions/view.ts'
+import type { RequestGeoResolution } from '../functions/_shared.ts'
 
 const POSTERLYTICS_HOME = 'https://3f9q2998.insforge.site/'
 
@@ -128,6 +129,62 @@ test('view preserves the tracked visit to 302 redirect contract', async () => {
   assert.deepEqual(calls, ['log_visit_attributed'])
 })
 
+test('view geo logging cannot alter a successful redirect', async () => {
+  let logCalls = 0
+  const runtime = {
+    ...testRuntime(async () => ({
+      data: 'https://destination.example/product',
+      error: null,
+    })),
+    logGeo: () => {
+      logCalls += 1
+      throw new Error('logging unavailable')
+    },
+  }
+  const response = await handleViewRequest(
+    new Request('https://example.test/functions/view?code=published', {
+      headers: { Cookie: 'plv=known-visitor' },
+    }),
+    runtime,
+  )
+
+  assert.equal(response.status, 302)
+  assert.equal(response.headers.get('Location'), 'https://destination.example/product')
+  assert.equal(logCalls, 1)
+})
+
+test('view preserves the attributed, geo, and legacy visit RPC fallback order', async () => {
+  const calls: Array<{
+    name: string
+    params: Record<string, unknown> | undefined
+  }> = []
+  const response = await handleViewRequest(
+    new Request('https://example.test/functions/view?code=published', {
+      headers: { Cookie: 'plv=known-visitor' },
+    }),
+    testRuntime(async (name, params) => {
+      calls.push({ name, params })
+      if (name === 'log_visit_attributed') {
+        return { data: null, error: { message: 'not available' } }
+      }
+      if (params && Object.hasOwn(params, 'p_country')) {
+        return { data: null, error: { message: 'geo contract not available' } }
+      }
+      return { data: 'https://destination.example/product', error: null }
+    }),
+  )
+
+  assert.equal(response.status, 302)
+  assert.deepEqual(calls.map((call) => call.name), [
+    'log_visit_attributed',
+    'log_visit',
+    'log_visit',
+  ])
+  assert.equal(calls[0].params?.p_country, null)
+  assert.equal(calls[1].params?.p_country, null)
+  assert.equal(Object.hasOwn(calls[2].params ?? {}, 'p_country'), false)
+})
+
 test('view unpublished status copy remains localized and gains recovery', () => {
   const unpublished = statusHtml('unpublished', 'zh-CN')
   assert.match(unpublished, /<title>海报尚未发布<\/title>/)
@@ -140,16 +197,27 @@ test('view unpublished status copy remains localized and gains recovery', () => 
 })
 
 function testRuntime(
-  rpc: (name: string) => Promise<{ data: unknown; error: unknown }>,
+  rpc: (
+    name: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: unknown }>,
 ) {
+  const geoResolution: RequestGeoResolution = {
+    geo: { country: null, city: null },
+    source: 'none',
+    outcome: 'missing_ip',
+    durationMs: 0,
+  }
+
   return {
     createClient: () => ({
       database: {
-        rpc: (name: string) => rpc(name),
+        rpc: (name: string, params?: Record<string, unknown>) => rpc(name, params),
       },
     }),
     getVisitorSalt: () => 'test-visitor-salt',
     hashVisitor: async () => 'test-visitor-hash',
-    resolveGeo: async () => ({ country: null, city: null }),
+    resolveGeo: async () => geoResolution,
+    logGeo: () => {},
   }
 }
