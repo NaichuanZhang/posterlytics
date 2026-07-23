@@ -1,0 +1,75 @@
+.app-error-screen {
+  display: grid;
+  min-width: 280px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 32px;
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.app-error-content {
+  display: grid;
+  width: min(100%, 560px);
+  gap: 28px;
+}
+
+.app-error-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 15px;
+}
+
+.app-error-brand-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--radius-small);
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.app-error-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.app-error-copy h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.app-error-copy p {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.app-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 420px) {
+  .app-error-screen {
+    padding: 24px;
+  }
+
+  .app-error-copy h1 {
+    font-size: 28px;
+  }
+
+  .app-error-actions .button {
+    width: 100%;
+  }
+}

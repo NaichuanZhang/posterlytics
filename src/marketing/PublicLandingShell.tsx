@@ -98,6 +98,8 @@ function StaticHero() {
         void import('./heroMotion').then(({ startHeroMotion }) => {
           if (cancelled) return
           dispose = startHeroMotion(hero)
+        }).catch(() => {
+          if (!cancelled) hero.classList.remove('hero-motion-pending')
         })
       })
     })

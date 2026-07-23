@@ -63,6 +63,22 @@ const SOURCE_LITERAL_ALLOWLIST: AllowedLiteral[] = [
     reason: 'Product brand mark.',
   },
   {
+    file: 'src/components/AppErrorBoundary.tsx',
+    kind: 'jsx-text',
+    text: 'P',
+    count: 1,
+    category: 'brand-name',
+    reason: 'Product brand mark in the recoverable application error screen.',
+  },
+  {
+    file: 'src/components/AppErrorBoundary.tsx',
+    kind: 'jsx-text',
+    text: 'Posterlytics',
+    count: 1,
+    category: 'brand-name',
+    reason: 'Product name in the recoverable application error screen.',
+  },
+  {
     file: 'src/components/ui/FirstPaintLoadingShell.tsx',
     kind: 'jsx-text',
     text: 'P',

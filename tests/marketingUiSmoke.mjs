@@ -49,6 +49,9 @@ try {
   await testFirstPaintLifecycle(browser)
   await testGuestHome(browser)
   await testAuthenticatedHome(browser)
+  await testOnlineLazyChunkRetry(browser)
+  await testOfflineLazyChunkReconnect(browser)
+  await testHeroMotionImportFailure(browser)
   await testAuthenticatedNotFound(browser)
   await testSignupMode(browser)
   await testPasswordRecovery(browser)
@@ -175,6 +178,152 @@ async function testAuthenticatedHome(browserInstance) {
   assert.deepEqual(pageErrors, [])
 
   await context.close()
+}
+
+async function testOnlineLazyChunkRetry(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, { authenticated: true })
+  const campaignWizardModule =
+    /\/src\/pages\/CampaignWizardPage\.tsx(?:\?|$)/
+  await context.route(campaignWizardModule, (route) => route.abort('failed'))
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`)
+  await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor()
+  await page.locator('.toolbar-actions')
+    .getByRole('link', { name: 'New campaign', exact: true })
+    .click()
+
+  const { retry } = await assertRecoverableErrorScreen(page, {
+    description:
+      'Posterlytics ran into an unexpected error. Try again or reload the page.',
+    heading: 'Something went wrong',
+    retryDisabled: false,
+  })
+  assert.equal(new URL(page.url()).pathname, '/campaigns/new')
+
+  await context.unroute(campaignWizardModule)
+  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
+  await retry.click()
+  await navigation
+  await page.getByRole('heading', { name: 'Create campaign', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/campaigns/new')
+  assert.equal(
+    await page.evaluate(() =>
+      performance.getEntriesByType('navigation')[0]?.type
+    ),
+    'reload',
+  )
+  assert.ok(
+    pageErrors.every((message) =>
+      /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|loading chunk\b.*failed/i.test(message)
+    ),
+    `Unexpected page errors: ${JSON.stringify(pageErrors)}`,
+  )
+
+  await context.close()
+}
+
+async function testOfflineLazyChunkReconnect(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, { authenticated: true })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`)
+  await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor()
+  await context.setOffline(true)
+  await page.locator('.toolbar-actions')
+    .getByRole('link', { name: 'New campaign', exact: true })
+    .click()
+
+  await assertRecoverableErrorScreen(page, {
+    description:
+      'Posterlytics could not connect. Check your internet connection and try again.',
+    heading: 'Connection interrupted',
+    retryDisabled: true,
+  })
+  assert.equal(new URL(page.url()).pathname, '/campaigns/new')
+
+  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
+  await context.setOffline(false)
+  await navigation
+  await page.getByRole('heading', { name: 'Create campaign', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/campaigns/new')
+  assert.ok(
+    pageErrors.every((message) =>
+      /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|loading chunk\b.*failed/i.test(message)
+    ),
+    `Unexpected page errors: ${JSON.stringify(pageErrors)}`,
+  )
+
+  await context.close()
+}
+
+async function testHeroMotionImportFailure(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1440, height: 960 },
+    reducedMotion: 'no-preference',
+  })
+  await installBackendMock(context, { authenticated: false })
+  await context.route(
+    /\/src\/marketing\/heroMotion\.ts(?:\?|$)/,
+    (route) => route.abort('failed'),
+  )
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`)
+  await page.getByRole('heading', { name: 'Posterlytics', exact: true }).waitFor()
+  await page.waitForFunction(() =>
+    !document.querySelector('.public-hero')
+      ?.classList.contains('hero-motion-pending')
+  )
+  assert.deepEqual(pageErrors, [])
+
+  await context.close()
+}
+
+async function assertRecoverableErrorScreen(page, {
+  description,
+  heading,
+  retryDisabled,
+}) {
+  const alert = page.getByRole('alert')
+  await alert.waitFor()
+  const errorHeading = alert.getByRole('heading', { name: heading, exact: true })
+  await errorHeading.waitFor()
+  await alert.getByText(description, { exact: true }).waitFor()
+
+  const retry = alert.getByRole('button', { name: 'Retry', exact: true })
+  const reload = alert.getByRole('button', { name: 'Reload page', exact: true })
+  assert.equal(await retry.isDisabled(), retryDisabled)
+  assert.equal(await reload.isEnabled(), true)
+  assert.equal(
+    await errorHeading.evaluate((element) => document.activeElement === element),
+    true,
+  )
+  assert.equal(
+    await page.locator('#root').evaluate((root) =>
+      root.childElementCount > 0 && (root.textContent?.trim().length ?? 0) > 0
+    ),
+    true,
+  )
+
+  return { reload, retry }
 }
 
 async function testAuthenticatedNotFound(browserInstance) {
