@@ -503,6 +503,37 @@ async function testCampaignWizardUseCases(browserInstance) {
   )
   assert.equal(await page.getByText('Amazon seller reference mode', { exact: true }).count(), 0)
   assert.equal(await page.locator('#poster-format option').count(), 5)
+  assert.equal(await page.locator('#poster-format').inputValue(), 'a4_2x3')
+
+  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
+  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
+  await selectWizardUseCase(page, 'RedNote post')
+  assert.equal(await page.locator('#poster-format').inputValue(), 'rednote_cover_3x4')
+  assert.equal(
+    await page.getByText(
+      'Artwork-only export. No QR code or placement tracking is included.',
+      { exact: true },
+    ).count(),
+    1,
+  )
+
+  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
+  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
+  await selectWizardUseCase(page, 'Website product')
+  assert.equal(await page.locator('#poster-format').inputValue(), 'a4_2x3')
+  assert.equal(
+    await page.getByText(
+      'Artwork-only export. No QR code or placement tracking is included.',
+      { exact: true },
+    ).count(),
+    0,
+  )
+
+  await page.locator('#poster-format').selectOption('luma_1x1')
+  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
+  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
+  await selectWizardUseCase(page, 'Website product')
+  assert.equal(await page.locator('#poster-format').inputValue(), 'luma_1x1')
 
   const amazonUrl =
     'https://www.amazon.com/dp/B0EXAMPLE?ref_=abc%2Fdef&tag=seller%20bytes#details'

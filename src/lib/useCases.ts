@@ -184,3 +184,18 @@ export function isReferenceOnlyUseCaseId(
 export function getUseCase(id: unknown): UseCaseDescriptor {
   return isUseCaseId(id) ? USE_CASE_BY_ID.get(id)! : DEFAULT_USE_CASE
 }
+
+export function resolvePosterFormatOnUseCaseSwitch(
+  currentFormat: PosterSizeSlug,
+  fromUseCaseId: CreatableUseCaseId | null,
+  toUseCaseId: CreatableUseCaseId,
+): PosterSizeSlug {
+  const destination = getUseCase(toUseCaseId)
+  if (
+    fromUseCaseId === toUseCaseId
+    && destination.allowedPosterFormats.includes(currentFormat)
+  ) {
+    return currentFormat
+  }
+  return destination.defaultPosterFormat
+}

@@ -86,6 +86,7 @@ import {
   CREATABLE_USE_CASES,
   getUseCase,
   isReferenceOnlyUseCaseId,
+  resolvePosterFormatOnUseCaseSwitch,
   type CreatableUseCaseId,
   type UseCaseFieldRequirement,
 } from '../lib/useCases'
@@ -149,6 +150,7 @@ export function CampaignWizardPage() {
   const latestProductUrl = useRef(productUrl)
   const latestProductName = useRef(productName)
   const latestUseCaseId = useRef(selectedUseCaseId)
+  const useCasePickerOriginRef = useRef<CreatableUseCaseId | null>(null)
   latestProductUrl.current = productUrl
   latestProductName.current = productName
   latestUseCaseId.current = selectedUseCaseId
@@ -341,6 +343,7 @@ export function CampaignWizardPage() {
   function discardLocalDraft() {
     campaignDraftPersistence.clear()
     cancelAmazonTitleLookup()
+    useCasePickerOriginRef.current = null
     setPhase('form')
     setError(null)
     setDraftId(null)
@@ -364,17 +367,16 @@ export function CampaignWizardPage() {
   }
 
   function selectUseCase(useCaseId: CreatableUseCaseId) {
-    const nextUseCase = getUseCase(useCaseId)
+    const source = selectedUseCaseId ?? useCasePickerOriginRef.current
     cancelAmazonTitleLookup()
     latestUseCaseId.current = useCaseId
     setSelectedUseCaseId(useCaseId)
     setSourceMismatchAttempted(false)
     setEagerCapturePreview(null)
     setPosterFormat((current) =>
-      nextUseCase.allowedPosterFormats.includes(current)
-        ? current
-        : nextUseCase.defaultPosterFormat
+      resolvePosterFormatOnUseCaseSwitch(current, source, useCaseId)
     )
+    useCasePickerOriginRef.current = null
     if (
       useCaseId === 'amazon_listing'
       && !destinationUrl.trim()
@@ -1054,6 +1056,7 @@ export function CampaignWizardPage() {
                 type="button"
                 className="button button-secondary button-small"
                 onClick={() => {
+                  useCasePickerOriginRef.current = selectedUseCaseId
                   cancelAmazonTitleLookup()
                   latestUseCaseId.current = null
                   setSelectedUseCaseId(null)

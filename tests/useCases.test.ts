@@ -8,6 +8,7 @@ import {
   getUseCase,
   isReferenceOnlyUseCaseId,
   isUseCaseId,
+  resolvePosterFormatOnUseCaseSwitch,
   USE_CASE_IDS,
   USE_CASES,
 } from '../src/lib/useCases.ts'
@@ -196,6 +197,88 @@ test('website, Amazon, and event retain all formats, A4 defaults, and tracking',
     )
     assert.equal(useCase.trackingEnabled, true)
   }
+})
+
+test('use-case round trip resolves each destination default', () => {
+  const redNoteFormat = resolvePosterFormatOnUseCaseSwitch(
+    'a4_2x3',
+    'website_product',
+    'rednote_post',
+  )
+  assert.equal(redNoteFormat, 'rednote_cover_3x4')
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      redNoteFormat,
+      'rednote_post',
+      'website_product',
+    ),
+    'a4_2x3',
+  )
+})
+
+test('cross-type format changes use the destination default', () => {
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'rednote_cover_3x4',
+      'rednote_post',
+      'website_product',
+    ),
+    'a4_2x3',
+  )
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'luma_1x1',
+      'website_product',
+      'amazon_listing',
+    ),
+    'a4_2x3',
+  )
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'a4_2x3',
+      'website_product',
+      'social_cover',
+    ),
+    'rednote_cover_3x4',
+  )
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'luma_1x1',
+      'website_product',
+      'rednote_post',
+    ),
+    'rednote_cover_3x4',
+  )
+})
+
+test('same-type format selection preserves valid defaults and explicit choices', () => {
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'a4_2x3',
+      'website_product',
+      'website_product',
+    ),
+    'a4_2x3',
+  )
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'luma_1x1',
+      'website_product',
+      'website_product',
+    ),
+    'luma_1x1',
+  )
+})
+
+test('initial use-case selection resolves the destination default', () => {
+  assert.equal(
+    resolvePosterFormatOnUseCaseSwitch(
+      'a4_2x3',
+      null,
+      'website_product',
+    ),
+    'a4_2x3',
+  )
 })
 
 test('registry labels are localized without carrying a prompt recipe', () => {
