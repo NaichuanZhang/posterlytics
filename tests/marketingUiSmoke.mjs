@@ -53,6 +53,8 @@ try {
   await testSignInErrorRecovery(browser)
   await testCampaignCreationFailure(browser)
   await testPublicResponsiveAccessibility(browser)
+  await testHeroTextSpacing(browser)
+  await testHeroTextResize(browser)
   await testPosterBreakpoints(browser)
   await testProtectedReturnPath(browser)
   await testChineseLocale(browser)
@@ -417,6 +419,111 @@ async function testPublicResponsiveAccessibility(browserInstance) {
     )
     await context.close()
   }
+}
+
+async function testHeroTextSpacing(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 320, height: 653 },
+    reducedMotion: 'reduce',
+    deviceScaleFactor: 1,
+  })
+  await installBackendMock(context, { authenticated: false })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: 'Posterlytics', exact: true }).waitFor()
+  await page.evaluate(() => document.fonts.ready)
+  await page.addStyleTag({
+    content: `
+      .public-hero-copy,
+      .public-hero-copy * {
+        line-height: 1.5 !important;
+        letter-spacing: 0.12em !important;
+        word-spacing: 0.16em !important;
+      }
+    `,
+  })
+  await waitForLayout(page)
+
+  const report = await readHeroTextGeometry(page)
+  assert.ok(
+    report.headingScrollWidth <= report.headingClientWidth,
+    `spaced hero heading clipped horizontally: ${JSON.stringify(report)}`,
+  )
+  assert.equal(
+    report.headingTextWithinBox,
+    true,
+    `spaced hero text escaped its heading box: ${JSON.stringify(report)}`,
+  )
+  assert.ok(
+    report.copyBottom <= report.stageTop + 1,
+    `spaced hero copy overlaps poster stage: ${JSON.stringify(report)}`,
+  )
+  assert.ok(
+    report.documentScrollWidth <= report.viewportWidth,
+    `spaced hero caused horizontal overflow: ${JSON.stringify(report)}`,
+  )
+  assert.deepEqual(pageErrors, [])
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/responsive-320x653-wcag-text-spacing.png`,
+    fullPage: true,
+  })
+  await context.close()
+}
+
+async function testHeroTextResize(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: 'reduce',
+    deviceScaleFactor: 1,
+  })
+  await installBackendMock(context, { authenticated: false })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: 'Posterlytics', exact: true }).waitFor()
+  await page.evaluate(() => document.fonts.ready)
+  await doubleComputedTextMetrics(
+    page,
+    [
+      '.public-overline',
+      '.public-hero h1',
+      '.public-hero-copy > p',
+      '.public-hero-actions a',
+    ].join(', '),
+  )
+
+  const report = await readHeroTextGeometry(page)
+  assert.ok(
+    report.headingScrollWidth <= report.headingClientWidth,
+    `resized hero heading clipped horizontally: ${JSON.stringify(report)}`,
+  )
+  assert.equal(
+    report.headingTextWithinBox,
+    true,
+    `resized hero text escaped its heading box: ${JSON.stringify(report)}`,
+  )
+  assert.equal(
+    report.headingTextIntersectsStage,
+    false,
+    `resized hero text intersects poster stage: ${JSON.stringify(report)}`,
+  )
+  assert.ok(
+    report.documentScrollWidth <= report.viewportWidth,
+    `resized hero caused horizontal overflow: ${JSON.stringify(report)}`,
+  )
+  assert.deepEqual(pageErrors, [])
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/hero-1280-200-percent-text.png`,
+    fullPage: true,
+  })
+  await context.close()
 }
 
 async function testPosterBreakpoints(browserInstance) {
@@ -843,6 +950,80 @@ async function assertNoHorizontalOverflow(page, label) {
   )
 }
 
+async function doubleComputedTextMetrics(page, selector) {
+  await page.locator(selector).evaluateAll((elements) => {
+    for (const element of elements) {
+      if (!(element instanceof HTMLElement)) continue
+      const style = getComputedStyle(element)
+      const fontSize = Number.parseFloat(style.fontSize)
+      const computedLineHeight = Number.parseFloat(style.lineHeight)
+      const lineHeight = Number.isFinite(computedLineHeight)
+        ? computedLineHeight
+        : fontSize * 1.2
+      element.style.setProperty('font-size', `${fontSize * 2}px`, 'important')
+      element.style.setProperty('line-height', `${lineHeight * 2}px`, 'important')
+    }
+  })
+  await waitForLayout(page)
+}
+
+async function readHeroTextGeometry(page) {
+  return page.evaluate(() => {
+    const heading = document.querySelector('.public-hero h1')
+    const copy = document.querySelector('.public-hero-copy')
+    const stage = document.querySelector('.hero-poster-stage')
+    if (
+      !(heading instanceof HTMLElement)
+      || !(copy instanceof HTMLElement)
+      || !(stage instanceof HTMLElement)
+    ) {
+      throw new Error('Hero geometry elements are missing.')
+    }
+
+    const toRect = (rect) => ({
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+    })
+    const headingRect = toRect(heading.getBoundingClientRect())
+    const copyRect = toRect(copy.getBoundingClientRect())
+    const stageRect = toRect(stage.getBoundingClientRect())
+    const range = document.createRange()
+    range.selectNodeContents(heading)
+    const textRects = [...range.getClientRects()]
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map(toRect)
+    const tolerance = 1
+    const intersects = (left, right) =>
+      Math.min(left.right, right.right) - Math.max(left.left, right.left) > tolerance
+      && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > tolerance
+
+    return {
+      copyBottom: copyRect.bottom,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      headingClientWidth: heading.clientWidth,
+      headingScrollWidth: heading.scrollWidth,
+      headingTextIntersectsStage: textRects.some((rect) => intersects(rect, stageRect)),
+      headingTextWithinBox: textRects.every((rect) =>
+        rect.left >= headingRect.left - tolerance
+        && rect.right <= headingRect.right + tolerance
+        && rect.top >= headingRect.top - tolerance
+        && rect.bottom <= headingRect.bottom + tolerance
+      ),
+      stageTop: stageRect.top,
+      textRects,
+      viewportWidth: window.innerWidth,
+    }
+  })
+}
+
+async function waitForLayout(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  }))
+}
+
 async function assertElementsWithinViewport(page, selector, label) {
   const issues = await page.locator(selector).evaluateAll((elements) => {
     const viewportWidth = document.documentElement.clientWidth
@@ -1079,21 +1260,22 @@ async function json(route, value, status = 200) {
 }
 
 async function waitForServer() {
-  await waitFor(async () => {
-    try {
-      const response = await fetch(BASE_URL)
-      return response.ok
-    } catch {
-      return false
-    }
-  }, 15_000, () => `Vite did not start.\n${serverOutput}`)
-}
-
-async function waitFor(check, timeoutMs, timeoutMessage) {
-  const deadline = Date.now() + timeoutMs
+  const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (await check()) return
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    if (server.exitCode !== null) {
+      throw new Error(
+        `Vite server exited with code ${server.exitCode} before startup.\n${serverOutput}`,
+      )
+    }
+    if (serverOutput.includes(BASE_URL)) {
+      try {
+        const response = await fetch(BASE_URL)
+        if (response.ok) return
+      } catch {
+        // This Vite process reported ready, but its socket is not accepting yet.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error(timeoutMessage())
+  throw new Error(`Vite server did not start.\n${serverOutput}`)
 }

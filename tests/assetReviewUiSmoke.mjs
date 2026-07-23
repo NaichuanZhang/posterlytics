@@ -51,6 +51,7 @@ try {
   await testGenerationDetailsSummary(browser)
   await testFailedGenerationDetails(browser)
   await testCampaignWizardUseCases(browser)
+  await testCampaignWizardTextResize(browser)
   await testAmazonProductTitleAssist(browser)
   await testWebsiteCapturePreview(browser)
   await testSinglePaidEagerCapture(browser)
@@ -551,6 +552,121 @@ async function testCampaignWizardUseCases(browserInstance) {
   assert.deepEqual(state.enqueueRequests, [])
   await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testCampaignWizardTextResize(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState()
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await openWizardForm(page, 'Website product')
+  const selectedLabel = page.locator('.campaign-use-case-selection strong')
+  await selectedLabel.evaluate((element) => {
+    element.textContent =
+      'Website product campaign type with extended localized wording for text resizing'
+  })
+  await doubleComputedTextMetrics(
+    page,
+    '.campaign-use-case-selection strong, .campaign-form .input',
+  )
+
+  const report = await page.evaluate(() => {
+    const label = document.querySelector('.campaign-use-case-selection strong')
+    const selection = document.querySelector('.campaign-use-case-selection')
+    if (!(label instanceof HTMLElement) || !(selection instanceof HTMLElement)) {
+      throw new Error('Campaign type selection is missing.')
+    }
+
+    const toRect = (rect) => ({
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+    })
+    const labelRect = toRect(label.getBoundingClientRect())
+    const selectionRect = toRect(selection.getBoundingClientRect())
+    const range = document.createRange()
+    range.selectNodeContents(label)
+    const textRects = [...range.getClientRects()]
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map(toRect)
+    const tolerance = 1
+    const within = (rect, container) =>
+      rect.left >= container.left - tolerance
+      && rect.right <= container.right + tolerance
+      && rect.top >= container.top - tolerance
+      && rect.bottom <= container.bottom + tolerance
+    const inputs = [...document.querySelectorAll('.campaign-form input.input')]
+      .flatMap((input) => {
+        if (!(input instanceof HTMLInputElement)) return []
+        const rect = input.getBoundingClientRect()
+        const style = getComputedStyle(input)
+        if (style.display === 'none' || style.visibility === 'hidden' || rect.height <= 0) {
+          return []
+        }
+        const lineHeight = Number.parseFloat(style.lineHeight)
+        const requiredHeight = lineHeight
+          + Number.parseFloat(style.paddingTop)
+          + Number.parseFloat(style.paddingBottom)
+          + Number.parseFloat(style.borderTopWidth)
+          + Number.parseFloat(style.borderBottomWidth)
+        return [{
+          height: rect.height,
+          id: input.id,
+          requiredHeight,
+        }]
+      })
+
+    return {
+      inputReports: inputs,
+      labelClientHeight: label.clientHeight,
+      labelClientWidth: label.clientWidth,
+      labelScrollHeight: label.scrollHeight,
+      labelScrollWidth: label.scrollWidth,
+      labelTextWithinBox: textRects.every((rect) => within(rect, labelRect)),
+      labelTextWithinSelection: textRects.every((rect) => within(rect, selectionRect)),
+      textRects,
+    }
+  })
+
+  assert.ok(
+    report.labelScrollWidth <= report.labelClientWidth,
+    `resized campaign type clipped horizontally: ${JSON.stringify(report)}`,
+  )
+  assert.ok(
+    report.labelScrollHeight <= report.labelClientHeight,
+    `resized campaign type clipped vertically: ${JSON.stringify(report)}`,
+  )
+  assert.equal(
+    report.labelTextWithinBox,
+    true,
+    `resized campaign type escaped its box: ${JSON.stringify(report)}`,
+  )
+  assert.equal(
+    report.labelTextWithinSelection,
+    true,
+    `resized campaign type escaped its selection row: ${JSON.stringify(report)}`,
+  )
+  assert.ok(report.inputReports.length > 0, 'Expected visible campaign inputs.')
+  assert.equal(
+    report.inputReports.every((input) => input.height + 1 >= input.requiredHeight),
+    true,
+    `resized campaign input clipped its line box: ${JSON.stringify(report)}`,
+  )
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/campaign-wizard-200-percent-text.png`,
+    fullPage: true,
+  })
   await context.close()
 }
 
@@ -2796,6 +2912,23 @@ async function waitForAnimationFrames(page, count) {
       await new Promise((resolve) => requestAnimationFrame(resolve))
     }
   }, count)
+}
+
+async function doubleComputedTextMetrics(page, selector) {
+  await page.locator(selector).evaluateAll((elements) => {
+    for (const element of elements) {
+      if (!(element instanceof HTMLElement)) continue
+      const style = getComputedStyle(element)
+      const fontSize = Number.parseFloat(style.fontSize)
+      const computedLineHeight = Number.parseFloat(style.lineHeight)
+      const lineHeight = Number.isFinite(computedLineHeight)
+        ? computedLineHeight
+        : fontSize * 1.2
+      element.style.setProperty('font-size', `${fontSize * 2}px`, 'important')
+      element.style.setProperty('line-height', `${lineHeight * 2}px`, 'important')
+    }
+  })
+  await waitForAnimationFrames(page, 2)
 }
 
 async function redNoteLayoutMetrics(locator) {

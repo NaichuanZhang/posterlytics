@@ -682,7 +682,8 @@ img {
 }
 
 .input {
-  height: 36px;
+  height: auto;
+  min-height: 36px;
   padding: 0 10px;
 }
 
@@ -1380,11 +1381,12 @@ img {
 }
 
 .campaign-use-case-selection strong {
-  overflow: hidden;
+  overflow: visible;
   font-size: 13px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .form-section {
