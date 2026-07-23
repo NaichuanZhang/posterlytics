@@ -737,103 +737,172 @@ async function testCampaignWizardTextResize(browserInstance) {
   page.on('pageerror', (error) => pageErrors.push(error))
 
   await openWizardForm(page, 'Website product')
+  // Stay one pixel above the 899px stack breakpoint so this exercises the narrow two-column wizard.
+  await page.setViewportSize({ width: 900, height: 900 })
+  await waitForAnimationFrames(page, 2)
+
+  const normalReport = await readCampaignWizardReflowGeometry(page)
+  const normalDetails = JSON.stringify(normalReport)
+  assert.ok(normalReport.summaryRows.length > 0, 'Expected campaign summary rows.')
+  assert.equal(
+    normalReport.summaryRows.every((row) =>
+      row.termTextRects.length === 1
+      && row.valueTextRects.length === 1
+      && row.termValueShareLine),
+    true,
+    `normal-size summary items did not share one flex line: ${normalDetails}`,
+  )
+  assert.equal(
+    normalReport.assetMode.buttons.length,
+    2,
+    `Expected both asset mode buttons: ${normalDetails}`,
+  )
+  assert.equal(
+    normalReport.assetMode.buttons.every((button) => button.textRects.length === 1),
+    true,
+    `normal-size asset mode button text wrapped: ${normalDetails}`,
+  )
+  assert.equal(
+    normalReport.assetMode.buttonsShareLine,
+    true,
+    `normal-size asset mode buttons did not share one flex line: ${normalDetails}`,
+  )
+
+  const sourceHost =
+    'source-catalog-for-low-vision-wizard-reflow.posterlytics-example.com'
+  const destinationHost =
+    'destination-checkout-for-low-vision-wizard-reflow.posterlytics-example.com'
+  await page.locator('#product-url').fill(`https://${sourceHost}/products/poster`)
+  await page.locator('#destination-url').fill(`https://${destinationHost}/signup`)
+  await page.locator('.campaign-summary dd').filter({ hasText: sourceHost }).waitFor()
+  await page.locator('.campaign-summary dd').filter({ hasText: destinationHost }).waitFor()
+
   const selectedLabel = page.locator('.campaign-use-case-selection strong')
   await selectedLabel.evaluate((element) => {
     element.textContent =
       'Website product campaign type with extended localized wording for text resizing'
   })
+  await page.addStyleTag({
+    content: `
+      .wizard-layout,
+      .wizard-layout * {
+        line-height: 1.5 !important;
+        letter-spacing: 0.12em !important;
+        word-spacing: 0.16em !important;
+      }
+    `,
+  })
   await doubleComputedTextMetrics(
     page,
-    '.campaign-use-case-selection strong, .campaign-form .input',
+    [
+      '.campaign-use-case-selection strong',
+      '.campaign-form .input',
+      '.campaign-summary dt',
+      '.campaign-summary dd',
+      '.asset-mode-control:not(.is-compact) > span:not(.sr-only)',
+      '.asset-mode-control:not(.is-compact) .segmented-control button',
+    ].join(', '),
   )
 
-  const report = await page.evaluate(() => {
-    const label = document.querySelector('.campaign-use-case-selection strong')
-    const selection = document.querySelector('.campaign-use-case-selection')
-    if (!(label instanceof HTMLElement) || !(selection instanceof HTMLElement)) {
-      throw new Error('Campaign type selection is missing.')
-    }
-
-    const toRect = (rect) => ({
-      bottom: rect.bottom,
-      left: rect.left,
-      right: rect.right,
-      top: rect.top,
-    })
-    const labelRect = toRect(label.getBoundingClientRect())
-    const selectionRect = toRect(selection.getBoundingClientRect())
-    const range = document.createRange()
-    range.selectNodeContents(label)
-    const textRects = [...range.getClientRects()]
-      .filter((rect) => rect.width > 0 && rect.height > 0)
-      .map(toRect)
-    const tolerance = 1
-    const within = (rect, container) =>
-      rect.left >= container.left - tolerance
-      && rect.right <= container.right + tolerance
-      && rect.top >= container.top - tolerance
-      && rect.bottom <= container.bottom + tolerance
-    const inputs = [...document.querySelectorAll('.campaign-form input.input')]
-      .flatMap((input) => {
-        if (!(input instanceof HTMLInputElement)) return []
-        const rect = input.getBoundingClientRect()
-        const style = getComputedStyle(input)
-        if (style.display === 'none' || style.visibility === 'hidden' || rect.height <= 0) {
-          return []
-        }
-        const lineHeight = Number.parseFloat(style.lineHeight)
-        const requiredHeight = lineHeight
-          + Number.parseFloat(style.paddingTop)
-          + Number.parseFloat(style.paddingBottom)
-          + Number.parseFloat(style.borderTopWidth)
-          + Number.parseFloat(style.borderBottomWidth)
-        return [{
-          height: rect.height,
-          id: input.id,
-          requiredHeight,
-        }]
-      })
-
-    return {
-      inputReports: inputs,
-      labelClientHeight: label.clientHeight,
-      labelClientWidth: label.clientWidth,
-      labelScrollHeight: label.scrollHeight,
-      labelScrollWidth: label.scrollWidth,
-      labelTextWithinBox: textRects.every((rect) => within(rect, labelRect)),
-      labelTextWithinSelection: textRects.every((rect) => within(rect, selectionRect)),
-      textRects,
-    }
-  })
+  const report = await readCampaignWizardReflowGeometry(page)
+  const details = JSON.stringify(report)
 
   assert.ok(
     report.labelScrollWidth <= report.labelClientWidth,
-    `resized campaign type clipped horizontally: ${JSON.stringify(report)}`,
+    `resized campaign type clipped horizontally: ${details}`,
   )
   assert.ok(
     report.labelScrollHeight <= report.labelClientHeight,
-    `resized campaign type clipped vertically: ${JSON.stringify(report)}`,
+    `resized campaign type clipped vertically: ${details}`,
   )
   assert.equal(
     report.labelTextWithinBox,
     true,
-    `resized campaign type escaped its box: ${JSON.stringify(report)}`,
+    `resized campaign type escaped its box: ${details}`,
   )
   assert.equal(
     report.labelTextWithinSelection,
     true,
-    `resized campaign type escaped its selection row: ${JSON.stringify(report)}`,
+    `resized campaign type escaped its selection row: ${details}`,
   )
   assert.ok(report.inputReports.length > 0, 'Expected visible campaign inputs.')
   assert.equal(
     report.inputReports.every((input) => input.height + 1 >= input.requiredHeight),
     true,
-    `resized campaign input clipped its line box: ${JSON.stringify(report)}`,
+    `resized campaign input clipped its line box: ${details}`,
+  )
+  assert.equal(
+    report.summaryRows.every((row) => row.doesNotIntersectNext),
+    true,
+    `resized campaign summary rows intersected: ${details}`,
+  )
+  assert.equal(
+    report.summaryRows.every((row) =>
+      row.termTextWithinElementAndRow
+      && row.valueTextWithinElementAndRow),
+    true,
+    `resized campaign summary text escaped its row: ${details}`,
+  )
+  assert.equal(
+    report.summaryRows.every((row) => !row.termValueTextIntersects),
+    true,
+    `resized campaign summary term and value text intersected: ${details}`,
+  )
+  assert.equal(
+    report.summaryRows.every((row) =>
+      row.rowScrollWidth <= row.rowClientWidth + 1
+      && row.termScrollWidth <= row.termClientWidth + 1
+      && row.valueScrollWidth <= row.valueClientWidth + 1),
+    true,
+    `resized campaign summary overflowed horizontally: ${details}`,
+  )
+
+  const longUrlRows = report.summaryRows.filter(
+    (row) => row.term === 'Source' || row.term === 'Destination',
+  )
+  assert.equal(
+    longUrlRows.length,
+    2,
+    `Expected Source and Destination summary rows: ${details}`,
+  )
+  assert.equal(
+    longUrlRows.every((row) => row.valueBelowTerm && row.valueTextRects.length > 1),
+    true,
+    `long summary URLs did not wrap below their terms: ${details}`,
+  )
+
+  assert.equal(
+    report.assetMode.groupInsideControl,
+    true,
+    `asset mode group escaped its control: ${details}`,
+  )
+  assert.equal(
+    report.assetMode.buttons.length,
+    2,
+    `Expected both resized asset mode buttons: ${details}`,
+  )
+  assert.equal(
+    report.assetMode.buttons.every((button) =>
+      button.buttonWithinGroup
+      && button.textWithinButton
+      && button.textWithinGroup
+      && button.scrollWidth <= button.clientWidth + 1),
+    true,
+    `resized asset mode button escaped or clipped: ${details}`,
+  )
+  assert.equal(
+    report.assetMode.buttonsIntersect,
+    false,
+    `resized asset mode buttons intersected: ${details}`,
+  )
+  assert.ok(
+    report.assetMode.groupScrollWidth <= report.assetMode.groupClientWidth + 1,
+    `resized asset mode group overflowed horizontally: ${details}`,
   )
   await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
   await page.screenshot({
-    path: `${OUTPUT_DIR}/campaign-wizard-200-percent-text.png`,
+    path: `${OUTPUT_DIR}/campaign-wizard-wcag-spacing-200-percent-text.png`,
     fullPage: true,
   })
   await context.close()
@@ -3501,6 +3570,197 @@ async function waitForAnimationFrames(page, count) {
       await new Promise((resolve) => requestAnimationFrame(resolve))
     }
   }, count)
+}
+
+async function readCampaignWizardReflowGeometry(page) {
+  return page.evaluate(() => {
+    const label = document.querySelector('.campaign-use-case-selection strong')
+    const selection = document.querySelector('.campaign-use-case-selection')
+    const summary = document.querySelector('.campaign-summary')
+    const assetControl = document.querySelector(
+      '.campaign-form .asset-mode-control:not(.is-compact)',
+    )
+    const assetGroup = assetControl?.querySelector('[role="group"]')
+    if (
+      !(label instanceof HTMLElement)
+      || !(selection instanceof HTMLElement)
+      || !(summary instanceof HTMLElement)
+      || !(assetControl instanceof HTMLElement)
+      || !(assetGroup instanceof HTMLElement)
+    ) {
+      throw new Error('Campaign wizard reflow elements are missing.')
+    }
+
+    const tolerance = 1
+    const rectOf = (rect) => ({
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+    })
+    const within = (rect, container) =>
+      rect.left >= container.left - tolerance
+      && rect.right <= container.right + tolerance
+      && rect.top >= container.top - tolerance
+      && rect.bottom <= container.bottom + tolerance
+    const intersects = (first, second) =>
+      first.left < second.right - tolerance
+      && first.right > second.left + tolerance
+      && first.top < second.bottom - tolerance
+      && first.bottom > second.top + tolerance
+    const sharesLine = (firstRects, secondRects) =>
+      firstRects.some((first) =>
+        secondRects.some((second) =>
+          first.top < second.bottom - tolerance
+          && first.bottom > second.top + tolerance))
+    const textRectsOf = (element) => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      return [...range.getClientRects()]
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map(rectOf)
+    }
+    const textNodeRectsOf = (element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      const rects = []
+      let node = walker.nextNode()
+      while (node) {
+        if (node.textContent?.trim()) {
+          const range = document.createRange()
+          range.selectNodeContents(node)
+          rects.push(
+            ...[...range.getClientRects()]
+              .filter((rect) => rect.width > 0 && rect.height > 0)
+              .map(rectOf),
+          )
+        }
+        node = walker.nextNode()
+      }
+      return rects
+    }
+
+    const labelRect = rectOf(label.getBoundingClientRect())
+    const selectionRect = rectOf(selection.getBoundingClientRect())
+    const labelTextRects = textRectsOf(label)
+    const summaryElements = [...summary.querySelectorAll('dl > div')]
+    const summaryRows = summaryElements.map((row, index) => {
+      const term = row.querySelector('dt')
+      const value = row.querySelector('dd')
+      if (!(row instanceof HTMLElement)
+        || !(term instanceof HTMLElement)
+        || !(value instanceof HTMLElement)) {
+        throw new Error('Campaign summary definition row is incomplete.')
+      }
+
+      const rowRect = rectOf(row.getBoundingClientRect())
+      const termRect = rectOf(term.getBoundingClientRect())
+      const valueRect = rectOf(value.getBoundingClientRect())
+      const termTextRects = textRectsOf(term)
+      const valueTextRects = textRectsOf(value)
+      const nextRow = summaryElements[index + 1]
+      const nextRowRect = nextRow instanceof HTMLElement
+        ? rectOf(nextRow.getBoundingClientRect())
+        : null
+
+      return {
+        doesNotIntersectNext: !nextRowRect || !intersects(rowRect, nextRowRect),
+        rowClientWidth: row.clientWidth,
+        rowScrollWidth: row.scrollWidth,
+        term: term.textContent?.trim() ?? '',
+        termClientWidth: term.clientWidth,
+        termScrollWidth: term.scrollWidth,
+        termTextRects,
+        termTextWithinElementAndRow: termTextRects.every(
+          (rect) => within(rect, termRect) && within(rect, rowRect),
+        ),
+        termValueShareLine: sharesLine(termTextRects, valueTextRects),
+        termValueTextIntersects: termTextRects.some((termTextRect) =>
+          valueTextRects.some((valueTextRect) => intersects(termTextRect, valueTextRect))),
+        value: value.textContent?.trim() ?? '',
+        valueBelowTerm: (
+          termTextRects.length > 0
+          && valueTextRects.length > 0
+          && Math.min(...valueTextRects.map((rect) => rect.top))
+            >= Math.max(...termTextRects.map((rect) => rect.bottom)) - tolerance
+        ),
+        valueClientWidth: value.clientWidth,
+        valueScrollWidth: value.scrollWidth,
+        valueTextRects,
+        valueTextWithinElementAndRow: valueTextRects.every(
+          (rect) => within(rect, valueRect) && within(rect, rowRect),
+        ),
+      }
+    })
+
+    const inputReports = [...document.querySelectorAll('.campaign-form input.input')]
+      .flatMap((input) => {
+        if (!(input instanceof HTMLInputElement)) return []
+        const rect = input.getBoundingClientRect()
+        const style = getComputedStyle(input)
+        if (style.display === 'none' || style.visibility === 'hidden' || rect.height <= 0) {
+          return []
+        }
+        const lineHeight = Number.parseFloat(style.lineHeight)
+        const requiredHeight = lineHeight
+          + Number.parseFloat(style.paddingTop)
+          + Number.parseFloat(style.paddingBottom)
+          + Number.parseFloat(style.borderTopWidth)
+          + Number.parseFloat(style.borderBottomWidth)
+        return [{
+          height: rect.height,
+          id: input.id,
+          requiredHeight,
+        }]
+      })
+
+    const assetControlRect = rectOf(assetControl.getBoundingClientRect())
+    const assetGroupRect = rectOf(assetGroup.getBoundingClientRect())
+    const buttonElements = [...assetGroup.querySelectorAll('button')]
+    const buttons = buttonElements.flatMap((button) => {
+      if (!(button instanceof HTMLButtonElement)) return []
+      const buttonRect = rectOf(button.getBoundingClientRect())
+      const textRects = textNodeRectsOf(button)
+      return [{
+        buttonWithinGroup: within(buttonRect, assetGroupRect),
+        clientWidth: button.clientWidth,
+        name: button.textContent?.trim() ?? '',
+        rect: buttonRect,
+        scrollWidth: button.scrollWidth,
+        textRects,
+        textWithinButton: textRects.every((rect) => within(rect, buttonRect)),
+        textWithinGroup: textRects.every((rect) => within(rect, assetGroupRect)),
+      }]
+    })
+
+    return {
+      assetMode: {
+        buttons,
+        buttonsIntersect: buttons.some((button, index) =>
+          buttons.slice(index + 1).some((other) => intersects(button.rect, other.rect))),
+        buttonsShareLine: (
+          buttons.length === 2
+          && sharesLine([buttons[0].rect], [buttons[1].rect])
+        ),
+        groupClientWidth: assetGroup.clientWidth,
+        groupInsideControl: (
+          assetControl.contains(assetGroup)
+          && within(assetGroupRect, assetControlRect)
+        ),
+        groupScrollWidth: assetGroup.scrollWidth,
+      },
+      inputReports,
+      labelClientHeight: label.clientHeight,
+      labelClientWidth: label.clientWidth,
+      labelScrollHeight: label.scrollHeight,
+      labelScrollWidth: label.scrollWidth,
+      labelTextWithinBox: labelTextRects.every((rect) => within(rect, labelRect)),
+      labelTextWithinSelection: labelTextRects.every(
+        (rect) => within(rect, selectionRect),
+      ),
+      labelTextRects,
+      summaryRows,
+    }
+  })
 }
 
 async function doubleComputedTextMetrics(page, selector) {

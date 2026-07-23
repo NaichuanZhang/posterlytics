@@ -1779,9 +1779,9 @@ img {
 }
 
 .campaign-summary dl > div {
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -1791,19 +1791,24 @@ img {
 }
 
 .campaign-summary dt {
+  min-width: 0;
+  flex: 0 1 78px;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: 11px;
 }
 
 .campaign-summary dd {
   min-width: 0;
+  flex: 1 1 10em;
   margin: 0;
-  overflow: hidden;
+  overflow: visible;
+  overflow-wrap: anywhere;
   color: var(--text-soft);
   font-size: 11px;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .creation-starting {
@@ -4471,9 +4476,20 @@ table.stats tr.winner td:first-child {
 }
 
 .asset-mode-control > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text-soft);
   font-size: 12px;
   font-weight: 600;
+}
+
+.asset-mode-control:not(.is-compact) {
+  flex-wrap: wrap;
+}
+
+.asset-mode-control:not(.is-compact) .segmented-control {
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .asset-mode-control .segmented-control button {
