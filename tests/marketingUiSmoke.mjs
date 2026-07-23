@@ -506,6 +506,8 @@ async function testPasswordRecovery(browserInstance) {
   await page.goto(`${BASE_URL}/signin`)
   await page.getByRole('button', { name: 'Forgot password?' }).click()
   await page.getByRole('heading', { name: 'Reset your password' }).waitFor()
+  await waitForFocused(page, '#auth-heading')
+  await page.keyboard.press('Tab')
   await waitForFocused(page, '#reset-email')
 
   await page.getByLabel('Email').fill('locked-out@posterlytics.test')

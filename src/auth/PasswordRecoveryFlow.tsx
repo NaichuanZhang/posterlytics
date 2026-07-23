@@ -49,9 +49,12 @@ export function PasswordRecoveryFlow({
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [resendSeconds, setResendSeconds] = useState(0)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const emailInputRef = useRef<HTMLInputElement>(null)
   const busy = pendingAction !== null
 
+  useFocusOnChange(headingRef, 'recovery-entry', { focusOnMount: true })
   useFocusOnChange(headingRef, step, { enabled: step === 'success' })
+  useFocusOnChange(emailInputRef, step, { enabled: step === 'email' })
 
   useEffect(() => {
     if (resendSeconds <= 0) return
@@ -405,6 +408,7 @@ export function PasswordRecoveryFlow({
           <label htmlFor="reset-email">{t('Email')}</label>
           <input
             key={step}
+            ref={emailInputRef}
             id="reset-email"
             type="email"
             required
@@ -416,7 +420,6 @@ export function PasswordRecoveryFlow({
             placeholder={t('you@company.com')}
             autoComplete="email"
             disabled={busy}
-            autoFocus
           />
         </div>
 
