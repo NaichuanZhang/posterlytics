@@ -250,9 +250,19 @@ test('wizard persists spec-driven nullable sources and the platform target atomi
     wizard,
     /disabled=\{[\s\S]*!referenceMinimumMet[\s\S]*!referenceContextRequirementMet[\s\S]*!pendingReferencesReady\(pendingReferences\)/,
   )
+  const artworkDetailsPosition = wizard.indexOf('aria-labelledby="source-heading"')
+  const generationReferencesPosition = wizard.indexOf(
+    '{referenceOnlyMode && renderGenerationReferences(inputFields)}',
+    artworkDetailsPosition,
+  )
+  const artworkOutputPosition = wizard.indexOf(
+    '{referenceOnlyMode && renderArtworkOutputFields(inputFields)}',
+    generationReferencesPosition,
+  )
   assert.ok(
-    wizard.indexOf('{referenceOnlyMode && renderGenerationReferences(inputFields)}')
-      < wizard.indexOf('aria-labelledby="source-heading"'),
+    artworkDetailsPosition >= 0
+      && artworkDetailsPosition < generationReferencesPosition
+      && generationReferencesPosition < artworkOutputPosition,
   )
   assert.doesNotMatch(wizard, /use_case:[\s\S]{0,120}(?:prompt|recipe)/i)
 })

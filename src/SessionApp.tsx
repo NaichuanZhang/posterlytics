@@ -5,6 +5,7 @@ import { RequireAuth } from './auth/RequireAuth'
 import { FirstPaintLoadingShell } from './components/ui/FirstPaintLoadingShell'
 import { Spinner } from './components/ui/Spinner'
 import { ToastProvider } from './components/ui/Toast'
+import { RouteFocusManager } from './components/RouteFocusManager'
 import { PublicLandingShell } from './marketing/PublicLandingShell'
 
 const SignInPage = lazy(() =>
@@ -71,6 +72,7 @@ export default function SessionApp() {
     <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
+          <RouteFocusManager />
           <Routes>
             <Route path="/" element={<HomeRoute />} />
             <Route

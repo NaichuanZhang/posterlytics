@@ -249,10 +249,12 @@ async function testPasswordRecovery(browserInstance) {
   await page.goto(`${BASE_URL}/signin`)
   await page.getByRole('button', { name: 'Forgot password?' }).click()
   await page.getByRole('heading', { name: 'Reset your password' }).waitFor()
+  await waitForFocused(page, '#reset-email')
 
   await page.getByLabel('Email').fill('locked-out@posterlytics.test')
   await page.getByRole('button', { name: 'Send reset code' }).click()
   await page.getByRole('heading', { name: 'Enter the code' }).waitFor()
+  await waitForFocused(page, '#reset-code')
   await page.getByText(
     'If an account exists, a code was sent. Check your inbox and spam folder.',
   ).waitFor()
@@ -263,11 +265,13 @@ async function testPasswordRecovery(browserInstance) {
   await page.getByLabel('Reset code').fill('123456')
   await page.getByRole('button', { name: 'Verify code' }).click()
   await page.getByRole('heading', { name: 'Create a new password' }).waitFor()
+  await waitForFocused(page, '#reset-new-password')
 
   await page.getByLabel('New password', { exact: true }).fill('new-secure-password')
   await page.getByLabel('Confirm new password').fill('new-secure-password')
   await page.getByRole('button', { name: 'Reset password' }).click()
   await page.getByRole('heading', { name: 'Password updated' }).waitFor()
+  await waitForFocused(page, '#auth-heading')
   await page.getByText('Your password has been changed.').waitFor()
 
   assert.deepEqual(authState.resetCalls, [
@@ -290,6 +294,7 @@ async function testPasswordRecovery(browserInstance) {
 
   await page.getByRole('button', { name: 'Sign in with new password' }).click()
   await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+  await waitForFocused(page, '#auth-heading')
   assert.equal(
     await page.getByLabel('Email').inputValue(),
     'locked-out@posterlytics.test',
@@ -1349,4 +1354,13 @@ async function waitForServer() {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(`Vite server did not start.\n${serverOutput}`)
+}
+
+async function waitForFocused(page, selector) {
+  await page.waitForFunction(
+    (targetSelector) => (
+      document.activeElement === document.querySelector(targetSelector)
+    ),
+    selector,
+  )
 }

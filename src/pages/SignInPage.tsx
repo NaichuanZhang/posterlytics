@@ -1,10 +1,11 @@
 import { ArrowLeft, ArrowRight, LoaderCircle } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { PasswordRecoveryFlow } from '../auth/PasswordRecoveryFlow'
 import { LanguageSelect } from '../components/LanguageSelect'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
+import { useFocusOnChange } from '../hooks/useViewFocus'
 import { insforge } from '../lib/insforge'
 import { useAuth } from '../auth/AuthProvider'
 import { parseAuthMode, safeNextPath } from '../lib/authRouting'
@@ -22,11 +23,17 @@ export function SignInPage() {
   const [errorKind, setErrorKind] = useState<SignInErrorKind | null>(null)
   const [busy, setBusy] = useState(false)
   const [recoveringPassword, setRecoveringPassword] = useState(false)
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { user, loading, refresh } = useAuth()
   const mode = parseAuthMode(searchParams.get('mode'))
   const nextPath = safeNextPath(searchParams.get('next'))
+
+  useFocusOnChange(headingRef, recoveringPassword, {
+    enabled: !recoveringPassword,
+    focusOnMount: true,
+  })
 
   useEffect(() => {
     if (!loading && user) navigate(nextPath, { replace: true })
@@ -134,7 +141,7 @@ export function SignInPage() {
             <>
               <div className="public-auth-heading">
                 <span>{t('Poster attribution workspace')}</span>
-                <h1 id="auth-heading">
+                <h1 ref={headingRef} id="auth-heading">
                   {mode === 'signin' ? t('Sign in') : t('Create an account')}
                 </h1>
                 <p>

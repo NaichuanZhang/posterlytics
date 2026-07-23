@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
   type SetStateAction,
 } from 'react'
+import { useRequiredFieldValidity } from '../hooks/useRequiredFieldValidity'
 import { useI18n } from '../i18n/I18nProvider'
 import type { Translate } from '../lib/i18n'
 import {
@@ -44,6 +45,7 @@ interface Props {
   referenceImagesMinimumCount?: number
   referenceImagesLabel?: string
   referenceImagesHint?: string
+  validationAttempt?: number
 }
 
 type ReferenceRejection =
@@ -66,21 +68,25 @@ export function GenerationReferences({
   referenceImagesMinimumCount = 0,
   referenceImagesLabel,
   referenceImagesHint,
+  validationAttempt = 0,
 }: Props) {
   const { formatNumber, t } = useI18n()
   const [rejections, setRejections] = useState<ReferenceRejection[]>([])
   const [urlInput, setUrlInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const id = useId()
   const contextId = `${id}-context`
+  const contextHintId = `${id}-context-hint`
+  const contextErrorId = `${id}-context-error`
   const imageInputId = `${id}-images`
   const imageLabelId = `${id}-images-label`
+  const imageDropzoneId = `${id}-images-dropzone`
   const imageActionId = `${id}-images-action`
   const imageStatusId = `${id}-images-status`
   const imageHintId = `${id}-images-hint`
   const imageErrorId = `${id}-images-errors`
+  const imageRequiredErrorId = `${id}-images-required-error`
   const urlInputId = `${id}-image-url`
   const totalImages = existingImages.length + pendingReferences.length
   const remainingSlots = Math.max(0, MAX_REFERENCE_IMAGES - totalImages)
@@ -90,6 +96,24 @@ export function GenerationReferences({
   const resolvedContextPlaceholder = contextPlaceholder
     ?? t('Audience, campaign goals, visual direction, required details, or anything the generator should preserve.')
   const resolvedReferenceImagesLabel = referenceImagesLabel ?? t('Supporting images')
+  const contextRequired = contextRequirement === 'required'
+  const requiredImageCount = Math.max(
+    referenceImagesMinimumCount,
+    referenceImagesRequirement === 'required' ? 1 : 0,
+  )
+  const referenceImagesRequired = requiredImageCount > 0
+  const contextValidity = useRequiredFieldValidity({
+    required: contextRequired,
+    valid: context.trim().length > 0,
+    validationAttempt,
+    resetKey: contextRequirement,
+  })
+  const referenceImagesValidity = useRequiredFieldValidity({
+    required: referenceImagesRequired,
+    valid: totalImages >= requiredImageCount,
+    validationAttempt,
+    resetKey: `${referenceImagesRequirement}:${requiredImageCount}`,
+  })
 
   useEffect(() => {
     if (!isUnavailable) return
@@ -142,26 +166,26 @@ export function GenerationReferences({
     return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain')
   }
 
-  function handleDragEnter(event: ReactDragEvent<HTMLButtonElement>) {
+  function handleDragEnter(event: ReactDragEvent<HTMLLabelElement>) {
     event.preventDefault()
     if (isUnavailable || !isSupportedDrag(event)) return
     dragDepth.current += 1
     setIsDragging(true)
   }
 
-  function handleDragOver(event: ReactDragEvent<HTMLButtonElement>) {
+  function handleDragOver(event: ReactDragEvent<HTMLLabelElement>) {
     event.preventDefault()
     event.dataTransfer.dropEffect = isUnavailable || !isSupportedDrag(event) ? 'none' : 'copy'
   }
 
-  function handleDragLeave(event: ReactDragEvent<HTMLButtonElement>) {
+  function handleDragLeave(event: ReactDragEvent<HTMLLabelElement>) {
     event.preventDefault()
     if (!isSupportedDrag(event)) return
     dragDepth.current = Math.max(0, dragDepth.current - 1)
     if (dragDepth.current === 0) setIsDragging(false)
   }
 
-  function handleDrop(event: ReactDragEvent<HTMLButtonElement>) {
+  function handleDrop(event: ReactDragEvent<HTMLLabelElement>) {
     event.preventDefault()
     dragDepth.current = 0
     setIsDragging(false)
@@ -219,19 +243,31 @@ export function GenerationReferences({
             id={contextId}
             className="textarea"
             value={context}
-            required={contextRequirement === 'required'}
+            required={contextRequired}
+            aria-required={contextRequired}
+            aria-invalid={contextValidity.invalid}
+            aria-describedby={[
+              contextHintId,
+              contextValidity.invalid ? contextErrorId : '',
+            ].filter(Boolean).join(' ')}
             maxLength={MAX_REFERENCE_CONTEXT_LENGTH}
             disabled={disabled}
             placeholder={resolvedContextPlaceholder}
             onChange={(event) => onContextChange(event.target.value)}
+            onBlur={contextValidity.onBlur}
           />
-          <div className="hint">
+          <div className="hint" id={contextHintId}>
             {contextHint ? `${contextHint} ` : ''}
             {t('{current} / {maximum} characters', {
               current: formatNumber(context.length),
               maximum: formatNumber(MAX_REFERENCE_CONTEXT_LENGTH),
             })}
           </div>
+          {contextValidity.invalid && (
+            <p className="field-error" id={contextErrorId}>
+              {t('Draft copy is required.')}
+            </p>
+          )}
         </div>
       )}
 
@@ -246,20 +282,31 @@ export function GenerationReferences({
             )}
           </div>
           <input
-            ref={inputRef}
             id={imageInputId}
-            className="reference-file-input"
+            className="reference-file-input sr-only"
+            data-testid="reference-file-input"
+            data-validation-focus-target={imageDropzoneId}
             type="file"
             accept="image/jpeg,image/png,image/webp"
             multiple
-            hidden
-            tabIndex={-1}
             disabled={isUnavailable}
+            aria-required={referenceImagesRequired}
+            aria-invalid={referenceImagesValidity.invalid}
+            aria-labelledby={imageLabelId}
+            aria-describedby={[
+              imageStatusId,
+              imageHintId,
+              referenceImagesValidity.invalid ? imageRequiredErrorId : '',
+              rejections.length > 0 ? imageErrorId : '',
+            ].filter(Boolean).join(' ')}
             onChange={selectFiles}
+            onBlur={referenceImagesValidity.onBlur}
           />
           <div className="reference-source-grid">
-            <button
-              type="button"
+            <label
+              id={imageDropzoneId}
+              htmlFor={imageInputId}
+              tabIndex={-1}
               className={[
                 'reference-dropzone',
                 isDragging ? 'is-drag-active' : '',
@@ -270,11 +317,12 @@ export function GenerationReferences({
               aria-describedby={[
                 imageStatusId,
                 imageHintId,
+                referenceImagesValidity.invalid ? imageRequiredErrorId : '',
                 rejections.length > 0 ? imageErrorId : '',
               ].filter(Boolean).join(' ')}
               aria-disabled={isUnavailable}
-              onClick={() => {
-                if (!isUnavailable) inputRef.current?.click()
+              onClick={(event) => {
+                if (isUnavailable) event.preventDefault()
               }}
               onDragEnter={handleDragEnter}
               onDragOver={handleDragOver}
@@ -311,7 +359,7 @@ export function GenerationReferences({
                       )}
                 </span>
               </span>
-            </button>
+            </label>
 
             <div className={`reference-url-panel${isUnavailable ? ' is-disabled' : ''}`}>
               <label htmlFor={urlInputId}>{t('Image URL')}</label>
@@ -357,6 +405,11 @@ export function GenerationReferences({
               <> {t('Add at least {count} images.', { count: referenceImagesMinimumCount })}</>
             )}
           </div>
+          {referenceImagesValidity.invalid && (
+            <p className="field-error" id={imageRequiredErrorId}>
+              {t('Add at least {count} images.', { count: requiredImageCount })}
+            </p>
+          )}
           {rejections.length > 0 && (
             <div className="reference-errors" id={imageErrorId} role="alert">
               <ul>

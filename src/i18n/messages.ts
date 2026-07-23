@@ -231,6 +231,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Raise candidate priority',
   'Lower candidate priority',
   'Required',
+  '{name} is required.',
   'Product name',
   'Looking up the Amazon product title...',
   'Product title unavailable. Enter the product name.',
@@ -268,6 +269,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'RedNote post generation requires at least one reference image.',
   'RedNote post generation requires draft copy.',
   'Draft copy',
+  'Draft copy is required.',
   'Paste the full draft copy for this RedNote post.',
   'The draft copy is interpreted together with the reference images.',
   'Draft copy and creative references',
@@ -275,6 +277,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Set artwork details, creative references, and an optional platform hint.',
   'Set artwork details, draft copy, creative references, and an optional platform hint.',
   'Artwork details',
+  'Artwork output',
   'Name the artwork and choose its full-bleed output format.',
   'Artwork name',
   'Summer launch cover',
@@ -955,6 +958,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Raise candidate priority': '提高候选优先级',
   'Lower candidate priority': '降低候选优先级',
   Required: '必填',
+  '{name} is required.': '请填写{name}。',
   'Product name': '产品名称',
   'Looking up the Amazon product title...': '正在查找亚马逊商品标题…',
   'Product title unavailable. Enter the product name.':
@@ -1007,6 +1011,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'RedNote post generation requires draft copy.':
     '生成小红书笔记需要填写笔记草稿。',
   'Draft copy': '笔记草稿',
+  'Draft copy is required.': '请填写笔记草稿。',
   'Paste the full draft copy for this RedNote post.':
     '粘贴这篇小红书笔记的完整草稿。',
   'The draft copy is interpreted together with the reference images.':
@@ -1019,6 +1024,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Set artwork details, draft copy, creative references, and an optional platform hint.':
     '设置画面信息、笔记草稿、创意参考素材和可选的平台提示。',
   'Artwork details': '画面信息',
+  'Artwork output': '画面输出',
   'Name the artwork and choose its full-bleed output format.':
     '为画面命名，并选择满版输出格式。',
   'Artwork name': '画面名称',

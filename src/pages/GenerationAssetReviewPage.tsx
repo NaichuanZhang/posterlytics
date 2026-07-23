@@ -26,6 +26,7 @@ import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { Spinner } from '../components/ui/Spinner'
+import { useFocusOnChange } from '../hooks/useViewFocus'
 import { useI18n } from '../i18n/I18nProvider'
 import {
   cancelGenerationAssetReview,
@@ -59,9 +60,15 @@ export function GenerationAssetReviewPage() {
   const [canceling, setCanceling] = useState(false)
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const initializedRef = useRef(false)
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const latestSelectionRef = useRef<string[]>([])
   const saveChainRef = useRef<Promise<void>>(Promise.resolve())
   const saveVersionRef = useRef(0)
+
+  useFocusOnChange(headingRef, loading ? 'loading' : 'ready', {
+    enabled: !loading,
+    onlyWhenFocusLost: true,
+  })
 
   const load = useCallback(async (initial = false) => {
     if (!campaignId || !generationId) return
@@ -281,7 +288,7 @@ export function GenerationAssetReviewPage() {
         <header className="asset-review-header">
           <div>
             <span>{t('Editor selection')}</span>
-            <h1>{t('Generation assets')}</h1>
+            <h1 ref={headingRef}>{t('Generation assets')}</h1>
           </div>
           {reviewReady && (
             <div className="asset-review-save" aria-live="polite">

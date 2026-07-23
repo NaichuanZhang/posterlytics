@@ -51,6 +51,7 @@ try {
   await testGenerationDetailsSummary(browser)
   await testFailedGenerationDetails(browser)
   await testCampaignWizardUseCases(browser)
+  await testCampaignWizardAccessibility(browser)
   await testCampaignWizardTextResize(browser)
   await testAmazonProductTitleAssist(browser)
   await testWebsiteCapturePreview(browser)
@@ -451,7 +452,7 @@ async function testCampaignWizardUseCases(browserInstance) {
   await selectWizardUseCase(page, 'Social cover')
   assert.deepEqual(
     await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
-    ['Creative references and direction', 'Artwork details'],
+    ['Artwork details', 'Creative references and direction', 'Artwork output'],
   )
   assert.equal(await page.locator('#product-url').count(), 0)
   assert.equal(await page.locator('#destination-url').count(), 0)
@@ -545,15 +546,151 @@ async function testCampaignWizardUseCases(browserInstance) {
   await page.locator('#product-name').fill('Unsupported marketplace')
   await page.getByRole('button', { name: 'Generate poster', exact: true }).click()
   await page.locator('.source-mismatch .inline-notice-error').waitFor()
-  assert.equal(
-    await page.locator('#product-url').evaluate((element) => element === document.activeElement),
-    true,
-  )
+  await waitForFocused(page, '#product-url')
   assert.deepEqual(state.campaignWrites, [])
   assert.deepEqual(state.enqueueRequests, [])
   await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
   await context.close()
+}
+
+async function testCampaignWizardAccessibility(browserInstance) {
+  const redNoteContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const redNoteState = createState()
+  await installBackendMock(redNoteContext, redNoteState)
+  const redNotePage = await redNoteContext.newPage()
+  const redNoteErrors = []
+  redNotePage.on('pageerror', (error) => redNoteErrors.push(error))
+
+  await redNotePage.goto(`${BASE_URL}/campaigns/new`)
+  await redNotePage.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await redNotePage.getByRole('button', { name: /RedNote post/ }).click()
+  await redNotePage.locator('.campaign-form').waitFor()
+  await waitForFocused(redNotePage, '#source-heading')
+  assert.equal(
+    await redNotePage.evaluate(() => document.activeElement !== document.body),
+    true,
+  )
+  assert.deepEqual(
+    await redNotePage.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Artwork details', 'Draft copy and creative references', 'Artwork output'],
+  )
+
+  const productName = redNotePage.locator('#product-name')
+  const draftCopy = redNotePage.locator('.generation-references textarea')
+  const fileInput = redNotePage.getByTestId('reference-file-input')
+  const imageUrl = redNotePage.getByLabel('Image URL', { exact: true })
+  const editorMode = redNotePage.getByRole('button', { name: 'Editor' })
+  const automaticMode = redNotePage.getByRole('button', { name: 'Automatic' })
+  const tagline = redNotePage.locator('#tagline')
+  const posterFormat = redNotePage.locator('#poster-format')
+  const platformHint = redNotePage.locator('#platform-hint')
+  const generate = redNotePage.getByRole('button', {
+    name: 'Generate poster',
+    exact: true,
+  })
+
+  for (const control of [productName, draftCopy, fileInput]) {
+    assert.equal(await control.getAttribute('aria-required'), 'true')
+    assert.equal(await control.getAttribute('aria-invalid'), 'false')
+  }
+  assert.equal(await generate.isDisabled(), true)
+
+  await productName.focus()
+  await waitForFocused(redNotePage, productName)
+  for (const control of [
+    draftCopy,
+    fileInput,
+    imageUrl,
+    editorMode,
+    automaticMode,
+    tagline,
+    posterFormat,
+    platformHint,
+  ]) {
+    await redNotePage.keyboard.press('Tab')
+    await waitForFocused(redNotePage, control)
+  }
+  await redNotePage.keyboard.press('Tab')
+  await waitForFocused(redNotePage, '.form-actions .button-secondary')
+
+  for (const control of [productName, draftCopy, fileInput]) {
+    assert.equal(await control.getAttribute('aria-invalid'), 'true')
+    assert.ok(await control.getAttribute('aria-describedby'))
+  }
+
+  await productName.fill('Accessible RedNote launch')
+  await draftCopy.fill('A complete launch draft for the RedNote post.')
+  await fileInput.setInputFiles(referenceImageFile('rednote-reference.png'))
+  await redNotePage.locator('.reference-tile').waitFor()
+  for (const control of [productName, draftCopy, fileInput]) {
+    assert.equal(await control.getAttribute('aria-invalid'), 'false')
+  }
+  assert.equal(await generate.isEnabled(), true)
+
+  await productName.fill('')
+  await generate.click()
+  await redNotePage.locator('#product-name[aria-invalid="true"]').waitFor()
+  await waitForFocused(redNotePage, productName)
+  assert.deepEqual(redNoteState.enqueueRequests, [])
+
+  await productName.fill('Accessible RedNote launch')
+  assert.equal(await productName.getAttribute('aria-invalid'), 'false')
+  await automaticMode.click()
+  await productName.press('Enter')
+  await redNotePage.getByRole('heading', { name: 'Building your poster' }).waitFor()
+  await waitForFocused(redNotePage, '.page-heading h1')
+  await waitFor(() => redNoteState.enqueueRequests.length === 1)
+  assert.deepEqual(redNoteState.enqueueModes, ['yolo'])
+  assert.deepEqual(redNoteErrors, [])
+  await redNoteContext.close()
+
+  const socialContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const socialState = createState()
+  await installBackendMock(socialContext, socialState)
+  const socialPage = await socialContext.newPage()
+  const socialErrors = []
+  socialPage.on('pageerror', (error) => socialErrors.push(error))
+
+  await socialPage.goto(`${BASE_URL}/campaigns/new`)
+  await socialPage.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await socialPage.getByRole('button', { name: /Social cover/ }).click()
+  await socialPage.locator('.campaign-form').waitFor()
+  await waitForFocused(socialPage, '#source-heading')
+  assert.deepEqual(
+    await socialPage.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Artwork details', 'Creative references and direction', 'Artwork output'],
+  )
+
+  const socialName = socialPage.locator('#product-name')
+  const socialFileInput = socialPage.getByTestId('reference-file-input')
+  await socialName.fill('Accessible social cover')
+  await socialFileInput.setInputFiles(referenceImageFile('social-reference.png'))
+  await socialPage.locator('.reference-tile').waitFor()
+  assert.equal(
+    await socialPage.getByRole('button', { name: 'Editor' })
+      .getAttribute('aria-pressed'),
+    'true',
+  )
+
+  await socialName.press('Enter')
+  await waitFor(() => socialState.enqueueRequests.length === 1)
+  await socialPage.waitForURL(
+    new RegExp('/campaigns/campaign-asset/generations/generated-1/assets$'),
+  )
+  await socialPage.getByRole('heading', { name: 'Generation assets' }).waitFor()
+  await waitForFocused(socialPage, '.asset-review-header h1')
+  assert.deepEqual(socialState.enqueueModes, ['editor'])
+  assert.deepEqual(socialErrors, [])
+  await socialContext.close()
 }
 
 async function testCampaignWizardTextResize(browserInstance) {
@@ -2274,6 +2411,17 @@ async function selectWizardUseCase(page, useCaseName) {
   await page.locator('.campaign-form').waitFor()
 }
 
+function referenceImageFile(name) {
+  return {
+    name,
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  }
+}
+
 async function fillWizardRequiredFields(
   page,
   {
@@ -3464,6 +3612,27 @@ async function waitFor(predicate, timeoutMs = 5000) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   throw new Error('Timed out waiting for mocked backend state.')
+}
+
+async function waitForFocused(page, target) {
+  if (typeof target === 'string') {
+    await page.waitForFunction(
+      (selector) => document.activeElement === document.querySelector(selector),
+      target,
+    )
+    return
+  }
+
+  const handle = await target.elementHandle()
+  assert.ok(handle)
+  try {
+    await page.waitForFunction(
+      (element) => document.activeElement === element,
+      handle,
+    )
+  } finally {
+    await handle.dispose()
+  }
 }
 
 async function waitForComputedStyle(locator, property, expected, timeoutMs = 5000) {

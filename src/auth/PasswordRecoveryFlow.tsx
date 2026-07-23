@@ -1,6 +1,13 @@
 import { ArrowLeft, ArrowRight, LoaderCircle, RefreshCw } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type RefObject,
+} from 'react'
 import { InlineNotice } from '../components/ui/Feedback'
+import { useFocusOnChange } from '../hooks/useViewFocus'
 import { useI18n } from '../i18n/I18nProvider'
 import { insforge } from '../lib/insforge'
 import {
@@ -41,7 +48,10 @@ export function PasswordRecoveryFlow({
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [resendSeconds, setResendSeconds] = useState(0)
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const busy = pendingAction !== null
+
+  useFocusOnChange(headingRef, step, { enabled: step === 'success' })
 
   useEffect(() => {
     if (resendSeconds <= 0) return
@@ -190,6 +200,7 @@ export function PasswordRecoveryFlow({
     return (
       <>
         <RecoveryHeading
+          headingRef={headingRef}
           eyebrow={t('Account recovery / Complete')}
           title={t('Password updated')}
           description={t('Sign in with your new password to return to your campaigns.')}
@@ -213,6 +224,7 @@ export function PasswordRecoveryFlow({
     return (
       <>
         <RecoveryHeading
+          headingRef={headingRef}
           eyebrow={t('Account recovery / 3 of 3')}
           title={t('Create a new password')}
           description={t('Use at least {count} characters.', {
@@ -227,6 +239,7 @@ export function PasswordRecoveryFlow({
           <div className="public-auth-field">
             <label htmlFor="reset-new-password">{t('New password')}</label>
             <input
+              key={step}
               id="reset-new-password"
               type="password"
               required
@@ -292,6 +305,7 @@ export function PasswordRecoveryFlow({
     return (
       <>
         <RecoveryHeading
+          headingRef={headingRef}
           eyebrow={t('Account recovery / 2 of 3')}
           title={t('Enter the code')}
           description={t('Enter the {count}-digit code from the reset email.', {
@@ -306,6 +320,7 @@ export function PasswordRecoveryFlow({
           <div className="public-auth-field">
             <label htmlFor="reset-code">{t('Reset code')}</label>
             <input
+              key={step}
               id="reset-code"
               type="text"
               required
@@ -380,6 +395,7 @@ export function PasswordRecoveryFlow({
   return (
     <>
       <RecoveryHeading
+        headingRef={headingRef}
         eyebrow={t('Account recovery / 1 of 3')}
         title={t('Reset your password')}
         description={t('Enter the email address you use for Posterlytics.')}
@@ -388,6 +404,7 @@ export function PasswordRecoveryFlow({
         <div className="public-auth-field">
           <label htmlFor="reset-email">{t('Email')}</label>
           <input
+            key={step}
             id="reset-email"
             type="email"
             required
@@ -427,10 +444,12 @@ export function PasswordRecoveryFlow({
 }
 
 function RecoveryHeading({
+  headingRef,
   eyebrow,
   title,
   description,
 }: {
+  headingRef: RefObject<HTMLHeadingElement>
   eyebrow: string
   title: string
   description: string
@@ -438,7 +457,7 @@ function RecoveryHeading({
   return (
     <div className="public-auth-heading">
       <span>{eyebrow}</span>
-      <h1 id="auth-heading">{title}</h1>
+      <h1 ref={headingRef} id="auth-heading" tabIndex={-1}>{title}</h1>
       <p>{description}</p>
     </div>
   )

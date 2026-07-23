@@ -13,6 +13,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -36,6 +37,8 @@ import { insforge } from '../lib/insforge'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import { useCampaign } from '../hooks/useCampaign'
 import { useDebouncedLocalDraft } from '../hooks/useDebouncedLocalDraft'
+import { useRequiredFieldValidity } from '../hooks/useRequiredFieldValidity'
+import { useFocusOnChange } from '../hooks/useViewFocus'
 import { materializeReferenceImages, deleteReferenceImages } from '../lib/referenceStorage'
 import {
   normalizeReferenceContext,
@@ -101,6 +104,7 @@ export function CampaignWizardPage() {
   const { items: activityItems, refresh: refreshActivity } = useGenerationActivity()
   const { preferences, updatePreferences } = useWorkspacePreferences()
   const [phase, setPhase] = useState<Phase>('form')
+  const [validationAttempt, setValidationAttempt] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [draftId, setDraftId] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
@@ -127,7 +131,12 @@ export function CampaignWizardPage() {
   const [platformHint, setPlatformHint] = useState('')
   const [referenceContext, setReferenceContext] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null)
+  const sourceHeadingRef = useRef<HTMLHeadingElement>(null)
+  const useCasePickerHeadingRef = useRef<HTMLHeadingElement>(null)
   const productUrlInputRef = useRef<HTMLInputElement>(null)
+  const validationTargetRef = useRef<HTMLElement | null>(null)
+  const validationAttemptQueuedRef = useRef(false)
   const amazonTitleRequestToken = useRef(0)
   const activeAmazonTitleRequest = useRef<{
     asin: string
@@ -264,6 +273,52 @@ export function CampaignWizardPage() {
     ),
     serialize: serializeLocalCampaignDraft,
   })
+  const productNameRequired = inputFields?.productName === 'required'
+  const productNameValidity = useRequiredFieldValidity({
+    required: productNameRequired,
+    valid: productName.trim().length > 0,
+    validationAttempt,
+    resetKey: selectedUseCaseId,
+  })
+  const generationViewActive = phase === 'uploading' || phase === 'started'
+
+  useFocusOnChange(pageHeadingRef, generationViewActive, {
+    enabled: generationViewActive,
+  })
+  useFocusOnChange(sourceHeadingRef, selectedUseCaseId, {
+    enabled: selectedUseCaseId !== null,
+  })
+  useFocusOnChange(useCasePickerHeadingRef, selectedUseCaseId, {
+    enabled: selectedUseCaseId === null,
+  })
+
+  const queueValidationAttempt = useCallback((target: HTMLElement | null) => {
+    if (target && validationTargetRef.current === null) {
+      validationTargetRef.current = target
+    }
+    if (validationAttemptQueuedRef.current) return
+
+    validationAttemptQueuedRef.current = true
+    queueMicrotask(() => {
+      validationAttemptQueuedRef.current = false
+      setValidationAttempt((current) => current + 1)
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (validationAttempt === 0) return
+
+    const target = validationTargetRef.current
+    validationTargetRef.current = null
+    if (
+      !target?.isConnected
+      || document.querySelector('[aria-modal="true"]')
+      || !isVisibleFocusTarget(target)
+    ) {
+      return
+    }
+    target.focus()
+  }, [validationAttempt])
 
   function updatePendingReferences(
     action: SetStateAction<PendingReference[]>,
@@ -477,20 +532,35 @@ export function CampaignWizardPage() {
     return campaignId
   }
 
-  async function handleSubmit(event: FormEvent) {
+  function handleInvalidCapture(event: FormEvent<HTMLFormElement>) {
+    queueValidationAttempt(firstInvalidControl(event.currentTarget))
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!user || !selectedUseCaseId || !selectedUseCase || !inputFields) return
+    const invalidControl = firstInvalidControl(event.currentTarget)
+    if (invalidControl) {
+      queueValidationAttempt(invalidControl)
+      return
+    }
     if (mismatchTarget || invalidAmazonSource) {
       setSourceMismatchAttempted(true)
-      productUrlInputRef.current?.focus()
+      queueValidationAttempt(productUrlInputRef.current)
       return
     }
     if (!referenceContextRequirementMet) {
       setError(t('RedNote post generation requires draft copy.'))
+      queueValidationAttempt(resolveValidationFocusTarget(
+        event.currentTarget.querySelector('textarea[aria-required="true"]'),
+      ))
       return
     }
     if (pendingReferences.length < minimumReferenceImages) {
       setError(t('Add at least {count} images.', { count: minimumReferenceImages }))
+      queueValidationAttempt(resolveValidationFocusTarget(
+        event.currentTarget.querySelector('[data-testid="reference-file-input"]'),
+      ))
       return
     }
     if (!pendingReferencesReady(pendingReferences)) {
@@ -654,6 +724,63 @@ export function CampaignWizardPage() {
     )
   }
 
+  function renderArtworkOutputFields(fields: NonNullable<typeof inputFields>) {
+    if (!selectedUseCase) return null
+
+    const outputFields = (
+      <>
+        {fields.tagline !== 'hidden' && (
+          <div className="field">
+            <label htmlFor="tagline">
+              {referenceOnlyMode ? t('Supporting line') : t('Tagline')}{' '}
+              <FieldRequirement requirement={fields.tagline} />
+            </label>
+            <input
+              id="tagline"
+              className="input"
+              required={fields.tagline === 'required'}
+              placeholder={referenceOnlyMode
+                ? t('A short optional line')
+                : t('Reports your team can act on')}
+              value={tagline}
+              onChange={(event) => setTagline(event.target.value)}
+            />
+          </div>
+        )}
+        <PosterFormatSelect
+          id="poster-format"
+          value={posterFormat}
+          allowedFormats={selectedUseCase.allowedPosterFormats}
+          onChange={setPosterFormat}
+        />
+        {fields.platformHint !== 'hidden' && (
+          <PlatformHintField
+            id="platform-hint"
+            value={platformHint}
+            onChange={setPlatformHint}
+          />
+        )}
+      </>
+    )
+
+    if (!referenceOnlyMode) return outputFields
+
+    return (
+      <section className="form-section" aria-labelledby="artwork-output-heading">
+        <div className="form-section-heading">
+          <span><Type size={17} aria-hidden="true" /></span>
+          <div>
+            <h2 id="artwork-output-heading">{t('Artwork output')}</h2>
+            <p>{t('Name the artwork and choose its full-bleed output format.')}</p>
+          </div>
+        </div>
+        <div className="field-grid">
+          {outputFields}
+        </div>
+      </section>
+    )
+  }
+
   function renderGenerationReferences(fields: NonNullable<typeof inputFields>) {
     if (
       fields.referenceContext === 'hidden'
@@ -723,6 +850,7 @@ export function CampaignWizardPage() {
           contextRequirement={fields.referenceContext}
           referenceImagesRequirement={fields.referenceImages.requirement}
           referenceImagesMinimumCount={fields.referenceImages.minimumCount}
+          validationAttempt={validationAttempt}
           {...referenceProps}
         />
         <AssetSelectionModeControl
@@ -748,7 +876,7 @@ export function CampaignWizardPage() {
     >
       <header className="page-heading page-heading-compact">
         <div>
-          <h1>
+          <h1 ref={pageHeadingRef}>
             {activity?.status === 'succeeded'
               ? t('Poster ready')
               : activity?.status === 'failed'
@@ -877,7 +1005,9 @@ export function CampaignWizardPage() {
       ) : !selectedUseCase || !inputFields ? (
         <section className="use-case-picker" aria-labelledby="use-case-picker-heading">
           <div className="use-case-picker-heading">
-            <h2 id="use-case-picker-heading">{t('Choose a campaign type')}</h2>
+            <h2 ref={useCasePickerHeadingRef} id="use-case-picker-heading">
+              {t('Choose a campaign type')}
+            </h2>
             <p>{t('Select the source workflow that matches this campaign.')}</p>
           </div>
           <div className="use-case-card-grid">
@@ -910,7 +1040,11 @@ export function CampaignWizardPage() {
         </section>
       ) : (
         <div className="wizard-layout">
-          <form className="campaign-form" onSubmit={handleSubmit}>
+          <form
+            className="campaign-form"
+            onInvalidCapture={handleInvalidCapture}
+            onSubmit={handleSubmit}
+          >
             <div className="campaign-use-case-selection">
               <div>
                 <span>{t('Campaign type')}</span>
@@ -932,8 +1066,6 @@ export function CampaignWizardPage() {
               </button>
             </div>
 
-            {referenceOnlyMode && renderGenerationReferences(inputFields)}
-
             <section className="form-section" aria-labelledby="source-heading">
               <div className="form-section-heading">
                 <span>
@@ -942,7 +1074,7 @@ export function CampaignWizardPage() {
                     : <Globe2 size={17} aria-hidden="true" />}
                 </span>
                 <div>
-                  <h2 id="source-heading">
+                  <h2 ref={sourceHeadingRef} id="source-heading">
                     {referenceOnlyMode ? t('Artwork details') : t('Product source')}
                   </h2>
                   <p>
@@ -1050,19 +1182,23 @@ export function CampaignWizardPage() {
                       id="product-name"
                       className="input"
                       required={inputFields.productName === 'required'}
+                      aria-required={productNameRequired}
+                      aria-invalid={productNameValidity.invalid}
                       placeholder={referenceOnlyMode ? t('Summer launch cover') : 'Northstar Reports'}
                       value={productName}
-                      aria-describedby={
+                      aria-describedby={[
                         amazonListing && amazonTitleLookupStatus !== 'idle'
                           ? 'amazon-title-lookup-status'
-                          : undefined
-                      }
+                          : '',
+                        productNameValidity.invalid ? 'product-name-error' : '',
+                      ].filter(Boolean).join(' ') || undefined}
                       onChange={(event) => {
                         const nextName = event.target.value
                         latestProductName.current = nextName
                         if (nextName.trim()) cancelAmazonTitleLookup()
                         setProductName(nextName)
                       }}
+                      onBlur={productNameValidity.onBlur}
                     />
                     {amazonListing && amazonTitleLookupStatus !== 'idle' && (
                       <p
@@ -1075,42 +1211,23 @@ export function CampaignWizardPage() {
                           : t('Product title unavailable. Enter the product name.')}
                       </p>
                     )}
+                    {productNameValidity.invalid && (
+                      <p className="field-error" id="product-name-error">
+                        {t('{name} is required.', {
+                          name: referenceOnlyMode
+                            ? t('Artwork name')
+                            : t('Product name'),
+                        })}
+                      </p>
+                    )}
                   </div>
                 )}
-                {inputFields.tagline !== 'hidden' && (
-                  <div className="field">
-                    <label htmlFor="tagline">
-                      {referenceOnlyMode ? t('Supporting line') : t('Tagline')}{' '}
-                      <FieldRequirement requirement={inputFields.tagline} />
-                    </label>
-                    <input
-                      id="tagline"
-                      className="input"
-                      required={inputFields.tagline === 'required'}
-                      placeholder={referenceOnlyMode
-                        ? t('A short optional line')
-                        : t('Reports your team can act on')}
-                      value={tagline}
-                      onChange={(event) => setTagline(event.target.value)}
-                    />
-                  </div>
-                )}
-                <PosterFormatSelect
-                  id="poster-format"
-                  value={posterFormat}
-                  allowedFormats={selectedUseCase.allowedPosterFormats}
-                  onChange={setPosterFormat}
-                />
-                {inputFields.platformHint !== 'hidden' && (
-                  <PlatformHintField
-                    id="platform-hint"
-                    value={platformHint}
-                    onChange={setPlatformHint}
-                  />
-                )}
+                {!referenceOnlyMode && renderArtworkOutputFields(inputFields)}
               </div>
             </section>
 
+            {referenceOnlyMode && renderGenerationReferences(inputFields)}
+            {referenceOnlyMode && renderArtworkOutputFields(inputFields)}
             {amazonListing && renderGenerationReferences(inputFields)}
             {renderCampaignAction(inputFields)}
             {!amazonListing && !referenceOnlyMode && renderGenerationReferences(inputFields)}
@@ -1208,6 +1325,71 @@ export function CampaignWizardPage() {
       )}
     </AppShell>
   )
+}
+
+type NativeValidityControl =
+  | HTMLButtonElement
+  | HTMLInputElement
+  | HTMLSelectElement
+  | HTMLTextAreaElement
+
+function hasNativeValidity(element: Element): element is NativeValidityControl {
+  return (
+    element instanceof HTMLButtonElement
+    || element instanceof HTMLInputElement
+    || element instanceof HTMLSelectElement
+    || element instanceof HTMLTextAreaElement
+  )
+}
+
+function isVisibleFocusTarget(target: HTMLElement): boolean {
+  if (
+    !target.isConnected
+    || target.matches('[hidden], :disabled, [aria-disabled="true"]')
+  ) {
+    return false
+  }
+  const style = window.getComputedStyle(target)
+  return (
+    style.display !== 'none'
+    && style.visibility !== 'hidden'
+    && target.getClientRects().length > 0
+  )
+}
+
+function resolveValidationFocusTarget(
+  control: Element | null,
+): HTMLElement | null {
+  if (!(control instanceof HTMLElement)) return null
+
+  const visibleTargetId = control.dataset.validationFocusTarget
+  if (visibleTargetId) {
+    const visibleTarget = document.getElementById(visibleTargetId)
+    return visibleTarget instanceof HTMLElement && isVisibleFocusTarget(visibleTarget)
+      ? visibleTarget
+      : null
+  }
+  if (control.classList.contains('sr-only')) return null
+  return isVisibleFocusTarget(control) ? control : null
+}
+
+function firstInvalidControl(form: HTMLFormElement): HTMLElement | null {
+  for (const element of Array.from(form.elements)) {
+    if (
+      hasNativeValidity(element)
+      && element.willValidate
+      && !element.validity.valid
+    ) {
+      const target = resolveValidationFocusTarget(element)
+      if (target) return target
+    }
+  }
+
+  for (const element of form.querySelectorAll('[aria-invalid="true"]')) {
+    const target = resolveValidationFocusTarget(element)
+    if (target) return target
+  }
+  return null
 }
 
 function summarizeUrl(value: string) {
