@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   sanitizeModelCopy,
   sanitizeModelCopyList,
+  stripPainterPromptEmoji,
   type ModelCopyPolicy,
 } from '../functions/_copySanitizer.ts'
 
@@ -36,6 +37,60 @@ test('sanitizeModelCopy preserves emoji sourced from campaign copy', () => {
   assert.equal(
     sanitizeModelCopy('Visit Café ☕ Roasters ☕ 🚀', 280, policy),
     'Visit Café ☕ Roasters ☕',
+  )
+})
+
+test('stripPainterPromptEmoji removes source-approved and complex emoji', () => {
+  const sourcedCopy = sanitizeModelCopy('Café ☕ Roasters', 280, {
+    emojiSourceTexts: ['Café ☕ Roasters'],
+  })
+  assert.equal(sourcedCopy, 'Café ☕ Roasters')
+
+  const prompt = [
+    `Render the exact text: "${sourcedCopy} 💬 plan 🟠 ⚙️ 🔍".`,
+    'Details: 1️⃣ 👩🏽‍💻 🇺🇸',
+  ].join('\n')
+
+  assert.equal(
+    stripPainterPromptEmoji(prompt),
+    'Render the exact text: "Café Roasters plan".\nDetails:',
+  )
+})
+
+test('stripPainterPromptEmoji returns clean multiline prompts byte-for-byte', () => {
+  const prompt = [
+    'Arrange it top to bottom:',
+    '  visual element, with expressive typography.',
+    'Render the exact text: "Ship clearly".',
+  ].join('\n')
+
+  assert.equal(stripPainterPromptEmoji(prompt), prompt)
+})
+
+test('stripPainterPromptEmoji preserves non-emoji copy on changed lines', () => {
+  const prompt =
+    'Render the exact text: "Bora Bora ☕ — 城市 · Get Started [Headline] ™ © ® → % # *".'
+
+  assert.equal(
+    stripPainterPromptEmoji(prompt),
+    'Render the exact text: "Bora Bora — 城市 · Get Started [Headline] ™ © ® → % # *".',
+  )
+})
+
+test('stripPainterPromptEmoji keeps adjacent quoted lines and indentation', () => {
+  const prompt = [
+    'Render the exact text: "Plan 💬 together".',
+    '  visual 🟠 element',
+    'Render the exact text: "Search 🔍 clearly".',
+  ].join('\n')
+
+  assert.equal(
+    stripPainterPromptEmoji(prompt),
+    [
+      'Render the exact text: "Plan together".',
+      '  visual element',
+      'Render the exact text: "Search clearly".',
+    ].join('\n'),
   )
 })
 

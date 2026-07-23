@@ -67,6 +67,34 @@ const DECORATIVE_EMOJI_SOURCE = [
   String.raw`\p{Emoji_Presentation}\uFE0F?`,
 ].join('|');
 
+export function stripPainterPromptEmoji(prompt: string): string {
+  const matcher = new RegExp(DECORATIVE_EMOJI_SOURCE, 'gu');
+  // Preserve byte-pinned prompts exactly when there is nothing to strip.
+  if (!matcher.test(prompt)) return prompt;
+
+  return prompt
+    .split('\n')
+    .map((line) => {
+      const stripped = line.replace(
+        new RegExp(DECORATIVE_EMOJI_SOURCE, 'gu'),
+        '',
+      );
+      if (stripped === line) return line;
+
+      const indentation = stripped.match(/^[ \t]*/u)?.[0] ?? '';
+      const content = stripped
+        .slice(indentation.length)
+        .replace(/[ \t]{2,}/gu, ' ')
+        .replace(/[ \t]+(?=[,.;:!?])/gu, '')
+        .replace(/[ \t]+(?="(?=[,.;:!?]|\r?$))/gu, '')
+        .replace(/[ \t]+(?=\r?$)/u, '');
+      return content === '' || content === '\r'
+        ? content
+        : `${indentation}${content}`;
+    })
+    .join('\n');
+}
+
 const ADJACENT_LATIN_DUPLICATE =
   /(?<![\p{Script=Latin}\p{M}'’-])(\p{Script=Latin}[\p{Script=Latin}\p{M}'’-]*)([ \t]+)\1(?![\p{Script=Latin}\p{M}'’-])/giu;
 

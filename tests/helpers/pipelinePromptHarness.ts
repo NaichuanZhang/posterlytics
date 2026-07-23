@@ -648,6 +648,48 @@ async function captureRedNoteDesignerArtifact(): Promise<
   }
 }
 
+export async function captureEmojiStrippedHeroPrompt(): Promise<string> {
+  const state = createState(
+    'website_product',
+    'https://example.com/products/northstar',
+    'product',
+  )
+  state.campaign.product_name = 'Taskpilot ☕'
+  state.campaign.tagline = 'Plan together 💬'
+  state.generation.instruction =
+    'Keep the hierarchy focused 🟠 and show the workflow 🔍.'
+  state.generation.brand_essence =
+    'A focused task system with a precise gear motif ⚙️.'
+  const layout = structuredClone(PRODUCT_LAYOUT)
+  layout.motifs = ['speech 💬', 'amber 🟠', 'gear ⚙️', 'search 🔍']
+  layout.zones = [
+    {
+      band: 'top',
+      role: 'plain-text brand row',
+      content: 'Taskpilot ☕',
+      emphasis: 'low',
+      align: 'left',
+    },
+    {
+      band: 'upper',
+      role: 'hero headline',
+      content: 'Plan tasks 💬 together',
+      emphasis: 'high',
+      align: 'left',
+    },
+    {
+      band: 'mid',
+      role: 'product detail',
+      content: 'See progress 🟠 ⚙️ 🔍',
+      emphasis: 'med',
+      align: 'left',
+    },
+  ]
+  state.generation.poster_layout = layout
+
+  return captureHeroPromptForState(state, 'emoji-stripping')
+}
+
 async function captureHeroPrompt(
   useCase: UseCaseId,
   scenario: 'product' | 'event',
@@ -660,6 +702,13 @@ async function captureHeroPrompt(
       ? 'https://lu.ma/fixture-summit'
       : 'https://example.com/products/northstar'
   const state = createState(useCase, productUrl, scenario)
+  return captureHeroPromptForState(state, useCase)
+}
+
+async function captureHeroPromptForState(
+  state: HarnessState,
+  label: string,
+): Promise<string> {
   const response = await withHarnessGlobals(
     state,
     null,
@@ -676,7 +725,7 @@ async function captureHeroPrompt(
     prompt?: { image?: unknown }
   }
   if (typeof payload.prompt?.image !== 'string') {
-    throw new Error(`Missing hero prompt for ${useCase}: ${JSON.stringify(payload)}`)
+    throw new Error(`Missing hero prompt for ${label}: ${JSON.stringify(payload)}`)
   }
   return payload.prompt.image
 }

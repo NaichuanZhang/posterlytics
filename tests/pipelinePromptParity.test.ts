@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
+  captureEmojiStrippedHeroPrompt,
   captureRedNoteAnalyzeFallbackDiagnostics,
   captureAnalyzeSourceMode,
   captureCurrentPipelinePromptGoldens,
@@ -57,6 +58,9 @@ const redNoteDiagnosticsPromise = actualPromise.then(
 )
 const redNoteFallbackPromise = redNoteDiagnosticsPromise.then(
   () => captureRedNoteAnalyzeFallbackDiagnostics(),
+)
+const emojiHeroPromptPromise = redNoteFallbackPromise.then(
+  () => captureEmojiStrippedHeroPrompt(),
 )
 
 test('website and Amazon analyze prompts match the pre-recipe byte goldens', async () => {
@@ -205,6 +209,21 @@ test('RedNote projects deterministic draft copy after both analyze attempts fail
     usedFallback: true,
     posterContent: projectRedNotePostPlanToPosterContent(fallbackPlan),
   })
+})
+
+test('hero stage strips source-approved emoji from the returned painter prompt', async () => {
+  const prompt = await emojiHeroPromptPromise
+
+  for (const emoji of ['💬', '🟠', '⚙️', '🔍', '☕']) {
+    assert.equal(prompt.includes(emoji), false)
+  }
+  assert.match(prompt, /Render the exact text: "Taskpilot"/)
+  assert.match(prompt, /Render the exact text: "Plan tasks together"/)
+  assert.match(prompt, /Render the exact text: "See progress"/)
+  assert.match(
+    prompt,
+    /USER REQUEST: Keep the hierarchy focused and show the workflow\./,
+  )
 })
 
 test('social prompts contain reference and platform semantics without URL evidence language', async () => {

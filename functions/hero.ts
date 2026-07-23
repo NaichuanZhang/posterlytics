@@ -27,6 +27,7 @@ import {
   type PosterSize,
   type TypedImageReference,
 } from './_shared.ts';
+import { stripPainterPromptEmoji } from './_copySanitizer.ts';
 import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
 import {
   colorNameForHex,
@@ -371,7 +372,7 @@ export async function runHeroStage(
       detail: 'The style board could not be attached or fell beyond the six-image painter limit.',
     });
   }
-  const prompt = redNoteBackgroundPrompt ?? buildPosterPrompt(
+  const rawPrompt = redNoteBackgroundPrompt ?? buildPosterPrompt(
     {
       ...generationSnapshot,
       reference_images: referenceImages.filter(
@@ -387,6 +388,7 @@ export async function runHeroStage(
     parentPosterSize,
     recipe,
   );
+  const prompt = stripPainterPromptEmoji(rawPrompt);
 
   // Request the registered ratio explicitly, never provider pixel dimensions.
   // AiPoster shows the full generated frame without cropping.

@@ -13,6 +13,7 @@ import {
   getPosterSize,
   POSTER_SIZES,
 } from '../src/lib/posterSize.ts'
+import { stripPainterPromptEmoji } from '../functions/_copySanitizer.ts'
 import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
 import { buildPosterPrompt } from '../functions/hero.ts'
 
@@ -159,6 +160,40 @@ test('product and social prompts include the exact painter artifact exclusion', 
         < prompt.indexOf('Arrange the poster top to bottom'),
     )
   }
+})
+
+test('assembled product prompts strip painter-bound emoji from copy and context', () => {
+  const layout = {
+    ...LAYOUT,
+    motifs: ['speech 💬', 'amber 🟠', 'gear ⚙️', 'search 🔍'],
+    zones: [
+      {
+        band: 'upper' as const,
+        role: 'hero headline',
+        content: 'Plan work 💬 clearly ☕',
+        emphasis: 'high' as const,
+      },
+    ],
+  }
+  const prompts = [
+    stripPainterPromptEmoji(compileLayoutPrompt(layout, {
+      product: 'Taskpilot ☕',
+      essence: 'A focused system with amber tools 🟠',
+    })),
+    stripPainterPromptEmoji(compileLayoutPrompt(
+      { ...layout, zones: [] },
+      { product: 'Taskpilot ☕', essence: '' },
+    )),
+  ]
+
+  for (const prompt of prompts) {
+    for (const emoji of ['💬', '🟠', '⚙️', '🔍', '☕']) {
+      assert.equal(prompt.includes(emoji), false)
+    }
+  }
+  assert.match(prompts[0], /Render the exact text: "Plan work clearly"/)
+  assert.match(prompts[0], /A focused system with amber tools/)
+  assert.match(prompts[1], /Taskpilot/)
 })
 
 for (const size of POSTER_SIZES) {
