@@ -1,29 +1,36 @@
 // Playwright capture orchestration. Loads a URL in a real Chromium, collects
-// viewport-visible computed styles + font links at three scroll positions,
-// aggregates them into RawTokens (pure), and merges compressed frames into one
-// style board for downstream vision models.
+// viewport-visible computed styles + font links at up to three scroll positions,
+// and delegates browser-free token/style-board finalization.
 
-import { chromium, type Browser } from 'playwright';
-import sharp from 'sharp';
-import { buildRawTokens } from './buildRawTokens.js';
+import { chromium, type Browser, type Page } from 'playwright';
+import { finalizeCaptureEvidence } from './captureEvidence.js';
+import {
+  FRAME_SETTLE_MS,
+  FULL_FINALIZATION_MIN_REMAINING_MS,
+  NAV_TIMEOUT_MS,
+  OPTIONAL_FRAME_MIN_REMAINING_MS,
+  POST_NAV_SETTLE_MS,
+  SOFT_SAMPLING_BUDGET_MS,
+  TOP_FRAME_RESERVE_MS,
+  startMonotonicTimer,
+} from './captureLifecycle.js';
 import type { ColorScheme } from './captureOptions.js';
-import { dismissPopups } from './dismissPopups.js';
+import { DISMISS_BUDGET_MS, dismissPopups } from './dismissPopups.js';
 import { framePositions, visibleIntersectionArea } from './frameSampling.js';
 import { assertPublicUrl } from './networkSafety.js';
-import { normalizeDesignTokens } from './normalizeDesignTokens.js';
-import { extractPixelEvidence } from './pixelPalette.js';
 import type {
   BrowserCollection,
-  CaptureResponse,
+  CaptureExecutionResult,
   ElementSample,
   RawTokens,
 } from './types.js';
 
-const NAV_TIMEOUT_MS = 9_000;
+const POST_NAV_SETTLE_MIN_REMAINING_MS =
+  TOP_FRAME_RESERVE_MS + POST_NAV_SETTLE_MS;
+const POPUP_DISMISS_MIN_REMAINING_MS =
+  TOP_FRAME_RESERVE_MS + DISMISS_BUDGET_MS;
 const VIEWPORT = { width: 1280, height: 800 };
 const FRAME_QUALITY = 78;
-const STYLE_BOARD_WIDTH = 960;
-const STYLE_BOARD_QUALITY = 68;
 
 let browserPromise: Promise<Browser> | null = null;
 
@@ -56,7 +63,10 @@ export async function captureUrl(
   rawUrl: string,
   colorScheme: ColorScheme = 'light',
   signal?: AbortSignal,
-): Promise<CaptureResponse> {
+): Promise<CaptureExecutionResult> {
+  const timer = startMonotonicTimer();
+  const hasSamplingBudget = (minimumMs: number): boolean =>
+    timer.hasRemaining(minimumMs, SOFT_SAMPLING_BUDGET_MS);
   const url = normalizeUrl(rawUrl);
   await assertPublicUrl(url);
   signal?.throwIfAborted();
@@ -96,48 +106,87 @@ export async function captureUrl(
   try {
     signal?.throwIfAborted();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
-    await page.waitForTimeout(400);
-
-    // Dismiss cookie banners / consent + newsletter modals / age gates BEFORE
-    // sampling tokens and screenshotting, so both come out clean. Best-effort:
-    // any failure leaves the page as-is and capture proceeds.
-    await dismissPopups(page, VIEWPORT).catch(() => {});
-
-    const scrollHeight = await page.evaluate(() => Math.max(
-      document.documentElement.scrollHeight,
-      document.body?.scrollHeight ?? 0,
-    ));
-    const positions = framePositions(scrollHeight, VIEWPORT.height);
     const samples: ElementSample[] = [];
     const fontLinks = new Set<string>();
     let title = '';
     const frameBuffers: Buffer[] = [];
-    for (const position of positions) {
-      signal?.throwIfAborted();
-      await page.evaluate((top) => {
-        document.documentElement.style.scrollBehavior = 'auto';
-        window.scrollTo(0, top);
-      }, position);
-      await page.waitForTimeout(100);
-      const frame = (await page.evaluate(collectInBrowser)) as BrowserCollection;
-      if (!title) title = frame.title;
-      for (const link of frame.fontLinks) fontLinks.add(link);
-      for (const reading of frame.samples) {
-        const { bounds, ...sample } = reading;
-        const area = visibleIntersectionArea(bounds, VIEWPORT);
-        if (area > 0) samples.push({ ...sample, area: Math.round(area) });
-      }
+    let captureComplete = true;
+    let budgetConstrained = false;
+
+    if (hasSamplingBudget(POST_NAV_SETTLE_MIN_REMAINING_MS)) {
       try {
-        frameBuffers.push(await page.screenshot({
-          type: 'jpeg',
-          quality: FRAME_QUALITY,
-          animations: 'disabled',
-        }));
+        await page.waitForTimeout(POST_NAV_SETTLE_MS);
       } catch {
-        // DOM evidence remains useful if a particular frame cannot be painted.
+        signal?.throwIfAborted();
+        captureComplete = false;
       }
+    } else {
+      budgetConstrained = true;
+      captureComplete = false;
     }
 
+    // Dismiss optional blockers only when its full ceiling still leaves enough
+    // time to collect the top frame.
+    if (hasSamplingBudget(POPUP_DISMISS_MIN_REMAINING_MS)) {
+      try {
+        await dismissPopups(page, VIEWPORT);
+        signal?.throwIfAborted();
+      } catch {
+        signal?.throwIfAborted();
+        captureComplete = false;
+      }
+    } else {
+      budgetConstrained = true;
+      captureComplete = false;
+    }
+
+    // The top frame is always attempted before scroll-height work so a slow page
+    // can still return useful evidence.
+    const topFrame = await captureFrame(page, 0, signal);
+    captureComplete = captureComplete && topFrame.complete;
+    title = appendFrameEvidence(
+      topFrame,
+      samples,
+      fontLinks,
+      frameBuffers,
+      title,
+    );
+
+    let lowerPositions: number[] = [];
+    if (hasSamplingBudget(OPTIONAL_FRAME_MIN_REMAINING_MS)) {
+      try {
+        const scrollHeight = await page.evaluate(() => Math.max(
+          document.documentElement.scrollHeight,
+          document.body?.scrollHeight ?? 0,
+        ));
+        lowerPositions = framePositions(scrollHeight, VIEWPORT.height).slice(1);
+      } catch {
+        signal?.throwIfAborted();
+        captureComplete = false;
+      }
+    } else {
+      budgetConstrained = true;
+      captureComplete = false;
+    }
+
+    for (const position of lowerPositions) {
+      if (!hasSamplingBudget(OPTIONAL_FRAME_MIN_REMAINING_MS)) {
+        budgetConstrained = true;
+        captureComplete = false;
+        break;
+      }
+      const frame = await captureFrame(page, position, signal);
+      captureComplete = captureComplete && frame.complete;
+      title = appendFrameEvidence(
+        frame,
+        samples,
+        fontLinks,
+        frameBuffers,
+        title,
+      );
+    }
+
+    signal?.throwIfAborted();
     const finalUrl = page.url();
     const meta: RawTokens['meta'] = {
       url,
@@ -145,21 +194,28 @@ export async function captureUrl(
       title,
       viewport: VIEWPORT,
     };
-    const rawTokens = buildRawTokens(samples, [...fontLinks], meta);
-    let styleBoard: Buffer | null = null;
-    try {
-      styleBoard = frameBuffers.length ? await mergeStyleBoard(frameBuffers) : null;
-    } catch {
-      styleBoard = null;
+    if (!hasSamplingBudget(FULL_FINALIZATION_MIN_REMAINING_MS)) {
+      budgetConstrained = true;
+      captureComplete = false;
     }
-    const pixelEvidence = styleBoard ? await readPixelEvidence(styleBoard).catch(() => undefined) : undefined;
-    const tokens = normalizeDesignTokens(rawTokens, pixelEvidence);
+    const evidence = await finalizeCaptureEvidence({
+      samples,
+      fontLinks: [...fontLinks],
+      meta,
+      frameBuffers,
+      captureComplete,
+      useFastPath: budgetConstrained || !captureComplete,
+    });
 
     return {
-      tokens,
-      screenshot_b64: styleBoard?.toString('base64') ?? null,
-      final_url: finalUrl,
-      title,
+      response: {
+        tokens: evidence.tokens,
+        screenshot_b64: evidence.styleBoard.toString('base64'),
+        final_url: finalUrl,
+        title,
+      },
+      outcome: evidence.outcome,
+      framesCaptured: frameBuffers.length,
     };
   } finally {
     signal?.removeEventListener('abort', closeOnAbort);
@@ -167,42 +223,73 @@ export async function captureUrl(
   }
 }
 
-async function mergeStyleBoard(frames: Buffer[]): Promise<Buffer> {
-  const normalized = await Promise.all(frames.map(async (frame) => {
-    const { data, info } = await sharp(frame)
-      .resize({ width: STYLE_BOARD_WIDTH, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: FRAME_QUALITY })
-      .toBuffer({ resolveWithObject: true });
-    return { data, width: info.width, height: info.height };
-  }));
-  const width = Math.max(...normalized.map((frame) => frame.width));
-  const height = normalized.reduce((sum, frame) => sum + frame.height, 0);
-  let top = 0;
-  const composites = normalized.map((frame) => {
-    const input = { input: frame.data, left: 0, top };
-    top += frame.height;
-    return input;
-  });
-  return sharp({
-    create: {
-      width,
-      height,
-      channels: 3,
-      background: '#ffffff',
-    },
-  })
-    .composite(composites)
-    .jpeg({ quality: STYLE_BOARD_QUALITY, mozjpeg: true })
-    .toBuffer();
+interface FrameCapture {
+  collection: BrowserCollection | null;
+  screenshot: Buffer | null;
+  complete: boolean;
 }
 
-async function readPixelEvidence(styleBoard: Buffer) {
-  const { data, info } = await sharp(styleBoard)
-    .resize({ width: 180, fit: 'inside', withoutEnlargement: true })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  return extractPixelEvidence(data, info.channels);
+async function captureFrame(
+  page: Page,
+  position: number,
+  signal?: AbortSignal,
+): Promise<FrameCapture> {
+  let complete = true;
+  try {
+    await page.evaluate((top) => {
+      document.documentElement.style.scrollBehavior = 'auto';
+      window.scrollTo(0, top);
+    }, position);
+  } catch {
+    signal?.throwIfAborted();
+    complete = false;
+  }
+  try {
+    await page.waitForTimeout(FRAME_SETTLE_MS);
+  } catch {
+    signal?.throwIfAborted();
+    complete = false;
+  }
+
+  let collection: BrowserCollection | null = null;
+  try {
+    collection = (await page.evaluate(collectInBrowser)) as BrowserCollection;
+  } catch {
+    signal?.throwIfAborted();
+    complete = false;
+  }
+
+  let screenshot: Buffer | null = null;
+  try {
+    screenshot = await page.screenshot({
+      type: 'jpeg',
+      quality: FRAME_QUALITY,
+      animations: 'disabled',
+    });
+  } catch {
+    signal?.throwIfAborted();
+    // DOM evidence remains useful if a particular frame cannot be painted.
+    complete = false;
+  }
+  return { collection, screenshot, complete };
+}
+
+function appendFrameEvidence(
+  frame: FrameCapture,
+  samples: ElementSample[],
+  fontLinks: Set<string>,
+  frameBuffers: Buffer[],
+  currentTitle: string,
+): string {
+  if (frame.screenshot) frameBuffers.push(frame.screenshot);
+  if (!frame.collection) return currentTitle;
+  for (const link of frame.collection.fontLinks) fontLinks.add(link);
+  for (const reading of frame.collection.samples) {
+    const { bounds, ...sample } = reading;
+    const area = visibleIntersectionArea(bounds, VIEWPORT);
+    if (area > 0) samples.push({ ...sample, area: Math.round(area) });
+  }
+  return currentTitle || frame.collection.title;
 }
 
 function normalizeUrl(u: string): string {

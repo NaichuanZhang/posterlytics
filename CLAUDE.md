@@ -37,7 +37,7 @@ The CLI may report a **deploy timeout** while the deploy actually succeeded — 
 
 ### Capture service (`capture-service/`, InsForge compute / Fly)
 
-A standalone Node + Playwright + Sharp container — Deno edge functions can't run a browser. It exposes `POST /capture` (bearer-auth) with `{ url, color_scheme? }` and returns visible-DOM design tokens plus a compressed three-frame style board in the backward-compatible `screenshot_b64` field. It enforces a **12-second capture deadline** (`server.ts`) and **blocks private-network targets** (`networkSafety.ts`) — keep both when touching capture code. Requires the **latest** CLI (`compute` is absent from older pinned versions like the homebrew `0.1.40`):
+A standalone Node + Playwright + Sharp container - Deno edge functions can't run a browser. It exposes `POST /capture` (bearer-auth) with `{ url, color_scheme? }` and returns visible-DOM design tokens plus style-board evidence in the backward-compatible `screenshot_b64` field. It samples up to three frames under a **10-second soft budget**, may return adoptable one-frame partial evidence, and enforces a **13-second hard capture deadline** below the edge caller's 15-second timeout (`server.ts`). It **blocks private-network targets** (`networkSafety.ts`) - keep the timing ladder and network checks when touching capture code. Requires the **latest** CLI (`compute` is absent from older pinned versions like the homebrew `0.1.40`):
 
 ```bash
 npx -y @insforge/cli@latest compute deploy ./capture-service --name posterlytics-capture --port 8080 \

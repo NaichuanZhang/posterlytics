@@ -85,7 +85,7 @@ export function isBlockingOverlay(box: OverlayBox): boolean {
 // button-heavy sites (news, e-commerce) otherwise made the per-element Playwright
 // round-trips run 20s+. Everything inside is one-shot in-page evaluate work, so
 // this budget is generous.
-const DISMISS_BUDGET_MS = 1500;
+export const DISMISS_BUDGET_MS = 1500;
 
 export async function dismissPopups(page: Page, viewport: Viewport): Promise<number> {
   try {

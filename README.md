@@ -58,9 +58,11 @@ banners, and Amazon policy validation are not supported yet.
   `OPENROUTER_API_KEY`.
 - **Capture:** `capture-service/` is a Playwright + Sharp compute service that
   returns visible-DOM design tokens, a weighted pixel palette, theme
-  classification, and a compressed three-frame style board. It enforces a
-  12-second deadline and blocks private-network targets. Classified Amazon
-  sources bypass both this service and raw HTML acquisition.
+  classification, and style-board evidence. It samples up to three frames under
+  a 10-second soft budget, can return usable one-frame partial evidence, and
+  enforces a 13-second hard deadline below the edge caller's 15-second timeout.
+  It blocks private-network targets. Classified Amazon sources bypass both this
+  service and raw HTML acquisition.
 - **Data:** Owner-only campaign data and visits-only analytics are exposed
   through RLS and narrow `SECURITY DEFINER` RPCs.
 - **Poster formats:** `src/lib/posterSize.ts` is shared by the SPA and bundled

@@ -3,6 +3,8 @@
 //   POST /capture   -> { tokens, screenshot_b64, final_url, title }
 //     Auth: Authorization: Bearer <CAPTURE_TOKEN>
 //     Body: { "url": "https://...", "color_scheme"?: "light" | "dark" }
+//     Up to three frames use a 10-second soft sampling budget; a 13-second
+//     hard deadline may still return usable one-frame partial evidence.
 //
 // Only the `analyze` edge function calls this, presenting the shared bearer
 // token. The container holds NO InsForge credentials by design — it returns
@@ -15,16 +17,25 @@ import {
   normalizeColorScheme,
   type ColorScheme,
 } from './captureOptions.js';
+import {
+  CAPTURE_DEADLINE_MS,
+  CaptureDeadlineError,
+  buildCaptureOutcomeLog,
+  classifyCaptureOutcome,
+  startMonotonicTimer,
+} from './captureLifecycle.js';
 import { UnsafeTargetError } from './networkSafety.js';
-import type { CaptureErrorBody, CaptureResponse } from './types.js';
+import type {
+  CaptureErrorBody,
+  CaptureExecutionResult,
+  CaptureOutcome,
+} from './types.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || '';
 const MAX_BODY_BYTES = 16 * 1024; // request bodies are tiny ({url})
-const CAPTURE_DEADLINE_MS = 12_000;
 
 class BodyTooLargeError extends Error {}
-class CaptureDeadlineError extends Error {}
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
@@ -72,13 +83,16 @@ function authorized(req: IncomingMessage): boolean {
   return header === `Bearer ${CAPTURE_TOKEN}`;
 }
 
-async function captureWithDeadline(url: string, colorScheme: ColorScheme): Promise<CaptureResponse> {
+async function captureWithDeadline(
+  url: string,
+  colorScheme: ColorScheme,
+): Promise<CaptureExecutionResult> {
   const controller = new AbortController();
   let timeout: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timeout = setTimeout(() => {
       controller.abort();
-      reject(new CaptureDeadlineError('Capture exceeded the 12 second deadline.'));
+      reject(new CaptureDeadlineError('Capture exceeded the 13 second deadline.'));
     }, CAPTURE_DEADLINE_MS);
   });
 
@@ -117,10 +131,23 @@ const server = createServer(async (req, res) => {
       }
       if (!url) return sendError(res, 400, 'missing_url', 'The request must include a URL.');
 
+      const attemptTimer = startMonotonicTimer();
       try {
         const result = await captureWithDeadline(url, colorScheme);
-        return send(res, 200, result);
+        logCaptureOutcome(
+          url,
+          attemptTimer.elapsedMs(),
+          result.outcome,
+          result.framesCaptured,
+        );
+        return send(res, 200, result.response);
       } catch (err) {
+        const outcome = classifyCaptureOutcome({
+          completed: false,
+          framesCaptured: 0,
+          failure: err instanceof CaptureDeadlineError ? 'timeout' : 'error',
+        });
+        logCaptureOutcome(url, attemptTimer.elapsedMs(), outcome, 0);
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof UnsafeTargetError) {
           return sendError(res, 422, 'unsafe_target', message);
@@ -139,9 +166,32 @@ const server = createServer(async (req, res) => {
   }
 });
 
+function logCaptureOutcome(
+  targetUrl: string,
+  durationMs: number,
+  outcome: CaptureOutcome,
+  framesCaptured: number,
+): void {
+  console.log(JSON.stringify(buildCaptureOutcomeLog({
+    timestamp: new Date().toISOString(),
+    targetUrl,
+    durationMs,
+    outcome,
+    framesCaptured,
+    processUptimeMs: process.uptime() * 1000,
+  })));
+}
+
 async function startServer(): Promise<void> {
+  const warmTimer = startMonotonicTimer();
   try {
     await warmBrowser();
+    console.log(JSON.stringify({
+      event: 'capture_browser_warmed',
+      timestamp: new Date().toISOString(),
+      duration_ms: Math.round(warmTimer.elapsedMs()),
+      process_uptime_ms: Math.round(process.uptime() * 1000),
+    }));
   } catch (error) {
     console.error(JSON.stringify({
       event: 'capture_browser_warm_failed',

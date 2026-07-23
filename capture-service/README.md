@@ -21,14 +21,18 @@ Subhosting cannot run a browser.
   board as base64; `analyze` uploads it to Storage. `screenshot_b64` is retained
   as the wire key so the capture service can deploy before the edge functions.
 - `color_scheme` is optional and defaults to `light` for older callers.
-- Frames are captured at `0`, `0.8x`, and `1.6x` viewport height, clamped and
-  deduplicated near the page end, then merged by Sharp into one compact JPEG.
+- The top frame is captured first, followed when budget allows by frames at
+  `0.8x` and `1.6x` viewport height, clamped and deduplicated near the page end.
+- Optional sampling stops at a 10-second soft budget. A usable constrained
+  capture returns normalized DOM tokens with the raw first JPEG as partial
+  evidence, skipping Sharp merge and pixel extraction. Complete captures merge
+  their frames into one compact JPEG with a weighted pixel palette.
 - DOM style weights use only each element's visible intersection with the
   current frame. `tokens.colors.visualPalette` records pixel usage proportions;
   `tokens.colors.theme` is `light`, `dark`, or `mixed`.
-- Chromium warms before the service accepts traffic. Page capture then has a
-  12-second deadline and rejects private/reserved network targets, including
-  redirects and subresources.
+- Chromium warms before the service accepts traffic. Page capture has a
+  13-second hard deadline below the edge caller's 15-second timeout and rejects
+  private/reserved network targets, including redirects and subresources.
 - Failures return a non-2xx response with
   `{ "error": { "code", "message", "retryable" } }`. `analyze` records the
   structured error and falls back to HTML color extraction.
@@ -39,7 +43,11 @@ the service boundary.
 
 ## Layers (separation of concerns)
 
-- `src/capture.ts` — Playwright orchestration, frame capture, and Sharp board merge.
+- `src/capture.ts` — Playwright orchestration and budget-aware frame capture.
+- `src/captureEvidence.ts` — browser-free Sharp board/pixel finalization and the
+  raw one-frame partial-evidence path.
+- `src/captureLifecycle.ts` — pure timing, outcome classification, and
+  privacy-safe capture log construction.
 - `src/frameSampling.ts` — pure frame positioning and visible-area geometry.
 - `src/pixelPalette.ts` — pure pixel clustering and theme classification.
 - `src/captureOptions.ts` — request color-scheme validation.

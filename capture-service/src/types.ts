@@ -127,6 +127,15 @@ export interface CaptureResponse {
   title: string;
 }
 
+export type CaptureOutcome = 'success' | 'partial' | 'timeout' | 'error';
+export type CompletedCaptureOutcome = Extract<CaptureOutcome, 'success' | 'partial'>;
+
+export interface CaptureExecutionResult {
+  response: CaptureResponse;
+  outcome: CompletedCaptureOutcome;
+  framesCaptured: number;
+}
+
 export interface CaptureErrorBody {
   error: {
     code: string;
