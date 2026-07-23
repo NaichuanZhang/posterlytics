@@ -20,6 +20,7 @@ import {
   type CapturePreview,
   type CapturePreviewError,
 } from '../lib/capturePreview'
+import { normalizeCaptureUrl } from '../lib/captureUrl'
 import { getDeviceColorScheme } from '../lib/colorScheme'
 import {
   createDefaultEagerCaptureSelection,
@@ -98,7 +99,24 @@ export function WebsiteCapturePreview({
   async function capture() {
     if (disabled || coolingDown || !url.trim() || activeRequest.current) return
 
-    const requestedUrl = url
+    const inputUrlAtRequest = url
+    const requestUrl = normalizeCaptureUrl(inputUrlAtRequest)
+    if (!requestUrl) {
+      const invalidSourceUrlFailure: CapturePreviewError = {
+        code: 'invalid_source_url',
+        message: t('Enter a complete HTTP or HTTPS website URL.'),
+        retryable: false,
+      }
+      setStatus('error')
+      setPreview(null)
+      setSelection({ imageUrls: [], logoExcluded: false })
+      setError(invalidSourceUrlFailure)
+      onPreviewChange?.(null)
+      onCaptureInFlightChange?.(false)
+      startCooldown()
+      return
+    }
+
     const token = ++requestToken.current
     const controller = new AbortController()
     activeRequest.current = controller
@@ -111,13 +129,13 @@ export function WebsiteCapturePreview({
 
     try {
       const response = await captureWebsitePreview({
-        url: requestedUrl,
+        url: requestUrl,
         colorScheme: getDeviceColorScheme(),
         signal: controller.signal,
       })
       if (
         token !== requestToken.current
-        || latestUrl.current !== requestedUrl
+        || latestUrl.current !== inputUrlAtRequest
       ) {
         return
       }
@@ -133,7 +151,7 @@ export function WebsiteCapturePreview({
     } catch (cause) {
       if (
         token !== requestToken.current
-        || latestUrl.current !== requestedUrl
+        || latestUrl.current !== inputUrlAtRequest
         || isAbortError(cause)
       ) {
         return

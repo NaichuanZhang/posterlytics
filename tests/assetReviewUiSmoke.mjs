@@ -1017,9 +1017,11 @@ async function testWebsiteCapturePreview(browserInstance) {
     reducedMotion: 'reduce',
   })
   const state = createState()
+  const initialInputUrl = 'Example.COM#details'
+  const initialRequestUrl = 'https://example.com/'
   state.capturePreviewResponses.push({
     delayMs: 140,
-    body: capturePreviewFixture('https://example.com/product', 'initial', {
+    body: capturePreviewFixture(initialRequestUrl, 'initial', {
       includeMissingImage: true,
     }),
   })
@@ -1042,7 +1044,8 @@ async function testWebsiteCapturePreview(browserInstance) {
   await page.getByRole('button', { name: 'Change campaign type' }).click()
   await selectWizardUseCase(page, 'Website product')
 
-  await page.locator('#product-url').fill('https://example.com/product')
+  const productUrl = page.locator('#product-url')
+  await productUrl.fill(initialInputUrl)
   const captureButton = page.getByRole('button', { name: 'Capture website' })
   await captureButton.evaluate((element) => {
     element.click()
@@ -1052,7 +1055,7 @@ async function testWebsiteCapturePreview(browserInstance) {
   await page.getByRole('button', { name: 'Capturing your site…' }).waitFor()
   await waitFor(() => state.capturePreviewRequests.length === 1)
   assert.deepEqual(state.capturePreviewRequests[0].body, {
-    url: 'https://example.com/product',
+    url: initialRequestUrl,
     use_case: 'website_product',
     color_scheme: 'light',
   })
@@ -1070,6 +1073,7 @@ async function testWebsiteCapturePreview(browserInstance) {
   await evidence.getByText('Website typefaces', { exact: true }).waitFor()
   await evidence.getByText('Preview unavailable', { exact: true }).waitFor()
   assert.equal(await evidence.locator('.website-color-list span').count(), 3)
+  assert.equal(await productUrl.inputValue(), initialInputUrl)
   assert.equal(
     await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
     true,
@@ -1132,6 +1136,23 @@ async function testWebsiteCapturePreview(browserInstance) {
   await new Promise((resolve) => setTimeout(resolve, 350))
   assert.equal(state.capturePreviewRequests.length, 3)
 
+  await productUrl.fill('ftp://example.com')
+  const invalidCaptureButton = page.getByRole('button', {
+    name: 'Capture website',
+  })
+  await invalidCaptureButton.waitFor()
+  assert.equal(await invalidCaptureButton.isEnabled(), true)
+  await invalidCaptureButton.click()
+  await page.getByText(
+    'Enter a complete HTTP or HTTPS website URL.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(state.capturePreviewRequests.length, 3)
+  assert.equal(
+    await page.getByRole('button', { name: 'Generate poster' }).isEnabled(),
+    true,
+  )
+
   state.capturePreviewResponses.push(
     {
       delayMs: 260,
@@ -1191,8 +1212,10 @@ async function testSinglePaidEagerCapture(browserInstance) {
     reducedMotion: 'reduce',
   })
   const successState = createState()
+  const eagerInputUrl = 'https://Example.COM/product'
+  const eagerRequestUrl = 'https://example.com/product'
   const successCapture = capturePreviewFixture(
-    'https://example.com/product',
+    eagerRequestUrl,
     'selection',
     {
       colorScheme: 'dark',
@@ -1207,7 +1230,7 @@ async function testSinglePaidEagerCapture(browserInstance) {
 
   await openWizardForm(successPage, 'Website product')
   await fillWizardRequiredFields(successPage, {
-    sourceUrl: 'https://example.com/product',
+    sourceUrl: eagerInputUrl,
     productName: 'Signal Studio',
     destinationUrl: 'https://example.com/start',
   })
@@ -1242,6 +1265,7 @@ async function testSinglePaidEagerCapture(browserInstance) {
   await assertNoOverflow(successPage)
   await submitWizardAndWaitForEnqueue(successPage, successState, 1)
 
+  assert.equal(successState.capturePreviewRequests[0].body.url, eagerRequestUrl)
   assert.equal(successState.capturePreviewRequests[0].body.color_scheme, 'dark')
   assert.equal(successState.storageUploads.length, 1)
   assert.match(
@@ -1252,7 +1276,7 @@ async function testSinglePaidEagerCapture(browserInstance) {
     write.method === 'PATCH' && write.body.eager_capture_url
   )
   assert.ok(adopted)
-  assert.equal(adopted.body.eager_capture_url, 'https://example.com/product')
+  assert.equal(adopted.body.eager_capture_url, eagerRequestUrl)
   assert.equal(adopted.body.eager_capture_color_scheme, 'dark')
   assert.equal(adopted.body.screenshot_key, successState.storageUploads[0].key)
   const [productOne, productTwo, productThree] =
