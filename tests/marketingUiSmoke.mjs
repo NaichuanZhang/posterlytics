@@ -43,8 +43,10 @@ server.stderr.on('data', (chunk) => {
 let browser
 try {
   await waitForServer()
+  await testStaticFirstPaintHtml()
   browser = await chromium.launch({ headless: true })
 
+  await testFirstPaintLifecycle(browser)
   await testGuestHome(browser)
   await testAuthenticatedHome(browser)
   await testAuthenticatedNotFound(browser)
@@ -68,6 +70,75 @@ try {
     new Promise((resolve) => server.once('exit', resolve)),
     new Promise((resolve) => setTimeout(resolve, 2000)),
   ])
+}
+
+async function testStaticFirstPaintHtml() {
+  for (const pathname of ['/', '/signin']) {
+    const response = await fetch(`${BASE_URL}${pathname}`, {
+      headers: { Accept: 'text/html' },
+    })
+    assert.equal(response.status, 200, `${pathname} did not return HTML successfully`)
+    assert.match(
+      response.headers.get('content-type') ?? '',
+      /^text\/html\b/,
+      `${pathname} did not return an HTML content type`,
+    )
+
+    const html = await response.text()
+    const shellTag = html.match(
+      /<div\b[^>]*data-first-paint-shell="static"[^>]*>/,
+    )?.[0]
+    assert.ok(shellTag, `${pathname} is missing the static first-paint shell`)
+    assert.match(shellTag, /\brole="status"/)
+    assert.match(shellTag, /\baria-live="polite"/)
+    assert.match(shellTag, /\baria-busy="true"/)
+    assert.ok(
+      html.includes('id="first-paint-shell-styles"'),
+      `${pathname} is missing the inline first-paint styles`,
+    )
+    assert.match(html, /<main\b[^>]*data-noscript-fallback/)
+  }
+}
+
+async function testFirstPaintLifecycle(browserInstance) {
+  const routes = [
+    { pathname: '/', appSelector: '.public-surface' },
+    { pathname: '/signin', appSelector: '.public-auth' },
+  ]
+
+  for (const { pathname, appSelector } of routes) {
+    const context = await browserInstance.newContext({
+      locale: 'en-US',
+      viewport: { width: 390, height: 844 },
+      reducedMotion: 'reduce',
+    })
+    await installBackendMock(context, { authenticated: false })
+
+    let releaseEntryModule
+    const entryModuleGate = new Promise((resolve) => {
+      releaseEntryModule = resolve
+    })
+    await context.route('**/src/main.tsx', async (route) => {
+      await entryModuleGate
+      await route.continue()
+    })
+
+    const page = await context.newPage()
+    const navigation = page.goto(`${BASE_URL}${pathname}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    const staticShell = page.locator('[data-first-paint-shell="static"]')
+    await staticShell.waitFor()
+    assert.equal(await staticShell.getAttribute('role'), 'status')
+    assert.equal(await page.getByRole('status').count(), 1)
+
+    releaseEntryModule()
+    await navigation
+    await page.locator(appSelector).waitFor()
+    assert.equal(await page.locator('[data-first-paint-shell]').count(), 0)
+
+    await context.close()
+  }
 }
 
 async function testGuestHome(browserInstance) {

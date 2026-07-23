@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthProvider'
 import { RequireAuth } from './auth/RequireAuth'
+import { FirstPaintLoadingShell } from './components/ui/FirstPaintLoadingShell'
 import { Spinner } from './components/ui/Spinner'
 import { ToastProvider } from './components/ui/Toast'
 import { PublicLandingShell } from './marketing/PublicLandingShell'
@@ -74,7 +75,7 @@ export default function SessionApp() {
             <Route path="/" element={<HomeRoute />} />
             <Route
               path="/signin"
-              element={<Suspense fallback={<Spinner full />}><SignInPage /></Suspense>}
+              element={<Suspense fallback={<FirstPaintLoadingShell />}><SignInPage /></Suspense>}
             />
             <Route path="/campaigns/new" element={<ProtectedPage><CampaignWizardPage /></ProtectedPage>} />
             <Route path="/campaigns/:id" element={<ProtectedPage><PosterEditorPage /></ProtectedPage>} />

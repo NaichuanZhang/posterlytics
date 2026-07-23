@@ -49,9 +49,144 @@
       content="https://posterlytics.insforge.site/marketing/social-card.jpg"
     />
 
+    <style id="first-paint-shell-styles">
+      .first-paint-shell,
+      .first-paint-noscript {
+        position: fixed;
+        z-index: 1000;
+        inset: 0;
+        display: grid;
+        min-width: 280px;
+        min-height: 100vh;
+        min-height: 100dvh;
+        box-sizing: border-box;
+        place-content: center;
+        justify-items: center;
+        gap: 24px;
+        padding: 24px;
+        background: #f2f3f0;
+        color: #171a1b;
+        font-family: Arial, Helvetica, sans-serif;
+        letter-spacing: 0;
+      }
+
+      .first-paint-shell *,
+      .first-paint-noscript * {
+        box-sizing: border-box;
+        letter-spacing: 0;
+      }
+
+      .first-paint-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .first-paint-brand-mark {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border-radius: 3px;
+        background: #e94f37;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .first-paint-progress {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+      }
+
+      .first-paint-spinner {
+        width: 24px;
+        height: 24px;
+        border: 2px solid #b9beb8;
+        border-top-color: #e94f37;
+        border-radius: 50%;
+        animation: first-paint-spin 700ms linear infinite;
+      }
+
+      .first-paint-label,
+      .first-paint-noscript-copy {
+        margin: 0;
+        color: inherit;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .first-paint-noscript {
+        align-content: center;
+        text-align: center;
+      }
+
+      .first-paint-noscript-title {
+        margin: 0;
+        font-size: 32px;
+        line-height: 1.1;
+      }
+
+      @keyframes first-paint-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .first-paint-shell,
+        .first-paint-noscript {
+          background: #171a1b;
+          color: #f2f3f0;
+        }
+
+        .first-paint-spinner {
+          border-color: #555b5e;
+          border-top-color: #e94f37;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .first-paint-spinner {
+          animation: none;
+        }
+      }
+    </style>
+    <noscript><style>[data-first-paint-shell]{display:none!important}</style></noscript>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div
+        id="static-first-paint-shell"
+        class="first-paint-shell"
+        data-first-paint-shell="static"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        aria-label="Loading"
+      >
+        <div class="first-paint-brand" aria-hidden="true">
+          <span class="first-paint-brand-mark">P</span>
+          <span>Posterlytics</span>
+        </div>
+        <div class="first-paint-progress">
+          <span class="first-paint-spinner" aria-hidden="true"></span>
+          <span class="first-paint-label">Loading</span>
+        </div>
+      </div>
+    </div>
+    <noscript>
+      <main class="first-paint-noscript" data-noscript-fallback>
+        <h1 class="first-paint-noscript-title">Posterlytics</h1>
+        <p class="first-paint-noscript-copy">
+          JavaScript is required to use Posterlytics. Enable JavaScript and reload this page.
+        </p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

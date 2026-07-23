@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Spinner } from './components/ui/Spinner'
+import { FirstPaintLoadingShell } from './components/ui/FirstPaintLoadingShell'
 import { shouldLoadSessionApp } from './lib/authRouting'
 import { PublicLandingShell } from './marketing/PublicLandingShell'
 
@@ -17,7 +17,7 @@ export default function App() {
   if (!needsSession) return <PublicLandingShell />
 
   return (
-    <Suspense fallback={<Spinner full />}>
+    <Suspense fallback={<FirstPaintLoadingShell />}>
       <SessionApp />
     </Suspense>
   )
