@@ -7,11 +7,16 @@ import {
   hasPosterQrBand,
   type PosterSize,
 } from '../lib/posterSize'
-import { resolveRedNoteRenderState } from '../lib/redNoteRender'
 import {
-  AiPoster,
-  type PosterRenderReady,
-} from './posters/AiPoster'
+  buildPosterExportFilename,
+  type PosterExportPage,
+} from '../lib/posterExport'
+import {
+  clampRedNotePageIndex,
+  resolveRedNoteRenderState,
+} from '../lib/redNoteRender'
+import type { PosterRenderReady } from './posters/AiPoster'
+import { PosterSurface } from './posters/PosterSurface'
 import { useToast } from './ui/Toast'
 import { useI18n } from '../i18n/I18nProvider'
 
@@ -21,11 +26,14 @@ interface Props {
   versionNumber?: number
   variant?: 'button' | 'icon'
   posterSize?: PosterSize
+  pageIndex?: number
 }
 
 interface ExportRenderAttempt {
   readonly id: number
   readonly imageSrcOverride?: string
+  readonly pageIndex: number
+  readonly page?: PosterExportPage
 }
 
 interface PendingRenderReady {
@@ -42,10 +50,10 @@ const POSTER_IMAGE_TIMEOUT_ERROR = 'Timed out waiting for a poster image.'
 
 // Exports at the descriptor's native sheet dimensions and pixel ratio. A scaled
 // QR band binds the export to a placement; an artwork-only descriptor does not.
-// AiPoster renders off-screen at full size and html-to-image captures it.
+// PosterSurface renders off-screen at full size and html-to-image captures it.
 //
 // The AI hero lives on cross-origin Storage, which would taint the export canvas;
-// we pre-fetch it to a same-origin data URL first and feed it to AiPoster via
+// we pre-fetch it to a same-origin data URL first and feed it to PosterSurface via
 // imageSrcOverride (falling back to the hosted URL if the fetch fails).
 export function PosterExportButton({
   campaign,
@@ -53,6 +61,7 @@ export function PosterExportButton({
   versionNumber,
   variant = 'button',
   posterSize = DEFAULT_POSTER_SIZE,
+  pageIndex = 0,
 }: Props) {
   const offscreenRef = useRef<HTMLDivElement>(null)
   const renderSequence = useRef(0)
@@ -63,14 +72,26 @@ export function PosterExportButton({
   const { t } = useI18n()
   const includesQrBand = hasPosterQrBand(posterSize)
   const redNoteRenderState = resolveRedNoteRenderState(campaign)
-  const redNoteExportDeferred = redNoteRenderState !== 'legacy'
+  const redNoteExportUnavailable = redNoteRenderState === 'invalid'
+  const redNotePageCount = typeof redNoteRenderState === 'object'
+    ? redNoteRenderState.plan.pages.length
+    : null
+  const exportPageIndex = redNotePageCount === null
+    ? 0
+    : clampRedNotePageIndex(pageIndex, redNotePageCount)
   const formatLabel = t(posterSize.label)
-  const buttonLabel = variant === 'icon' && includesQrBand && placement
-    ? t('Download {name} poster as {format} PNG', {
-        name: placement.label,
+  const buttonLabel = redNotePageCount !== null
+    ? t('Export page {number} of {count} as {format} PNG', {
+        number: exportPageIndex + 1,
+        count: redNotePageCount,
         format: formatLabel,
       })
-    : t('Export {format} PNG', { format: formatLabel })
+    : variant === 'icon' && includesQrBand && placement
+      ? t('Download {name} poster as {format} PNG', {
+          name: placement.label,
+          format: formatLabel,
+        })
+      : t('Export {format} PNG', { format: formatLabel })
   const resolveRenderReady = useCallback((
     attemptId: number,
     result: PosterRenderReady,
@@ -96,11 +117,17 @@ export function PosterExportButton({
   async function handleExport() {
     if (
       busy
-      || redNoteExportDeferred
+      || redNoteExportUnavailable
       || (includesQrBand && !placement)
     ) return
     setBusy(true)
     try {
+      const page: PosterExportPage | undefined = redNotePageCount === null
+        ? undefined
+        : {
+            pageIndex: exportPageIndex,
+            pageCount: redNotePageCount,
+          }
       // Pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
       const imageSrcOverride = campaign.hero_image_url
         ? await fetchAsDataUrl(campaign.hero_image_url) ?? undefined
@@ -108,6 +135,8 @@ export function PosterExportButton({
       const attempt: ExportRenderAttempt = {
         id: renderSequence.current + 1,
         imageSrcOverride,
+        pageIndex: page?.pageIndex ?? 0,
+        page,
       }
       renderSequence.current = attempt.id
       const renderReady = createRenderReadyPromise(
@@ -132,11 +161,15 @@ export function PosterExportButton({
       })
       const a = document.createElement('a')
       a.href = dataUrl
-      const version = versionNumber ? `-v${versionNumber}` : ''
-      const placementSuffix = includesQrBand && placement
-        ? `-${placement.label.replace(/\W+/g, '-')}`
-        : ''
-      a.download = `${campaign.product_name.replace(/\W+/g, '-')}${version}${placementSuffix}-${posterSize.export.filenameSuffix}.png`
+      a.download = buildPosterExportFilename({
+        productName: campaign.product_name,
+        versionNumber,
+        placementLabel: includesQrBand && placement
+          ? placement.label
+          : undefined,
+        filenameSuffix: posterSize.export.filenameSuffix,
+        page: attempt.page,
+      })
       a.click()
       notify(t('Poster export is ready.'), 'success')
     } catch (e) {
@@ -185,7 +218,7 @@ export function PosterExportButton({
         onClick={handleExport}
         disabled={
           busy
-          || redNoteExportDeferred
+          || redNoteExportUnavailable
           || (includesQrBand && !placement)
         }
         aria-label={variant === 'icon' ? buttonLabel : undefined}
@@ -200,14 +233,15 @@ export function PosterExportButton({
           style={{ position: 'fixed', left: -20000, top: 0, pointerEvents: 'none' }}
           aria-hidden
         >
-          <AiPoster
-            key={renderAttempt.id}
+          <PosterSurface
+            key={`${renderAttempt.id}:${renderAttempt.pageIndex}`}
             ref={offscreenRef}
             campaign={campaign}
             code={placement?.code ?? null}
             imageAlt=""
             imageSrcOverride={renderAttempt.imageSrcOverride}
             onRenderReady={handleRenderReady}
+            pageIndex={renderAttempt.pageIndex}
             posterSize={posterSize}
           />
         </div>

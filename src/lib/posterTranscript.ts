@@ -16,7 +16,10 @@ import type {
   PosterSpec,
 } from './types'
 import type { UseCaseId } from './useCases'
-import { resolveRedNoteRenderState } from './redNoteRender'
+import {
+  clampRedNotePageIndex,
+  resolveRedNoteRenderState,
+} from './redNoteRender'
 
 export type PosterTranscriptSource =
   | 'campaign'
@@ -52,6 +55,7 @@ export interface PosterTranscriptInput {
 interface PosterTranscriptOptions {
   locale: SupportedLocale
   includeCompositedFooter: boolean
+  pageIndex?: number
 }
 
 const SHORT_ALT_MAX_CODE_POINTS = 150
@@ -64,6 +68,7 @@ export function derivePosterTranscript(
   {
     locale,
     includeCompositedFooter,
+    pageIndex = 0,
   }: PosterTranscriptOptions,
 ): PosterTranscript {
   const blocks: PosterTranscriptBlock[] = []
@@ -82,7 +87,7 @@ export function derivePosterTranscript(
       addEventFooterBlocks(input, add)
     }
   } else {
-    addProductArtworkBlocks(input, add)
+    addProductArtworkBlocks(input, add, pageIndex)
     if (includeCompositedFooter && includesQrBand) {
       const spec = recordOf(input.poster_spec)
       add(
@@ -115,6 +120,7 @@ function transcriptIncludesQrBand(posterFormat: unknown): boolean {
 function addProductArtworkBlocks(
   input: PosterTranscriptInput,
   add: (source: PosterTranscriptSource, value: unknown) => void,
+  pageIndex: number,
 ) {
   const redNoteRenderState = resolveRedNoteRenderState(input)
   if (redNoteRenderState !== 'legacy') {
@@ -122,10 +128,14 @@ function addProductArtworkBlocks(
       add('campaign', input.product_name)
       return
     }
-    const cover = redNoteRenderState.plan.pages[0]
-    if (cover.kind === 'cover') {
-      add('poster-content', cover.title)
-      add('poster-content', cover.subtitle)
+    const pages = redNoteRenderState.plan.pages
+    const page = pages[clampRedNotePageIndex(pageIndex, pages.length)]
+    if (page.kind === 'cover') {
+      add('poster-content', page.title)
+      add('poster-content', page.subtitle)
+    } else {
+      add('poster-content', page.heading)
+      for (const block of page.blocks) add('poster-content', block)
     }
     return
   }

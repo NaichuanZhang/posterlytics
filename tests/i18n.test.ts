@@ -104,6 +104,9 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Square 1:1': '方形 1:1',
     'Artwork-only export. No QR code or placement tracking is included.':
       '仅导出画面，不包含二维码或投放追踪。',
+    'Page {number} of {count}': '第 {number} / {count} 页',
+    'Export page {number} of {count} as {format} PNG':
+      '将第 {number} / {count} 页导出为 {format} PNG',
     'Create an account': '创建新账户',
     'Reset code': '验证码',
     'Verify code': '验证',

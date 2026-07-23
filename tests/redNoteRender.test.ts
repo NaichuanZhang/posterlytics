@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   REDNOTE_BACKGROUND_RENDER_MODE,
+  clampRedNotePageIndex,
   contrastCheckedColor,
   contrastRatio,
   getRedNotePageRenderModel,
+  redNoteCodePointLength,
   resolveRedNotePalette,
   resolveRedNoteRenderState,
 } from '../src/lib/redNoteRender.ts'
@@ -87,6 +89,16 @@ test('render-state resolution isolates legacy, composite, and invalid marked row
   }
 })
 
+test('page index clamping handles invalid requests and page-count shrinkage', () => {
+  assert.equal(clampRedNotePageIndex(-1, 5), 0)
+  assert.equal(clampRedNotePageIndex(10, 5), 4)
+  assert.equal(clampRedNotePageIndex(1.5, 5), 0)
+  assert.equal(clampRedNotePageIndex(Number.NaN, 5), 0)
+  assert.equal(clampRedNotePageIndex(4, 2), 1)
+  assert.equal(clampRedNotePageIndex(1, 0), 0)
+  assert.equal(clampRedNotePageIndex(1, 2.5), 0)
+})
+
 test('cover render model maps native geometry and uses the maximum CJK size tier', () => {
   const snapshot = structuredClone(plan)
   const model = getRedNotePageRenderModel(plan, 0)
@@ -120,6 +132,51 @@ test('content render model is page-index ready without exposing pager state', ()
     width: 1098,
     height: 1512,
   })
+})
+
+test('maximum bounded CJK content keeps native geometry and conservative tiers', () => {
+  const maxContentPlan: RedNotePostPlan = {
+    schema_version: 1,
+    pages: [
+      { kind: 'cover', title: '封面' },
+      {
+        kind: 'content',
+        heading: '章节'.repeat(32),
+        blocks: Array.from({ length: 4 }, () => '内容'.repeat(80)),
+      },
+    ],
+  }
+  const model = getRedNotePageRenderModel(maxContentPlan, 1)
+
+  assert.equal(model.kind, 'content')
+  if (model.kind !== 'content') return
+  const heading = model.composition.heading
+  const body = model.composition.body
+  assert.ok(heading)
+  assert.ok(body)
+  assert.equal(redNoteCodePointLength(model.page.heading), 64)
+  assert.deepEqual(
+    model.page.blocks.map(redNoteCodePointLength),
+    [160, 160, 160, 160],
+  )
+  assert.deepEqual(heading, {
+    x: 144,
+    y: 168,
+    width: 954,
+    height: 216,
+  })
+  assert.deepEqual(body, {
+    x: 144,
+    y: 432,
+    width: 954,
+    height: 896,
+  })
+  assert.equal(model.headingSize, 48)
+  assert.equal(model.bodySize, 26)
+})
+
+test('strict render model still rejects an out-of-range internal index', () => {
+  assert.throws(() => getRedNotePageRenderModel(plan, 2), RangeError)
 })
 
 test('contrast helpers retain compliant colors and choose a readable fallback', () => {

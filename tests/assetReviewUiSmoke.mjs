@@ -62,6 +62,7 @@ try {
   await testQrBandEdgeSamplingAndExport(browser)
   await testQrBandSamplingFallback(browser)
   await testRedNoteCoverFormat(browser)
+  await testRedNotePostPagerAndCurrentPageExport(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
   console.log(`asset review UI smoke passed; screenshots: ${OUTPUT_DIR}`)
@@ -1648,6 +1649,221 @@ async function testRedNoteCoverFormat(browserInstance) {
   await context.close()
 }
 
+async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
+  const context = await browserInstance.newContext({
+    acceptDownloads: true,
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  const redNotePlan = {
+    schema_version: 1,
+    pages: [
+      {
+        kind: 'cover',
+        title: 'Walk Shanghai slowly',
+        subtitle: 'Three pages from one shared background',
+      },
+      {
+        kind: 'content',
+        heading: 'A quieter route',
+        blocks: [
+          'Start before the busiest streets fill up.',
+          'Keep the river on your left and follow the morning light.',
+        ],
+      },
+      {
+        kind: 'content',
+        heading: '章节'.repeat(32),
+        blocks: Array.from({ length: 4 }, () => '内容'.repeat(80)),
+      },
+    ],
+  }
+  const redNoteContent = {
+    headline: 'Walk Shanghai slowly',
+    what_it_does: 'Three pages from one shared background',
+    how_it_works: [],
+    why_use_it: [],
+    features: ['A quieter route'],
+    cta: '',
+    rednote_post: redNotePlan,
+  }
+  const markedLayout = {
+    ...posterLayout([]),
+    render_mode: 'rednote-background-v1',
+  }
+
+  Object.assign(state.campaign, {
+    use_case: 'rednote_post',
+    poster_format: 'rednote_cover_3x4',
+    poster_content: redNoteContent,
+    poster_layout: markedLayout,
+    hero_image_url: edgePosterUrl,
+    hero_image_key: 'poster/rednote-background.png',
+  })
+  Object.assign(state.currentGeneration, {
+    use_case: 'rednote_post',
+    poster_format: 'rednote_cover_3x4',
+    poster_content: redNoteContent,
+    poster_layout: markedLayout,
+    hero_image_url: edgePosterUrl,
+    hero_image_key: 'poster/rednote-background.png',
+  })
+  state.readyGenerations = [{
+    ...state.currentGeneration,
+    id: 'generation-legacy-rednote',
+    parent_generation_id: state.currentGeneration.id,
+    version_number: 2,
+    instruction: 'Historical text-baked RedNote cover.',
+    poster_layout: posterLayout([
+      {
+        band: 'upper',
+        role: 'headline',
+        content: 'Historical RedNote cover',
+      },
+    ]),
+  }]
+  state.placements = []
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  const pager = page.getByRole('group', { name: 'Page navigation' })
+  await pager.waitFor()
+  const previousPage = pager.getByRole('button', { name: 'Previous page' })
+  const nextPage = pager.getByRole('button', { name: 'Next page' })
+  assert.equal(await previousPage.isDisabled(), true)
+  assert.equal(await nextPage.isEnabled(), true)
+  await pager.getByText('Page 1 of 3', { exact: true }).waitFor()
+
+  const canvas = page.locator('.canvas-stage')
+  let renderedPage = canvas.locator('[data-rednote-page-index="0"]')
+  await renderedPage.waitFor()
+  const sharedHeroSource = await renderedPage
+    .locator('[data-poster-hero]')
+    .getAttribute('src')
+  assert.ok(sharedHeroSource)
+  assert.equal(await renderedPage.locator('[data-poster-hero]').count(), 1)
+  const transcript = page.locator('.poster-transcript-copy')
+  assert.deepEqual(
+    await transcript.locator('p').allTextContents(),
+    ['Walk Shanghai slowly', 'Three pages from one shared background'],
+  )
+
+  await nextPage.click()
+  renderedPage = canvas.locator(
+    '[data-rednote-page-index="1"][data-poster-render-status="not-applicable"]',
+  )
+  await renderedPage.waitFor()
+  await pager.getByText('Page 2 of 3', { exact: true }).waitFor()
+  assert.equal(
+    await renderedPage.locator('[data-poster-hero]').getAttribute('src'),
+    sharedHeroSource,
+  )
+  assert.deepEqual(
+    await transcript.locator('p').allTextContents(),
+    [
+      'A quieter route',
+      'Start before the busiest streets fill up.',
+      'Keep the river on your left and follow the morning light.',
+    ],
+  )
+
+  await nextPage.click()
+  renderedPage = canvas.locator(
+    '[data-rednote-page-index="2"][data-poster-render-status="not-applicable"]',
+  )
+  await renderedPage.waitFor()
+  await pager.getByText('Page 3 of 3', { exact: true }).waitFor()
+  assert.equal(await nextPage.isDisabled(), true)
+  assert.equal(await previousPage.isEnabled(), true)
+  assert.equal(
+    await renderedPage.locator('[data-poster-hero]').getAttribute('src'),
+    sharedHeroSource,
+  )
+  await waitForAnimationFrames(page, 2)
+  for (const selector of ['[data-rednote-heading]', '[data-rednote-body]']) {
+    const metrics = await redNoteLayoutMetrics(
+      renderedPage.locator(selector),
+    )
+    const diagnostic = JSON.stringify(metrics, null, 2)
+    console.log(`RedNote layout diagnostic for ${selector}:\n${diagnostic}`)
+    assert.deepEqual(
+      {
+        clientHeight: metrics.clientHeight,
+        clientWidth: metrics.clientWidth,
+      },
+      selector === '[data-rednote-heading]'
+        ? { clientHeight: 216, clientWidth: 954 }
+        : { clientHeight: 896, clientWidth: 954 },
+      `${selector} does not use its native composition rectangle:\n${diagnostic}`,
+    )
+    assert.deepEqual(
+      {
+        clientHeight: metrics.root.clientHeight,
+        clientWidth: metrics.root.clientWidth,
+      },
+      { clientHeight: 1656, clientWidth: 1242 },
+      `RedNote root is not a native-size layout box:\n${diagnostic}`,
+    )
+    assert.ok(
+      metrics.scrollHeight <= metrics.clientHeight,
+      `${selector} overflows at ${metrics.scrollHeight}px/${metrics.clientHeight}px:\n${diagnostic}`,
+    )
+  }
+
+  const versions = page.getByRole('region', { name: 'Versions' })
+  await versions.locator('.version-row').filter({ hasText: 'Version 2' }).click()
+  await pager.waitFor({ state: 'detached' })
+  assert.equal(
+    await page.getByRole('button', {
+      name: 'Export Portrait 3:4 full bleed PNG',
+    }).isEnabled(),
+    true,
+  )
+  await versions.locator('.version-row').filter({ hasText: 'Version 1' }).click()
+  await page.getByRole('group', { name: 'Page navigation' }).waitFor()
+  await page.getByText('Page 1 of 3', { exact: true }).waitFor()
+
+  const resetPager = page.getByRole('group', { name: 'Page navigation' })
+  await resetPager.getByRole('button', { name: 'Next page' }).click()
+  await resetPager.getByText('Page 2 of 3', { exact: true }).waitFor()
+  const exportButton = page.getByRole('button', {
+    name: 'Export page 2 of 3 as Portrait 3:4 full bleed PNG',
+  })
+  const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
+  await exportButton.click()
+  await page.locator(
+    '[data-poster-export-render] [data-rednote-page-index="1"]',
+  ).waitFor()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  assert.ok(downloadPath)
+  assert.match(download.suggestedFilename(), /-page-02-of-03\.png$/)
+  const png = await readFile(downloadPath)
+  assert.equal(png.subarray(1, 4).toString('ascii'), 'PNG')
+  assert.deepEqual(
+    {
+      width: png.readUInt32BE(16),
+      height: png.readUInt32BE(20),
+    },
+    { width: 1242, height: 1656 },
+  )
+  await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+  await assertNoOverflow(page)
+  await page.screenshot({
+    path: `${OUTPUT_DIR}/rednote-post-page-export-desktop.png`,
+    fullPage: true,
+  })
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testAssetModeTooltips(browserInstance) {
   const desktopContext = await browserInstance.newContext({
     locale: 'en-US',
@@ -2530,6 +2746,96 @@ async function waitForAnimationFrames(page, count) {
   }, count)
 }
 
+async function redNoteLayoutMetrics(locator) {
+  return locator.evaluate((element) => {
+    const rectOf = (rect) => ({
+      bottom: rect.bottom,
+      height: rect.height,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      width: rect.width,
+      x: rect.x,
+      y: rect.y,
+    })
+    const styleOf = (node) => {
+      const style = getComputedStyle(node)
+      return {
+        alignItems: style.alignItems,
+        boxSizing: style.boxSizing,
+        display: style.display,
+        flex: style.flex,
+        flexBasis: style.flexBasis,
+        flexGrow: style.flexGrow,
+        flexShrink: style.flexShrink,
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        gridTemplateColumns: style.gridTemplateColumns,
+        height: style.height,
+        justifyContent: style.justifyContent,
+        lineHeight: style.lineHeight,
+        maxHeight: style.maxHeight,
+        maxWidth: style.maxWidth,
+        minHeight: style.minHeight,
+        minWidth: style.minWidth,
+        overflow: style.overflow,
+        overflowWrap: style.overflowWrap,
+        placeItems: style.placeItems,
+        position: style.position,
+        transform: style.transform,
+        transformOrigin: style.transformOrigin,
+        whiteSpace: style.whiteSpace,
+        width: style.width,
+      }
+    }
+    const dimensionsOf = (node) => ({
+      clientHeight: node.clientHeight,
+      clientWidth: node.clientWidth,
+      offsetHeight: node.offsetHeight,
+      offsetWidth: node.offsetWidth,
+      rect: rectOf(node.getBoundingClientRect()),
+      scrollHeight: node.scrollHeight,
+      scrollWidth: node.scrollWidth,
+      style: styleOf(node),
+    })
+    const labelOf = (node) => {
+      if (node.hasAttribute('data-rednote-heading')) return '[data-rednote-heading]'
+      if (node.hasAttribute('data-rednote-body')) return '[data-rednote-body]'
+      if (node.hasAttribute('data-rednote-page-index')) {
+        return `[data-rednote-page-index="${node.getAttribute('data-rednote-page-index')}"]`
+      }
+      if (node.classList.contains('canvas-stage')) return '.canvas-stage'
+      const classes = Array.from(node.classList).slice(0, 2).join('.')
+      return `${node.tagName.toLowerCase()}${classes ? `.${classes}` : ''}`
+    }
+    const textRange = document.createRange()
+    textRange.selectNodeContents(element)
+    const root = element.closest('[data-rednote-page-index]')
+    if (!root) throw new Error('RedNote text is missing its native poster root.')
+
+    const ancestors = []
+    let current = element
+    while (current) {
+      ancestors.push({
+        label: labelOf(current),
+        ...dimensionsOf(current),
+      })
+      if (current.classList.contains('canvas-stage')) break
+      current = current.parentElement
+    }
+
+    return {
+      ...dimensionsOf(element),
+      ancestors,
+      lineFragments: Array.from(textRange.getClientRects(), rectOf),
+      root: dimensionsOf(root),
+      rootScale: root.clientWidth > 0
+        ? root.getBoundingClientRect().width / root.clientWidth
+        : null,
+    }
+  })
+}
+
 async function probePngPixel(page, png, point) {
   const dataUrl = `data:image/png;base64,${png.toString('base64')}`
   return page.evaluate(async ({ dataUrl: src, point: sample }) => {
@@ -2676,11 +2982,18 @@ async function json(route, body, status = 200) {
 async function waitForServer() {
   const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
-    try {
-      const response = await fetch(BASE_URL)
-      if (response.ok) return
-    } catch {
-      // Server is still starting.
+    if (server.exitCode !== null) {
+      throw new Error(
+        `Vite server exited with code ${server.exitCode} before startup.\n${serverOutput}`,
+      )
+    }
+    if (serverOutput.includes(BASE_URL)) {
+      try {
+        const response = await fetch(BASE_URL)
+        if (response.ok) return
+      } catch {
+        // This Vite process reported ready, but its socket is not accepting yet.
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }

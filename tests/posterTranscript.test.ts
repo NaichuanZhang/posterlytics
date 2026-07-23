@@ -189,8 +189,8 @@ test('legacy RedNote transcript preserves the text-baked layout surface', () => 
   assert.doesNotMatch(transcript.plainText, /Second page|Deferred copy/)
 })
 
-test('marked RedNote transcript exposes only the DOM-composited cover', () => {
-  const transcript = derivePosterTranscript({
+test('marked RedNote transcript follows the selected DOM-composited page', () => {
+  const input: PosterTranscriptInput = {
     product_name: 'City Notes',
     scenario: 'product',
     use_case: 'rednote_post',
@@ -222,19 +222,61 @@ test('marked RedNote transcript exposes only the DOM-composited cover', () => {
       ...layout([]),
       render_mode: 'rednote-background-v1',
     },
-  }, {
+  }
+  const coverTranscript = derivePosterTranscript(input, {
     locale: 'en-US',
     includeCompositedFooter: false,
   })
 
-  assert.deepEqual(transcript.blocks, [
+  assert.deepEqual(coverTranscript.blocks, [
     { source: 'poster-content', text: 'Walk Shanghai slowly' },
     { source: 'poster-content', text: 'Five quiet streets' },
   ])
   assert.doesNotMatch(
-    transcript.plainText,
+    coverTranscript.plainText,
     /Projected title|Projected subtitle|Second page|Deferred copy/,
   )
+
+  const contentTranscript = derivePosterTranscript(input, {
+    locale: 'en-US',
+    includeCompositedFooter: false,
+    pageIndex: 1,
+  })
+  assert.deepEqual(contentTranscript.blocks, [
+    { source: 'poster-content', text: 'Second page' },
+    { source: 'poster-content', text: 'Deferred copy' },
+  ])
+  assert.doesNotMatch(
+    contentTranscript.plainText,
+    /Projected title|Projected subtitle|Walk Shanghai slowly|Five quiet streets/,
+  )
+})
+
+test('invalid marked RedNote transcript preserves the campaign fallback', () => {
+  const transcript = derivePosterTranscript({
+    product_name: 'Invalid City Notes',
+    scenario: 'product',
+    use_case: 'rednote_post',
+    poster_format: 'rednote_cover_3x4',
+    poster_content: {
+      rednote_post: {
+        schema_version: 1,
+        pages: [],
+      },
+    },
+    poster_layout: {
+      ...layout([]),
+      render_mode: 'rednote-background-v1',
+    },
+  }, {
+    locale: 'en-US',
+    includeCompositedFooter: false,
+    pageIndex: 8,
+  })
+
+  assert.deepEqual(transcript.blocks, [
+    { source: 'campaign', text: 'Invalid City Notes' },
+  ])
 })
 
 test('scaled event artwork and footer use only poster_spec provenance', () => {

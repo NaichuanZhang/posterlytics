@@ -1,4 +1,10 @@
-import { Maximize2, Minus, Plus } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minus,
+  Plus,
+} from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   CANVAS_ZOOM_LEVELS,
@@ -12,6 +18,10 @@ import {
   hasPosterQrBand,
   type PosterSize,
 } from '../lib/posterSize'
+import {
+  clampRedNotePageIndex,
+  resolveRedNoteRenderState,
+} from '../lib/redNoteRender'
 import type { Campaign } from '../lib/types'
 import { LayoutPreview } from './LayoutPreview'
 import { Poster } from './Poster'
@@ -25,6 +35,9 @@ interface PosterCanvasProps {
   versionLabel: string
   onZoomChange: (zoom: CanvasZoom) => void
   posterSize?: PosterSize
+  pageIndex?: number
+  pageCount?: number
+  onPageIndexChange?: (pageIndex: number) => void
 }
 
 interface ElementSize {
@@ -40,6 +53,9 @@ export function PosterCanvas({
   versionLabel,
   onZoomChange,
   posterSize = DEFAULT_POSTER_SIZE,
+  pageIndex = 0,
+  pageCount,
+  onPageIndexChange,
 }: PosterCanvasProps) {
   const { t } = useI18n()
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -82,6 +98,22 @@ export function PosterCanvas({
   const stageWidth = Math.max(viewport.width, previewWidth + 96)
   const stageHeight = Math.max(viewport.height, previewHeight + 96)
   const requiresPlacement = hasPosterQrBand(posterSize)
+  const redNoteRenderState = useMemo(
+    () => resolveRedNoteRenderState(campaign),
+    [campaign],
+  )
+  const compositePageCount = typeof redNoteRenderState === 'object'
+    ? redNoteRenderState.plan.pages.length
+    : null
+  const renderedPageIndex = compositePageCount === null
+    ? 0
+    : clampRedNotePageIndex(pageIndex, compositePageCount)
+  const showPageControls = (
+    compositePageCount !== null
+    && pageCount === compositePageCount
+    && !!onPageIndexChange
+    && !!campaign.hero_image_url
+  )
 
   return (
     <div className="canvas-shell">
@@ -105,6 +137,7 @@ export function PosterCanvas({
                   imageAlt={imageAlt}
                   width={previewWidth}
                   posterSize={posterSize}
+                  pageIndex={renderedPageIndex}
                 />
               ) : (
                 <div className="canvas-message">{t('Preparing the tracked placement')}</div>
@@ -120,11 +153,72 @@ export function PosterCanvas({
           )}
         </div>
       </div>
-      <CanvasZoomControls
-        zoom={zoom}
-        fitZoom={fitZoom}
-        onZoomChange={onZoomChange}
-      />
+      {showPageControls && compositePageCount !== null && onPageIndexChange ? (
+        <div className="canvas-control-row">
+          <RedNotePageControls
+            pageIndex={renderedPageIndex}
+            pageCount={compositePageCount}
+            onPageIndexChange={onPageIndexChange}
+          />
+          <CanvasZoomControls
+            zoom={zoom}
+            fitZoom={fitZoom}
+            onZoomChange={onZoomChange}
+          />
+        </div>
+      ) : (
+        <CanvasZoomControls
+          zoom={zoom}
+          fitZoom={fitZoom}
+          onZoomChange={onZoomChange}
+        />
+      )}
+    </div>
+  )
+}
+
+function RedNotePageControls({
+  pageIndex,
+  pageCount,
+  onPageIndexChange,
+}: {
+  pageIndex: number
+  pageCount: number
+  onPageIndexChange: (pageIndex: number) => void
+}) {
+  const { t } = useI18n()
+  return (
+    <div
+      className="rednote-page-controls"
+      role="group"
+      aria-label={t('Page navigation')}
+    >
+      <button
+        type="button"
+        className="zoom-icon"
+        aria-label={t('Previous page')}
+        data-tooltip={t('Previous page')}
+        disabled={pageIndex === 0}
+        onClick={() => onPageIndexChange(pageIndex - 1)}
+      >
+        <ChevronLeft size={15} aria-hidden="true" />
+      </button>
+      <span className="rednote-page-position" aria-live="polite">
+        {t('Page {number} of {count}', {
+          number: pageIndex + 1,
+          count: pageCount,
+        })}
+      </span>
+      <button
+        type="button"
+        className="zoom-icon"
+        aria-label={t('Next page')}
+        data-tooltip={t('Next page')}
+        disabled={pageIndex === pageCount - 1}
+        onClick={() => onPageIndexChange(pageIndex + 1)}
+      >
+        <ChevronRight size={15} aria-hidden="true" />
+      </button>
     </div>
   )
 }

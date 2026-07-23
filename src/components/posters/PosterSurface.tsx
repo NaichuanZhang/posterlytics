@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import { useI18n } from '../../i18n/I18nProvider'
 import {
+  clampRedNotePageIndex,
   resolveRedNoteRenderState,
 } from '../../lib/redNoteRender'
 import {
@@ -86,12 +87,17 @@ export const PosterSurface = forwardRef<HTMLDivElement, Props>(
       )
     }
 
+    const safePageIndex = clampRedNotePageIndex(
+      pageIndex,
+      renderState.plan.pages.length,
+    )
+
     return (
       <RedNotePostPage
         ref={ref}
         campaign={campaign}
         plan={renderState.plan}
-        pageIndex={pageIndex}
+        pageIndex={safePageIndex}
         imageAlt={imageAlt}
         imageSrcOverride={imageSrcOverride}
         onRenderReady={onRenderReady}

@@ -50,6 +50,7 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
       typeof document === 'undefined' || !document.fonts,
     )
     const notifiedReady = useRef<string | null>(null)
+    const readinessKey = imageSrc ? `${pageIndex}:${imageSrc}` : null
     const model = useMemo(
       () => getRedNotePageRenderModel(plan, pageIndex),
       [pageIndex, plan],
@@ -79,12 +80,12 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
     useLayoutEffect(() => {
       setImageLoaded(false)
       notifiedReady.current = null
-    }, [imageSrc, pageIndex])
+    }, [imageSrc])
 
     useLayoutEffect(() => {
-      if (!imageLoaded || !fontsLoaded || !imageSrc) return
-      if (notifiedReady.current === imageSrc) return
-      notifiedReady.current = imageSrc
+      if (!imageLoaded || !fontsLoaded || !imageSrc || !readinessKey) return
+      if (notifiedReady.current === readinessKey) return
+      notifiedReady.current = readinessKey
       onRenderReady?.({
         imageSrc,
         footerColor: palette.background,
@@ -96,6 +97,7 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
       imageSrc,
       onRenderReady,
       palette.background,
+      readinessKey,
     ])
 
     return (
@@ -197,6 +199,7 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
               }}
             />
             <strong
+              data-rednote-heading
               style={{
                 ...rectStyle(model.composition.heading!),
                 color: palette.text,
@@ -211,6 +214,7 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
               {model.page.heading}
             </strong>
             <div
+              data-rednote-body
               style={{
                 ...rectStyle(model.composition.body!),
                 display: 'flex',

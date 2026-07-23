@@ -9,6 +9,7 @@ interface Props {
   imageAlt: string
   width?: number // rendered preview width in px (defaults to fit the editor column)
   posterSize?: PosterSize
+  pageIndex?: number
 }
 
 // The poster is the AI-painted hero artwork on its descriptor-native output
@@ -25,6 +26,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
     imageAlt,
     width = DEFAULT_PREVIEW_W,
     posterSize = DEFAULT_POSTER_SIZE,
+    pageIndex = 0,
   },
   ref,
 ) {
@@ -57,7 +59,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
           imageAlt={imageAlt}
           compositedFooterAriaHidden
           posterSize={posterSize}
-          pageIndex={0}
+          pageIndex={pageIndex}
         />
       </div>
     </div>

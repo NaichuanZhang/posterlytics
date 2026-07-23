@@ -65,6 +65,10 @@ import {
 } from '../lib/posterSize'
 import { normalizePlatformHint } from '../lib/platformHints'
 import { derivePosterTranscript } from '../lib/posterTranscript'
+import {
+  clampRedNotePageIndex,
+  resolveRedNoteRenderState,
+} from '../lib/redNoteRender'
 import { getDeviceColorScheme } from '../lib/colorScheme'
 import { deleteReferenceImages, materializeReferenceImages } from '../lib/referenceStorage'
 import {
@@ -134,6 +138,10 @@ export function PosterEditorPage() {
   const [busy, setBusy] = useState<BusyAction | null>(null)
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null)
   const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null)
+  const [redNotePageSelection, setRedNotePageSelection] = useState({
+    generationKey: null as string | null,
+    pageIndex: 0,
+  })
   const [instruction, setInstruction] = useState('')
   const [platformHint, setPlatformHint] = useState('')
   const [platformHintBaseline, setPlatformHintBaseline] =
@@ -323,6 +331,38 @@ export function PosterEditorPage() {
     () => campaign ? overlayGeneration(campaign, previewGeneration) : null,
     [campaign, previewGeneration],
   )
+  const previewRedNoteRenderState = useMemo(
+    () => previewCampaign
+      ? resolveRedNoteRenderState(previewCampaign)
+      : 'legacy',
+    [previewCampaign],
+  )
+  const previewGenerationKey = previewGeneration?.id
+    ?? campaign?.current_generation_id
+    ?? campaign?.id
+    ?? null
+  const redNotePageCount = typeof previewRedNoteRenderState === 'object'
+    ? previewRedNoteRenderState.plan.pages.length
+    : null
+  const requestedRedNotePageIndex =
+    redNotePageSelection.generationKey === previewGenerationKey
+      ? redNotePageSelection.pageIndex
+      : 0
+  const effectivePageIndex = redNotePageCount === null
+    ? 0
+    : clampRedNotePageIndex(requestedRedNotePageIndex, redNotePageCount)
+
+  useEffect(() => {
+    const generationKey = redNotePageCount === null
+      ? null
+      : previewGenerationKey
+    setRedNotePageSelection((current) => (
+      current.generationKey === generationKey
+      && current.pageIndex === effectivePageIndex
+        ? current
+        : { generationKey, pageIndex: effectivePageIndex }
+    ))
+  }, [effectivePageIndex, previewGenerationKey, redNotePageCount])
 
   if (loading || generationsLoading) {
     return (
@@ -360,6 +400,7 @@ export function PosterEditorPage() {
   const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
   const posterTranscript = derivePosterTranscript(previewCampaign, {
     locale,
+    pageIndex: effectivePageIndex,
     includeCompositedFooter: (
       previewIncludesQrBand
       && !!previewCode
@@ -668,6 +709,14 @@ export function PosterEditorPage() {
     }
   }
 
+  function changeRedNotePageIndex(nextPageIndex: number) {
+    if (redNotePageCount === null) return
+    setRedNotePageSelection({
+      generationKey: previewGenerationKey,
+      pageIndex: clampRedNotePageIndex(nextPageIndex, redNotePageCount),
+    })
+  }
+
   const versionPanel = (
     <PosterVersionHistory
       campaign={campaign}
@@ -874,6 +923,7 @@ export function PosterEditorPage() {
                 }
                 versionNumber={selectedGeneration?.version_number ?? undefined}
                 posterSize={previewPosterSize}
+                pageIndex={effectivePageIndex}
               />
             )}
             {campaignTrackingEnabled && previewIncludesQrBand && selectedPlacement && (
@@ -1067,10 +1117,13 @@ export function PosterEditorPage() {
               imageAlt={posterTranscript.shortAlt}
               zoom={preferences.zoom}
               posterSize={previewPosterSize}
+              pageIndex={effectivePageIndex}
+              pageCount={redNotePageCount ?? undefined}
               versionLabel={selectedGeneration
                 ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
                 : t('Current poster')}
               onZoomChange={(zoom) => updatePreferences({ zoom })}
+              onPageIndexChange={changeRedNotePageIndex}
             />
             <PosterTranscript transcript={posterTranscript} />
           </figure>

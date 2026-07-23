@@ -74,6 +74,15 @@ export function resolveRedNoteRenderState(
   return plan ? { mode: 'composite', plan } : 'invalid'
 }
 
+export function clampRedNotePageIndex(
+  requested: number,
+  pageCount: number,
+): number {
+  if (!Number.isInteger(pageCount) || pageCount <= 0) return 0
+  if (!Number.isInteger(requested)) return 0
+  return Math.min(Math.max(requested, 0), pageCount - 1)
+}
+
 export function getRedNotePageRenderModel(
   plan: RedNotePostPlan,
   pageIndex: number,
@@ -207,7 +216,7 @@ function contentBodySize(blocks: readonly string[]): number {
   )
   if (longest <= 48 && total <= 120) return 40
   if (longest <= 96 && total <= 260) return 34
-  return 29
+  return 26
 }
 
 function normalizedColor(value: unknown, fallback: string): string {
