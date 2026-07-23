@@ -3846,6 +3846,27 @@ img {
 
 /* Analytics */
 
+.analytics-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.analytics-summary-meta h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.analytics-freshness {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .metric-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

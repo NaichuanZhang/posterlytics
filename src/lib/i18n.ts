@@ -42,6 +42,19 @@ export function formatLocalizedDate(
   return new Intl.DateTimeFormat(locale, options).format(date)
 }
 
+export function formatFreshnessTimestamp(
+  date: Date,
+  locale: SupportedLocale,
+): string {
+  return formatLocalizedDate(locale, date, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 export function translateEnumLabel<Value extends string>(
   t: Translate,
   labels: Readonly<Record<Value, TranslationKey>>,

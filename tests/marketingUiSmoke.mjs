@@ -654,6 +654,13 @@ async function testProtectedReturnPath(browserInstance) {
     await page.locator('.analytics-filter-note').innerText(),
     'Bots filtered: 17',
   )
+  await page.getByRole('heading', { name: 'All time', exact: true }).waitFor()
+  const freshnessTime = page.locator('.analytics-freshness time')
+  await freshnessTime.waitFor()
+  const freshnessDateTime = await freshnessTime.getAttribute('datetime')
+  assert.ok(freshnessDateTime)
+  assert.ok(Number.isFinite(Date.parse(freshnessDateTime)))
+  assert.match(await freshnessTime.innerText(), /^View updated:/)
 
   const returnedUrl = new URL(page.url())
   assert.equal(

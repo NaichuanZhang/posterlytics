@@ -9,6 +9,7 @@ import {
 } from '../src/i18n/messages.ts'
 import {
   DEFAULT_LOCALE,
+  formatFreshnessTimestamp,
   formatLocalizedDate,
   preferredLocale,
   resolveSupportedLocale,
@@ -85,6 +86,24 @@ test('unknown enum labels and invalid dates degrade without throwing', () => {
   )
   assert.equal(
     formatLocalizedDate('en-US', 'not-a-date', { dateStyle: 'medium' }),
+    '—',
+  )
+})
+
+test('freshness timestamps use the supported locale without reading the clock', () => {
+  const date = new Date(2026, 6, 23, 15, 42)
+  const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim()
+
+  assert.equal(
+    normalizeWhitespace(formatFreshnessTimestamp(date, 'en-US')),
+    'Jul 23, 2026, 3:42 PM',
+  )
+  assert.equal(
+    normalizeWhitespace(formatFreshnessTimestamp(date, 'zh-CN')),
+    '2026年7月23日 15:42',
+  )
+  assert.equal(
+    formatFreshnessTimestamp(new Date(Number.NaN), 'en-US'),
     '—',
   )
 })

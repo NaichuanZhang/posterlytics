@@ -1,5 +1,5 @@
 import { RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { BreakdownCard } from '../components/BreakdownCard'
@@ -12,6 +12,7 @@ import { useCampaignBreakdowns } from '../hooks/useCampaignBreakdowns'
 import { usePlacementStats } from '../hooks/usePlacementStats'
 import { useI18n } from '../i18n/I18nProvider'
 import { countryBreakdownsForDisplay } from '../lib/countryBreakdowns'
+import { formatFreshnessTimestamp } from '../lib/i18n'
 import { getUseCase } from '../lib/useCases'
 
 export function AnalyticsPage() {
@@ -35,6 +36,29 @@ export function AnalyticsPage() {
     reload: reloadBreakdowns,
   } = useCampaignBreakdowns(id, trackingEnabled)
   const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const analyticsLoading = statsLoading || breakdownsLoading
+  const previousLoad = useRef({ campaignId: id, loading: true })
+
+  // Intentionally dependency-less: observe every committed analytics load transition.
+  useEffect(() => {
+    if (id !== previousLoad.current.campaignId) {
+      setLastUpdated(null)
+      previousLoad.current = { campaignId: id, loading: analyticsLoading }
+      return
+    }
+
+    if (
+      previousLoad.current.loading
+      && !analyticsLoading
+      && trackingEnabled
+      && !statsError
+      && !breakdownsError
+    ) {
+      setLastUpdated(new Date())
+    }
+    previousLoad.current = { campaignId: id, loading: analyticsLoading }
+  })
 
   async function refreshAll() {
     setRefreshing(true)
@@ -96,7 +120,7 @@ export function AnalyticsPage() {
         <button
           type="button"
           className="toolbar-button"
-          disabled={refreshing}
+          disabled={refreshing || analyticsLoading}
           onClick={() => void refreshAll()}
         >
           <RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} aria-hidden="true" />
@@ -117,6 +141,19 @@ export function AnalyticsPage() {
           <span>{statsError || breakdownsError}</span>
         </InlineNotice>
       )}
+
+      <div className="analytics-summary-meta">
+        <h2>{t('All time')}</h2>
+        <span className="analytics-freshness">
+          {lastUpdated && (
+            <time dateTime={lastUpdated.toISOString()}>
+              {t('View updated: {date}', {
+                date: formatFreshnessTimestamp(lastUpdated, locale),
+              })}
+            </time>
+          )}
+        </span>
+      </div>
 
       {statsLoading ? (
         <div className="metric-strip" aria-label={t('Loading metrics')} aria-busy="true">
