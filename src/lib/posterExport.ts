@@ -1,6 +1,45 @@
+import {
+  hasPosterQrBand,
+  type PosterSize,
+} from './posterSize'
+import type { Campaign, Placement } from './types'
+
 export interface PosterExportPage {
   readonly pageIndex: number
   readonly pageCount: number
+}
+
+export interface PosterExportRunSnapshot {
+  readonly campaign: Campaign
+  readonly posterSize: PosterSize
+  readonly heroImageUrl: string | null
+  readonly placementCode: string | null
+  readonly includesQrBand: boolean
+  readonly requiresQrImage: boolean
+  readonly capture: {
+    readonly width: number
+    readonly height: number
+    readonly pixelRatio: number
+  }
+  readonly naming: {
+    readonly productName: string
+    readonly versionNumber?: number
+    readonly placementLabel?: string
+    readonly filenameSuffix: string
+  }
+  readonly pages: {
+    readonly selected?: PosterExportPage
+    readonly count: number | null
+  }
+}
+
+interface PosterExportRunSnapshotInput {
+  readonly campaign: Campaign
+  readonly placement?: Placement | null
+  readonly versionNumber?: number
+  readonly posterSize: PosterSize
+  readonly pageIndex: number
+  readonly pageCount: number | null
 }
 
 interface PosterExportFilenameInput {
@@ -15,6 +54,48 @@ interface PosterExportArchiveFilenameInput {
   readonly productName: string
   readonly versionNumber?: number
   readonly filenameSuffix: string
+}
+
+export function buildPosterExportRunSnapshot({
+  campaign,
+  placement,
+  versionNumber,
+  posterSize,
+  pageIndex,
+  pageCount,
+}: PosterExportRunSnapshotInput): PosterExportRunSnapshot {
+  const runCampaign = campaign
+  const includesQrBand = hasPosterQrBand(posterSize)
+  const placementCode = placement?.code ?? null
+  const selected = pageCount === null
+    ? undefined
+    : { pageIndex, pageCount }
+
+  return {
+    campaign: runCampaign,
+    posterSize,
+    heroImageUrl: runCampaign.hero_image_url,
+    placementCode,
+    includesQrBand,
+    requiresQrImage: includesQrBand && !!placementCode,
+    capture: {
+      width: posterSize.sheet.width,
+      height: posterSize.sheet.height,
+      pixelRatio: posterSize.export.pixelRatio,
+    },
+    naming: {
+      productName: runCampaign.product_name,
+      versionNumber,
+      placementLabel: includesQrBand && placement
+        ? placement.label
+        : undefined,
+      filenameSuffix: posterSize.export.filenameSuffix,
+    },
+    pages: {
+      selected,
+      count: pageCount,
+    },
+  }
 }
 
 export function buildPosterExportFilename({

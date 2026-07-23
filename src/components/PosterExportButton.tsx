@@ -10,7 +10,9 @@ import {
 import {
   buildPosterExportArchiveFilename,
   buildPosterExportFilename,
+  buildPosterExportRunSnapshot,
   type PosterExportPage,
+  type PosterExportRunSnapshot,
 } from '../lib/posterExport'
 import {
   buildStoredZip,
@@ -38,7 +40,8 @@ interface Props {
 
 interface ExportRenderAttempt {
   readonly id: number
-  readonly imageSrcOverride?: string
+  readonly run: PosterExportRunSnapshot
+  readonly imageSrcOverride: string | undefined
   readonly pageIndex: number
   readonly page?: PosterExportPage
 }
@@ -146,11 +149,13 @@ export function PosterExportButton({
   }, [renderAttemptId, resolveRenderReady])
 
   async function capturePageToPng(
+    run: PosterExportRunSnapshot,
     page: PosterExportPage | undefined,
     imageSrcOverride: string | undefined,
   ): Promise<string | null> {
     const attempt: ExportRenderAttempt = {
       id: renderSequence.current + 1,
+      run,
       imageSrcOverride,
       pageIndex: page?.pageIndex ?? 0,
       page,
@@ -158,7 +163,7 @@ export function PosterExportButton({
     renderSequence.current = attempt.id
     const renderReady = createRenderReadyPromise(
       attempt.id,
-      imageSrcOverride ?? campaign.hero_image_url,
+      attempt.imageSrcOverride ?? attempt.run.heroImageUrl,
     )
     setRenderAttempt(attempt)
     await renderReady
@@ -167,12 +172,12 @@ export function PosterExportButton({
     if (document.fonts?.ready) await document.fonts.ready
     await waitForPosterImages(
       offscreenRef.current,
-      includesQrBand && !!placement,
+      attempt.run.requiresQrImage,
     )
     return toPng(offscreenRef.current, {
-      width: posterSize.sheet.width,
-      height: posterSize.sheet.height,
-      pixelRatio: posterSize.export.pixelRatio,
+      width: attempt.run.capture.width,
+      height: attempt.run.capture.height,
+      pixelRatio: attempt.run.capture.pixelRatio,
       cacheBust: true,
     })
   }
@@ -183,29 +188,30 @@ export function PosterExportButton({
       || redNoteExportUnavailable
       || (includesQrBand && !placement)
     ) return
+    const run = buildPosterExportRunSnapshot({
+      campaign,
+      placement,
+      versionNumber,
+      posterSize,
+      pageIndex: exportPageIndex,
+      pageCount: redNotePageCount,
+    })
     setActivity({ kind: 'current-page' })
     try {
-      const page: PosterExportPage | undefined = redNotePageCount === null
-        ? undefined
-        : {
-            pageIndex: exportPageIndex,
-            pageCount: redNotePageCount,
-          }
+      const page = run.pages.selected
       // Pre-fetch the cross-origin hero to a data URL to avoid canvas taint.
-      const imageSrcOverride = campaign.hero_image_url
-        ? await fetchAsDataUrl(campaign.hero_image_url) ?? undefined
+      const imageSrcOverride = run.heroImageUrl
+        ? await fetchAsDataUrl(run.heroImageUrl) ?? undefined
         : undefined
-      const dataUrl = await capturePageToPng(page, imageSrcOverride)
+      const dataUrl = await capturePageToPng(run, page, imageSrcOverride)
       if (!dataUrl) return
       const a = document.createElement('a')
       a.href = dataUrl
       a.download = buildPosterExportFilename({
-        productName: campaign.product_name,
-        versionNumber,
-        placementLabel: includesQrBand && placement
-          ? placement.label
-          : undefined,
-        filenameSuffix: posterSize.export.filenameSuffix,
+        productName: run.naming.productName,
+        versionNumber: run.naming.versionNumber,
+        placementLabel: run.naming.placementLabel,
+        filenameSuffix: run.naming.filenameSuffix,
         page,
       })
       a.click()
@@ -222,36 +228,47 @@ export function PosterExportButton({
 
   async function handleAllPagesExport() {
     if (busy || !showAllPagesButton || redNotePageCount === null) return
+    const run = buildPosterExportRunSnapshot({
+      campaign,
+      placement,
+      versionNumber,
+      posterSize,
+      pageIndex: exportPageIndex,
+      pageCount: redNotePageCount,
+    })
+    const pageCount = run.pages.count
+    if (pageCount === null) return
     setActivity({
       kind: 'all-pages',
       number: 1,
-      count: redNotePageCount,
+      count: pageCount,
     })
     let entries: StoredZipEntry[] = []
     try {
-      if (!campaign.hero_image_url) throw new Error(POSTER_HERO_FETCH_ERROR)
-      const imageSrcOverride = await fetchAsDataUrl(campaign.hero_image_url)
+      if (!run.heroImageUrl) throw new Error(POSTER_HERO_FETCH_ERROR)
+      const imageSrcOverride = await fetchAsDataUrl(run.heroImageUrl)
       if (!imageSrcOverride) throw new Error(POSTER_HERO_FETCH_ERROR)
 
-      for (let pageIndex = 0; pageIndex < redNotePageCount; pageIndex += 1) {
+      for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
         setActivity({
           kind: 'all-pages',
           number: pageIndex + 1,
-          count: redNotePageCount,
+          count: pageCount,
         })
         const page: PosterExportPage = {
           pageIndex,
-          pageCount: redNotePageCount,
+          pageCount,
         }
-        const dataUrl = await capturePageToPng(page, imageSrcOverride)
+        const dataUrl = await capturePageToPng(run, page, imageSrcOverride)
         if (!dataUrl) throw new Error(POSTER_RENDER_MISSING_ERROR)
         entries = [
           ...entries,
           {
             filename: buildPosterExportFilename({
-              productName: campaign.product_name,
-              versionNumber,
-              filenameSuffix: posterSize.export.filenameSuffix,
+              productName: run.naming.productName,
+              versionNumber: run.naming.versionNumber,
+              placementLabel: run.naming.placementLabel,
+              filenameSuffix: run.naming.filenameSuffix,
               page,
             }),
             bytes: pngDataUrlToBytes(dataUrl),
@@ -264,9 +281,9 @@ export function PosterExportButton({
       downloadZip(
         archive,
         buildPosterExportArchiveFilename({
-          productName: campaign.product_name,
-          versionNumber,
-          filenameSuffix: posterSize.export.filenameSuffix,
+          productName: run.naming.productName,
+          versionNumber: run.naming.versionNumber,
+          filenameSuffix: run.naming.filenameSuffix,
         }),
       )
       notify(t('All pages are ready in one ZIP.'), 'success')
@@ -355,13 +372,13 @@ export function PosterExportButton({
           <PosterSurface
             key={`${renderAttempt.id}:${renderAttempt.pageIndex}`}
             ref={offscreenRef}
-            campaign={campaign}
-            code={placement?.code ?? null}
+            campaign={renderAttempt.run.campaign}
+            code={renderAttempt.run.placementCode}
             imageAlt=""
             imageSrcOverride={renderAttempt.imageSrcOverride}
             onRenderReady={handleRenderReady}
             pageIndex={renderAttempt.pageIndex}
-            posterSize={posterSize}
+            posterSize={renderAttempt.run.posterSize}
           />
         </div>
       )}

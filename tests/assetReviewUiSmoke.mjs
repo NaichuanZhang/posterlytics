@@ -2058,8 +2058,10 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
     viewport: { width: 1360, height: 900 },
     reducedMotion: 'reduce',
   })
+  await installPosterExportRunAudit(context)
   const state = createState({ editorReady: true })
   const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  const generationBPosterUrl = `${BASE_URL}/fixture/generation-b-poster.svg`
   const redNotePlan = {
     schema_version: 1,
     pages: [
@@ -2118,18 +2120,38 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
     id: 'generation-legacy-rednote',
     parent_generation_id: state.currentGeneration.id,
     version_number: 2,
-    instruction: 'Historical text-baked RedNote cover.',
+    instruction: 'Generation B square poster.',
+    use_case: 'website_product',
+    poster_format: 'luma_1x1',
+    poster_content: null,
     poster_layout: posterLayout([
       {
         band: 'upper',
         role: 'headline',
-        content: 'Historical RedNote cover',
+        content: 'Generation B square',
       },
     ]),
+    hero_image_url: generationBPosterUrl,
+    hero_image_key: 'poster/generation-b-square.png',
   }]
   state.placements = []
   await installBackendMock(context, state)
   const page = await context.newPage()
+  let armedHeroFetch = null
+  let heldHeroFetchCount = 0
+  await page.route(edgePosterUrl, async (route) => {
+    const gate = armedHeroFetch
+    if (route.request().resourceType() === 'fetch' && gate) {
+      armedHeroFetch = null
+      heldHeroFetchCount += 1
+      await gate.promise
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'image/svg+xml',
+      body: edgePosterSvg(),
+    })
+  })
   const pageErrors = []
   page.on('pageerror', (error) => pageErrors.push(error))
 
@@ -2224,9 +2246,9 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
   await pager.waitFor({ state: 'detached' })
   assert.equal(
     await page.getByRole('button', {
-      name: 'Export Portrait 3:4 full bleed PNG',
+      name: 'Export Square 1:1 PNG',
     }).isEnabled(),
-    true,
+    false,
   )
   assert.equal(
     await page.getByRole('button', {
@@ -2244,15 +2266,53 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
   const exportButton = page.getByRole('button', {
     name: 'Export page 2 of 3 as Portrait 3:4 full bleed PNG',
   })
-  const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
+  const currentPageGate = deferred()
+  armedHeroFetch = currentPageGate
+  await page.evaluate(() => {
+    window.__posterExportRunAudits = []
+  })
   await exportButton.click()
-  await page.locator(
-    '[data-poster-export-render] [data-rednote-page-index="1"]',
-  ).waitFor()
+  await waitFor(() => heldHeroFetchCount === 1)
+  let downloadPromise = null
+  try {
+    await versions.locator('.version-row').filter({ hasText: 'Version 2' }).click()
+    await resetPager.waitFor({ state: 'detached' })
+    await versions
+      .locator('.version-row[aria-pressed="true"]')
+      .filter({ hasText: 'Version 2' })
+      .waitFor()
+    assert.equal(
+      await page.locator('[data-poster-export-render]').count(),
+      0,
+      'the export clone mounts only after the held hero prefetch resolves',
+    )
+    downloadPromise = page.waitForEvent('download', { timeout: 90_000 })
+  } finally {
+    currentPageGate.resolve()
+  }
+  assert.ok(downloadPromise)
+  const currentPageExport = page.locator(
+    '[data-poster-export-render] '
+    + '[data-poster-size="rednote_cover_3x4"]'
+    + '[data-rednote-page-index="1"]'
+    + '[data-poster-render-status="not-applicable"]',
+  )
+  await currentPageExport.waitFor()
+  assert.equal(
+    (
+      await currentPageExport
+        .locator('[data-rednote-heading]')
+        .textContent()
+    )?.trim(),
+    'A quieter route',
+  )
   const download = await downloadPromise
   const downloadPath = await download.path()
   assert.ok(downloadPath)
-  assert.match(download.suggestedFilename(), /-page-02-of-03\.png$/)
+  assert.equal(
+    download.suggestedFilename(),
+    'Signal-Studio-v1-FullBleed-3x4-page-02-of-03.png',
+  )
   const png = await readFile(downloadPath)
   assert.equal(png.subarray(1, 4).toString('ascii'), 'PNG')
   assert.deepEqual(
@@ -2262,16 +2322,59 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
     },
     { width: 1242, height: 1656 },
   )
+  const currentPageAudits = await page.evaluate(
+    () => window.__posterExportRunAudits,
+  )
+  assert.equal(currentPageAudits.length, 1)
+  assert.deepEqual(
+    {
+      heading: currentPageAudits[0].heading,
+      pageIndex: currentPageAudits[0].pageIndex,
+      posterSize: currentPageAudits[0].posterSize,
+    },
+    {
+      heading: 'A quieter route',
+      pageIndex: '1',
+      posterSize: 'rednote_cover_3x4',
+    },
+  )
+  assert.equal(
+    currentPageAudits[0].text.includes('Generation B square'),
+    false,
+  )
   await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
 
+  await versions.locator('.version-row').filter({ hasText: 'Version 1' }).click()
+  await resetPager.waitFor()
+  await resetPager.getByText('Page 1 of 3', { exact: true }).waitFor()
   const allPagesExportButton = page.getByRole('button', {
     name: 'Export all 3 pages as Portrait 3:4 full bleed ZIP',
   })
-  const zipDownloadPromise = page.waitForEvent('download', { timeout: 90_000 })
+  const allPagesGate = deferred()
+  armedHeroFetch = allPagesGate
+  await page.evaluate(() => {
+    window.__posterExportRunAudits = []
+  })
   await allPagesExportButton.click()
-  await page.locator(
-    '[data-poster-export-render] [data-rednote-page-index="0"]',
-  ).waitFor()
+  await waitFor(() => heldHeroFetchCount === 2)
+  let zipDownloadPromise = null
+  try {
+    await versions.locator('.version-row').filter({ hasText: 'Version 2' }).click()
+    await resetPager.waitFor({ state: 'detached' })
+    await versions
+      .locator('.version-row[aria-pressed="true"]')
+      .filter({ hasText: 'Version 2' })
+      .waitFor()
+    assert.equal(
+      await page.locator('[data-poster-export-render]').count(),
+      0,
+      'the ZIP clone mounts only after the held hero prefetch resolves',
+    )
+    zipDownloadPromise = page.waitForEvent('download', { timeout: 180_000 })
+  } finally {
+    allPagesGate.resolve()
+  }
+  assert.ok(zipDownloadPromise)
   const zipDownload = await zipDownloadPromise
   const zipDownloadPath = await zipDownload.path()
   assert.ok(zipDownloadPath)
@@ -2306,7 +2409,30 @@ async function testRedNotePostPagerAndCurrentPageExport(browserInstance) {
       filename,
     )
   }
+  const zipAudits = await page.evaluate(() => window.__posterExportRunAudits)
+  assert.deepEqual(
+    zipAudits.map((audit) => ({
+      pageIndex: audit.pageIndex,
+      posterSize: audit.posterSize,
+    })),
+    [
+      { pageIndex: '0', posterSize: 'rednote_cover_3x4' },
+      { pageIndex: '1', posterSize: 'rednote_cover_3x4' },
+      { pageIndex: '2', posterSize: 'rednote_cover_3x4' },
+    ],
+  )
+  assert.equal(zipAudits[0].text.includes('Walk Shanghai slowly'), true)
+  assert.equal(zipAudits[1].text.includes('A quieter route'), true)
+  assert.equal(zipAudits[2].text.includes('章节'), true)
+  assert.equal(
+    zipAudits.some((audit) => audit.text.includes('Generation B square')),
+    false,
+  )
   await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+  await versions.locator('.version-row').filter({ hasText: 'Version 1' }).click()
+  await resetPager.waitFor()
+  await resetPager.getByText('Page 1 of 3', { exact: true }).waitFor()
+  await resetPager.getByRole('button', { name: 'Next page' }).click()
   await resetPager.getByText('Page 2 of 3', { exact: true }).waitFor()
   await canvas.locator('[data-rednote-page-index="1"]').waitFor()
   await assertNoOverflow(page)
@@ -3241,6 +3367,31 @@ async function installPosterExportSvgAudit(context) {
   })
 }
 
+async function installPosterExportRunAudit(context) {
+  await context.addInitScript(() => {
+    window.__posterExportRunAudits = []
+    const serializeToString = XMLSerializer.prototype.serializeToString
+    XMLSerializer.prototype.serializeToString = function (node) {
+      const serialized = serializeToString.call(this, node)
+      if (!(node instanceof SVGElement)) return serialized
+      const poster = node
+        .querySelector('foreignObject')
+        ?.querySelector('[data-poster-size]')
+      if (!poster) return serialized
+      window.__posterExportRunAudits.push({
+        heading: poster
+          .querySelector('[data-rednote-heading]')
+          ?.textContent
+          ?.trim() ?? null,
+        pageIndex: poster.getAttribute('data-rednote-page-index'),
+        posterSize: poster.getAttribute('data-poster-size'),
+        text: poster.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+      })
+      return serialized
+    }
+  })
+}
+
 function setQrFooterCaption(state, caption) {
   state.campaign.poster_spec = { qr_label: caption }
   state.currentGeneration.poster_spec = { qr_label: caption }
@@ -3643,6 +3794,17 @@ async function waitFor(predicate, timeoutMs = 5000) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   throw new Error('Timed out waiting for mocked backend state.')
+}
+
+function deferred() {
+  let resolvePromise = () => {}
+  const promise = new Promise((resolve) => {
+    resolvePromise = resolve
+  })
+  return {
+    promise,
+    resolve: resolvePromise,
+  }
 }
 
 async function waitForFocused(page, target) {
