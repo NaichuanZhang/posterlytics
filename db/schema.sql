@@ -65,6 +65,12 @@ CREATE TABLE public.campaigns (
       use_case IN ('social_cover', 'rednote_post')
       OR (product_url IS NOT NULL AND destination_url IS NOT NULL)
     ),
+  CONSTRAINT campaigns_social_cover_qr_destination_required
+    CHECK (
+      use_case <> 'social_cover'
+      OR poster_format IS DISTINCT FROM 'rednote_3x4'
+      OR NULLIF(BTRIM(destination_url), '') IS NOT NULL
+    ),
   CONSTRAINT campaigns_platform_hint_valid
     CHECK (
       (
@@ -584,10 +590,11 @@ SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_use_case TEXT;
+  v_destination_url TEXT;
 BEGIN
   -- Serialize placement writes with campaign use-case changes.
-  SELECT use_case
-  INTO v_use_case
+  SELECT use_case, destination_url
+  INTO v_use_case, v_destination_url
   FROM public.campaigns
   WHERE id = NEW.campaign_id
     AND user_id = NEW.user_id
@@ -598,8 +605,9 @@ BEGIN
       USING ERRCODE = '23503';
   END IF;
 
-  IF v_use_case = 'social_cover' THEN
-    RAISE EXCEPTION 'Social cover campaigns cannot have placements.'
+  IF v_use_case = 'social_cover'
+    AND NULLIF(BTRIM(v_destination_url), '') IS NULL THEN
+    RAISE EXCEPTION 'Social cover campaigns require a destination before placements can be added.'
       USING ERRCODE = '23514';
   ELSIF v_use_case = 'rednote_post' THEN
     RAISE EXCEPTION 'RedNote post campaigns cannot have placements.'
@@ -622,17 +630,17 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF NEW.use_case IN ('social_cover', 'rednote_post')
-    AND NEW.use_case IS DISTINCT FROM OLD.use_case
+  IF NEW.use_case IS DISTINCT FROM OLD.use_case
     AND EXISTS (
       SELECT 1
       FROM public.placements
       WHERE campaign_id = OLD.id
     ) THEN
-    IF NEW.use_case = 'social_cover' THEN
-      RAISE EXCEPTION 'Remove campaign placements before switching to social cover.'
+    IF NEW.use_case = 'social_cover'
+      AND NULLIF(BTRIM(NEW.destination_url), '') IS NULL THEN
+      RAISE EXCEPTION 'Add a social cover destination or remove campaign placements before switching.'
         USING ERRCODE = '23514';
-    ELSE
+    ELSIF NEW.use_case = 'rednote_post' THEN
       RAISE EXCEPTION 'Remove campaign placements before switching to RedNote post.'
         USING ERRCODE = '23514';
     END IF;
@@ -824,8 +832,8 @@ BEGIN
   WHERE id = v_placement.campaign_id;
 
   IF v_campaign.status <> 'published'
-    OR v_campaign.use_case IN ('social_cover', 'rednote_post')
-    OR v_campaign.destination_url IS NULL THEN
+    OR v_campaign.use_case = 'rednote_post'
+    OR NULLIF(BTRIM(v_campaign.destination_url), '') IS NULL THEN
     RETURN NULL;
   END IF;
 

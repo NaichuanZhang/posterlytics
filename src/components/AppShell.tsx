@@ -10,8 +10,8 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { useI18n } from '../i18n/I18nProvider'
+import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 import type { Campaign } from '../lib/types'
-import { getUseCase } from '../lib/useCases'
 import { LanguageSelect } from './LanguageSelect'
 
 export type CampaignSection = 'poster' | 'placements' | 'analytics'
@@ -26,7 +26,10 @@ export interface AppShellProps {
   mode?: 'page' | 'workspace'
   breadcrumbs?: BreadcrumbItem[]
   actions?: ReactNode
-  campaign?: Pick<Campaign, 'id' | 'product_name' | 'status' | 'use_case'>
+  campaign?: Pick<
+    Campaign,
+    'id' | 'product_name' | 'status' | 'use_case' | 'destination_url'
+  >
   activeSection?: CampaignSection
   contentClassName?: string
 }
@@ -144,25 +147,28 @@ export function CampaignTabs({
   campaign,
   activeSection,
 }: {
-  campaign: Pick<Campaign, 'id' | 'product_name' | 'status' | 'use_case'>
+  campaign: Pick<
+    Campaign,
+    'id' | 'product_name' | 'status' | 'use_case' | 'destination_url'
+  >
   activeSection: CampaignSection
 }) {
   const { t } = useI18n()
-  const useCase = getUseCase(campaign.use_case)
+  const trackingActive = isCampaignTrackingActive(campaign)
   const allTabs: Array<{ section: CampaignSection; label: string; to: string }> = [
     { section: 'poster', label: t('Poster'), to: `/campaigns/${campaign.id}` },
     { section: 'placements', label: t('Placements'), to: `/campaigns/${campaign.id}/placements` },
     { section: 'analytics', label: t('Analytics'), to: `/campaigns/${campaign.id}/analytics` },
   ]
   const tabs = allTabs.filter(
-    (tab) => tab.section === 'poster' || useCase.trackingEnabled,
+    (tab) => tab.section === 'poster' || trackingActive,
   )
 
   return (
     <div className="campaign-bar">
       <div className="campaign-identity">
         <strong>{campaign.product_name}</strong>
-        {useCase.trackingEnabled && (
+        {trackingActive && (
           <span className={`status-badge status-${campaign.status}`}>
             {campaign.status === 'published'
               ? t('Published')

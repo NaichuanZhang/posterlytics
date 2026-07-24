@@ -223,6 +223,12 @@ function parseCampaignDraftData(value: unknown): CampaignDraftDataV1 | null {
       posterFormat = useCase.defaultPosterFormat
     }
   }
+  const destinationUrl = (
+    selectedUseCaseId === 'social_cover'
+    && posterFormat !== 'rednote_3x4'
+  )
+    ? ''
+    : value.destinationUrl as string
 
   const serverCampaignId = typeof value.serverCampaignId === 'string'
     && value.serverCampaignId.trim()
@@ -236,7 +242,7 @@ function parseCampaignDraftData(value: unknown): CampaignDraftDataV1 | null {
     productName: value.productName as string,
     tagline: value.tagline as string,
     ctaText: value.ctaText as string,
-    destinationUrl: value.destinationUrl as string,
+    destinationUrl,
     posterFormat,
     platformHint: value.platformHint as string,
     referenceContext: value.referenceContext as string,

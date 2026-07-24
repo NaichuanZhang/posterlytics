@@ -29,6 +29,10 @@ import { AssetSelectionModeControl } from '../components/AssetSelectionModeContr
 import { GenerationReferences } from '../components/GenerationReferences'
 import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
+import {
+  isValidSocialCoverDestination,
+  SocialCoverQrSettings,
+} from '../components/SocialCoverQrSettings'
 import { WebsiteCapturePreview } from '../components/WebsiteCapturePreview'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
@@ -63,6 +67,7 @@ import {
   type PosterSizeSlug,
 } from '../lib/posterSize'
 import { normalizePlatformHint } from '../lib/platformHints'
+import { ensureDefaultCampaignPlacement } from '../lib/placementService'
 import {
   EagerCaptureSyncError,
   syncEagerCaptureEvidence,
@@ -211,6 +216,8 @@ export function CampaignWizardPage() {
     && productSourceKind === 'invalid'
   )
   const amazonListing = selectedUseCaseId === 'amazon_listing'
+  const socialCover = selectedUseCaseId === 'social_cover'
+  const socialCoverQrEnabled = socialCover && posterFormat === 'rednote_3x4'
   const referenceOnlyMode = isReferenceOnlyUseCaseId(selectedUseCaseId)
   const redNotePost = selectedUseCaseId === 'rednote_post'
   const minimumReferenceImages = inputFields
@@ -376,6 +383,9 @@ export function CampaignWizardPage() {
     setPosterFormat((current) =>
       resolvePosterFormatOnUseCaseSwitch(current, source, useCaseId)
     )
+    if (useCaseId === 'social_cover' && source !== 'social_cover') {
+      setDestinationUrl('')
+    }
     useCasePickerOriginRef.current = null
     if (
       useCaseId === 'amazon_listing'
@@ -479,16 +489,25 @@ export function CampaignWizardPage() {
     if (!selectedUseCaseId) throw new Error(t('Choose a use case before creating a campaign.'))
 
     const fields = getUseCase(selectedUseCaseId).inputFields
+    const qrEnabled = (
+      selectedUseCaseId === 'social_cover'
+      && posterFormat === 'rednote_3x4'
+    )
+    if (qrEnabled && !isValidSocialCoverDestination(destinationUrl)) {
+      throw new Error(t('Use a complete HTTP or HTTPS destination URL.'))
+    }
     const resolvedProductUrl = fields.productUrl.requirement === 'hidden'
       ? null
       : productUrl.trim()
-    const resolvedDestinationUrl = fields.destinationUrl === 'hidden'
-      ? null
-      : selectedUseCaseId === 'amazon_listing'
-        && !destinationUrl.trim()
-        && isAmazonSourceUrl(productUrl)
-          ? productUrl.trim()
-          : destinationUrl.trim()
+    const resolvedDestinationUrl = qrEnabled
+      ? destinationUrl.trim()
+      : fields.destinationUrl === 'hidden'
+        ? null
+        : selectedUseCaseId === 'amazon_listing'
+          && !destinationUrl.trim()
+          && isAmazonSourceUrl(productUrl)
+            ? productUrl.trim()
+            : destinationUrl.trim()
     if (resolvedDestinationUrl && resolvedDestinationUrl !== destinationUrl) {
       setDestinationUrl(resolvedDestinationUrl)
     }
@@ -504,7 +523,11 @@ export function CampaignWizardPage() {
       platform_hint: fields.platformHint === 'hidden'
         ? null
         : normalizePlatformHint(platformHint),
-      poster_format: posterFormat,
+      poster_format: selectedUseCaseId === 'social_cover'
+        ? qrEnabled
+          ? 'rednote_3x4'
+          : 'rednote_cover_3x4'
+        : posterFormat,
       status: 'draft',
     }
 
@@ -572,6 +595,7 @@ export function CampaignWizardPage() {
     const submittedColorScheme = getDeviceColorScheme()
     const submittedProductUrl = productUrl
     const submittedUseCase = selectedUseCaseId
+    const submittedSocialQrEnabled = socialCoverQrEnabled
     const submittedEagerCapture = eagerCapturePreview
     setError(null)
     setPhase('uploading')
@@ -583,6 +607,23 @@ export function CampaignWizardPage() {
       setError(cause instanceof Error ? cause.message : String(cause))
       setPhase('error')
       return
+    }
+
+    if (submittedSocialQrEnabled) {
+      const placementError = await ensureDefaultCampaignPlacement({
+        campaignId,
+        userId: user.id,
+        label: t('Primary'),
+      })
+      if (placementError) {
+        console.error('Primary placement provisioning failed', {
+          campaignId,
+          error: placementError,
+        })
+        setError(t('The campaign was saved, but its primary placement could not be prepared.'))
+        setPhase('error')
+        return
+      }
     }
 
     try {
@@ -749,12 +790,25 @@ export function CampaignWizardPage() {
             />
           </div>
         )}
-        <PosterFormatSelect
-          id="poster-format"
-          value={posterFormat}
-          allowedFormats={selectedUseCase.allowedPosterFormats}
-          onChange={setPosterFormat}
-        />
+        {socialCover ? (
+          <SocialCoverQrSettings
+            idPrefix="social-cover-qr"
+            enabled={socialCoverQrEnabled}
+            destinationUrl={destinationUrl}
+            onEnabledChange={(enabled) => {
+              setPosterFormat(enabled ? 'rednote_3x4' : 'rednote_cover_3x4')
+              if (!enabled) setDestinationUrl('')
+            }}
+            onDestinationUrlChange={setDestinationUrl}
+          />
+        ) : (
+          <PosterFormatSelect
+            id="poster-format"
+            value={posterFormat}
+            allowedFormats={selectedUseCase.allowedPosterFormats}
+            onChange={setPosterFormat}
+          />
+        )}
         {fields.platformHint !== 'hidden' && (
           <PlatformHintField
             id="platform-hint"
@@ -773,7 +827,11 @@ export function CampaignWizardPage() {
           <span><Type size={17} aria-hidden="true" /></span>
           <div>
             <h2 id="artwork-output-heading">{t('Artwork output')}</h2>
-            <p>{t('Name the artwork and choose its full-bleed output format.')}</p>
+            <p>
+              {socialCover
+                ? t('Keep the full-bleed default or add a tracked QR footer.')
+                : t('Name the artwork and choose its full-bleed output format.')}
+            </p>
           </div>
         </div>
         <div className="field-grid">
@@ -1298,7 +1356,7 @@ export function CampaignWizardPage() {
                   <dd>{ctaText.trim() || t('Not set')}</dd>
                 </div>
               )}
-              {inputFields.destinationUrl !== 'hidden' && (
+              {(inputFields.destinationUrl !== 'hidden' || socialCoverQrEnabled) && (
                 <div>
                   <dt>{t('Destination')}</dt>
                   <dd>{summarizeUrl(destinationUrl) || t('Not set')}</dd>

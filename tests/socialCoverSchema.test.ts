@@ -203,7 +203,7 @@ test('same-input retry copies the frozen platform hint instead of the mutable ta
 test('historical tracking guards stay social-only while the baseline extends them', () => {
   for (const [sql, useCaseCheck, message] of [
     [migration, /v_use_case = 'social_cover'/, /Social cover campaigns cannot have placements\./],
-    [baseline, /v_use_case = 'social_cover'/, /Social cover campaigns cannot have placements\./],
+    [baseline, /v_use_case = 'social_cover'/, /Social cover campaigns require a destination before placements can be added\./],
   ] as const) {
     const placementGuard = lastFunction(sql, 'guard_placement_tracking_policy')
     assert.match(placementGuard, /FROM public\.campaigns/)
@@ -227,7 +227,7 @@ test('historical tracking guards stay social-only while the baseline extends the
       campaignGuard,
       sql === migration
         ? /NEW\.use_case = 'social_cover'/
-        : /NEW\.use_case IN \('social_cover', 'rednote_post'\)/,
+        : /NEW\.use_case = 'social_cover'[\s\S]*NULLIF\(BTRIM\(NEW\.destination_url\), ''\) IS NULL/,
     )
     assert.match(campaignGuard, /FROM public\.placements/)
     assert.match(
@@ -240,13 +240,18 @@ test('historical tracking guards stay social-only while the baseline extends the
 test('visit attribution stays historically social-only and extends the baseline', () => {
   for (const [sql, guardText] of [
     [migration, "v_campaign.use_case = 'social_cover'"],
-    [baseline, "v_campaign.use_case IN ('social_cover', 'rednote_post')"],
+    [baseline, "v_campaign.use_case = 'rednote_post'"],
   ] as const) {
     const logVisit = lastFunction(sql, 'log_visit_attributed')
     const guard = logVisit.indexOf(guardText)
     const insert = logVisit.indexOf('INSERT INTO public.scans')
     assert.ok(guard >= 0 && guard < insert)
-    assert.match(logVisit, /v_campaign\.destination_url IS NULL/)
+    assert.match(
+      logVisit,
+      sql === migration
+        ? /v_campaign\.destination_url IS NULL/
+        : /NULLIF\(BTRIM\(v_campaign\.destination_url\), ''\) IS NULL/,
+    )
   }
 })
 

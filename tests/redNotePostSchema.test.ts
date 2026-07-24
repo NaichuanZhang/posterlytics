@@ -9,13 +9,22 @@ const migration = readFileSync(
   ),
   'utf8',
 )
+const socialQrMigration = readFileSync(
+  new URL(
+    '../migrations/20260724070000_social-cover-qr-stitch.sql',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const baseline = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8')
 
 const REFERENCE_ONLY_IDS = /'social_cover', 'rednote_post'/
-const CURRENT_FUNCTIONS = [
+const TRACKING_FUNCTIONS = [
   'guard_placement_tracking_policy',
   'guard_campaign_tracking_policy',
   'log_visit_attributed',
+] as const
+const REDNOTE_FUNCTIONS = [
   'enqueue_poster_generation',
   'retry_poster_generation',
 ] as const
@@ -54,7 +63,14 @@ test('migration and baseline register RedNote in every use-case constraint', () 
 })
 
 test('new migration owns exact current policy and routing function bodies', () => {
-  for (const name of CURRENT_FUNCTIONS) {
+  for (const name of TRACKING_FUNCTIONS) {
+    assert.equal(
+      normalizedFunction(socialQrMigration, name),
+      normalizedFunction(baseline, name),
+      `${name} drifted between QR migration and baseline`,
+    )
+  }
+  for (const name of REDNOTE_FUNCTIONS) {
     assert.equal(
       normalizedFunction(migration, name),
       normalizedFunction(baseline, name),
@@ -63,15 +79,34 @@ test('new migration owns exact current policy and routing function bodies', () =
   }
 })
 
-test('tracking and attribution reject both reference-only use cases', () => {
-  for (const sql of [migration, baseline]) {
+test('RedNote migration historically rejected both reference-only use cases', () => {
+  const placementGuard = lastFunction(
+    migration,
+    'guard_placement_tracking_policy',
+  )
+  assert.match(
+    placementGuard,
+    /IF v_use_case = 'social_cover' THEN[\s\S]*RAISE EXCEPTION 'Social cover campaigns cannot have placements\.'/,
+  )
+  assert.match(
+    placementGuard,
+    /ELSIF v_use_case = 'rednote_post' THEN[\s\S]*RAISE EXCEPTION 'RedNote post campaigns cannot have placements\.'/,
+  )
+  assert.match(
+    lastFunction(migration, 'guard_campaign_tracking_policy'),
+    /NEW\.use_case IN \('social_cover', 'rednote_post'\)/,
+  )
+  assert.match(
+    lastFunction(migration, 'log_visit_attributed'),
+    /v_campaign\.use_case IN \('social_cover', 'rednote_post'\)/,
+  )
+})
+
+test('current tracking policy keeps every RedNote placement and visit rejected', () => {
+  for (const sql of [socialQrMigration, baseline]) {
     const placementGuard = lastFunction(
       sql,
       'guard_placement_tracking_policy',
-    )
-    assert.match(
-      placementGuard,
-      /IF v_use_case = 'social_cover' THEN[\s\S]*RAISE EXCEPTION 'Social cover campaigns cannot have placements\.'/,
     )
     assert.match(
       placementGuard,
@@ -79,11 +114,11 @@ test('tracking and attribution reject both reference-only use cases', () => {
     )
     assert.match(
       lastFunction(sql, 'guard_campaign_tracking_policy'),
-      /NEW\.use_case IN \('social_cover', 'rednote_post'\)/,
+      /ELSIF NEW\.use_case = 'rednote_post' THEN/,
     )
     assert.match(
       lastFunction(sql, 'log_visit_attributed'),
-      /v_campaign\.use_case IN \('social_cover', 'rednote_post'\)/,
+      /v_campaign\.use_case = 'rednote_post'/,
     )
   }
 })

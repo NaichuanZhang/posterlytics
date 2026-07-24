@@ -14,6 +14,7 @@ import type { GenerationActivityItem } from '../lib/types'
 import { activityForCampaign, generationActivityLabel } from '../lib/generationActivity'
 import { useI18n } from '../i18n/I18nProvider'
 import { derivePosterTranscript } from '../lib/posterTranscript'
+import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
 import { PosterThumbnail } from '../components/posters/PosterThumbnail'
 
@@ -32,7 +33,7 @@ export function CampaignsListPage() {
     try {
       const { data, error: queryError } = await insforge.database
         .from('campaigns')
-        .select('id, product_name, product_url, tagline, scenario, use_case, poster_format, poster_copy, poster_content, poster_spec, poster_layout, status, created_at, brand_assets, hero_image_url')
+        .select('id, product_name, product_url, tagline, destination_url, scenario, use_case, poster_format, poster_copy, poster_content, poster_spec, poster_layout, status, created_at, brand_assets, hero_image_url')
         .order('created_at', { ascending: false })
 
       if (queryError) {
@@ -189,7 +190,7 @@ function CampaignFile({
         includeCompositedFooter: false,
       }).shortAlt
     : ''
-  const trackingEnabled = getUseCase(campaign.use_case).trackingEnabled
+  const trackingActive = isCampaignTrackingActive(campaign)
 
   return (
     <Link to={`/campaigns/${campaign.id}`} className="campaign-file">
@@ -205,7 +206,7 @@ function CampaignFile({
             <GalleryVerticalEnd size={26} />
           </span>
         )}
-        {(activity || trackingEnabled) && (
+        {(activity || trackingActive) && (
           <span className={`status-badge status-${activity ? 'generating' : campaign.status}`}>
             {activity
               ? generationActivityLabel(activity, locale)

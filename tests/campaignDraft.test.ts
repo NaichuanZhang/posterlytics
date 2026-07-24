@@ -181,6 +181,51 @@ test('campaign draft round-trip preserves mixed reference insertion order', () =
   ])
 })
 
+test('social-cover QR drafts round-trip their banded format and destination', () => {
+  const data = buildCampaignDraftData({
+    selectedUseCaseId: 'social_cover',
+    productUrl: '',
+    productName: 'Summer signals',
+    tagline: '',
+    ctaText: 'Get started',
+    destinationUrl: 'https://example.com/social',
+    posterFormat: 'rednote_3x4',
+    platformHint: 'Instagram',
+    referenceContext: 'Keep the diagonal light.',
+    pendingReferences: [],
+    serverCampaignId: null,
+    eagerCapture: null,
+  })
+
+  const parsed = parseCampaignDraft(
+    serializeCampaignDraft(OWNER_ID, data, NOW_MS),
+    OWNER_ID,
+    NOW_MS,
+  )
+
+  assert.equal(parsed?.data.posterFormat, 'rednote_3x4')
+  assert.equal(
+    parsed?.data.destinationUrl,
+    'https://example.com/social',
+  )
+})
+
+test('restoring an OFF social-cover draft clears a stale destination', () => {
+  const envelope = validEnvelope()
+  envelope.data.selectedUseCaseId = 'social_cover'
+  envelope.data.posterFormat = 'rednote_cover_3x4'
+  envelope.data.destinationUrl = 'https://example.com/stale'
+
+  const parsed = parseCampaignDraft(
+    JSON.stringify(envelope),
+    OWNER_ID,
+    NOW_MS,
+  )
+
+  assert.equal(parsed?.data.posterFormat, 'rednote_cover_3x4')
+  assert.equal(parsed?.data.destinationUrl, '')
+})
+
 test('campaign draft reader rejects malformed, partial, incompatible, foreign, and expired envelopes', () => {
   const valid = validEnvelope()
   assert.equal(parseCampaignDraft('{broken', OWNER_ID, NOW_MS), null)

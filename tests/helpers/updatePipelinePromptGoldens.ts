@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import {
   captureCurrentPipelinePromptGoldens,
+  captureSocialCoverQrPromptGoldens,
   type PipelinePromptGoldens,
 } from './pipelinePromptHarness.ts'
 
@@ -30,6 +31,10 @@ type SocialPromptGoldens = {
 
 const legacyUrl = new URL('../fixtures/pipelinePromptGoldens.json', import.meta.url)
 const socialUrl = new URL('../fixtures/socialCoverPromptGoldens.json', import.meta.url)
+const socialQrUrl = new URL(
+  '../fixtures/socialCoverQrPromptGoldens.json',
+  import.meta.url,
+)
 const redNoteAnalyzeUrl = new URL(
   '../fixtures/redNoteAnalyzePromptGolden.json',
   import.meta.url,
@@ -40,6 +45,7 @@ const redNoteAnalyze = readJson<
   PipelinePromptGoldens['analyze']['rednote_post']
 >(redNoteAnalyzeUrl)
 const actual = await captureCurrentPipelinePromptGoldens()
+const socialQr = await captureSocialCoverQrPromptGoldens()
 
 for (const useCase of ['website_product', 'amazon_listing', 'event'] as const) {
   assertChatUnchanged(`analyze.${useCase}`, actual.analyze[useCase], legacy.analyze[useCase])
@@ -76,7 +82,10 @@ const nextSocial: SocialPromptGoldens = {
 
 writeJson(legacyUrl, nextLegacy)
 writeJson(socialUrl, nextSocial)
-console.log('Updated hero prompt goldens; analyze/designer bytes were unchanged.')
+writeJson(socialQrUrl, socialQr)
+console.log(
+  'Updated hero and banded-social prompt goldens; existing analyze/designer bytes were unchanged.',
+)
 
 function assertChatUnchanged(
   label: string,

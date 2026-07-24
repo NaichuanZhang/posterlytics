@@ -168,3 +168,39 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     assert.equal(zhCN[key as TranslationKey], value)
   }
 })
+
+test('social-cover QR controls and recovery copy stay localized in English and Chinese', () => {
+  const expected: Partial<Record<TranslationKey, string>> = {
+    'Add a tracked QR footer': '添加追踪二维码页脚',
+    'Add a scannable QR footer and track visits to a destination.':
+      '添加可扫描的二维码页脚，并追踪前往目标地址的访问。',
+    'Use a complete HTTP or HTTPS destination URL.':
+      '请输入完整的 HTTP 或 HTTPS 目标 URL。',
+    'Keep the full-bleed default or add a tracked QR footer.':
+      '保留默认满版画面，或添加追踪二维码页脚。',
+    'Save QR settings': '保存二维码设置',
+    'QR settings saved.': '已保存二维码设置。',
+    'QR settings could not be saved.': '无法保存二维码设置。',
+    'QR settings were saved, but the primary placement could not be prepared.':
+      '二维码设置已保存，但无法准备主要投放点。',
+    'The campaign was saved, but its primary placement could not be prepared.':
+      '推广活动已保存，但无法准备主要投放点。',
+    'The primary placement could not be prepared.': '无法准备主要投放点。',
+    'Primary placement ready.': '主要投放点已就绪。',
+    'Retry primary placement': '重试准备主要投放点',
+    'Save QR settings before generating a version.':
+      '请先保存二维码设置，再生成新版本。',
+    'Prepare the primary placement before generating a QR poster.':
+      '请先准备主要投放点，再生成二维码海报。',
+    'This version needs a tracked placement before it can be previewed.':
+      '此版本需要追踪投放点后才能预览。',
+    'The poster preview will appear when its tracked code is ready.':
+      '追踪代码准备好后将显示海报预览。',
+  }
+
+  for (const [key, value] of Object.entries(expected)) {
+    const translationKey = key as TranslationKey
+    assert.equal(enUS[translationKey], translationKey)
+    assert.equal(zhCN[translationKey], value)
+  }
+})

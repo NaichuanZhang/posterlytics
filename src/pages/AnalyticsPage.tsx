@@ -13,28 +13,28 @@ import { usePlacementStats } from '../hooks/usePlacementStats'
 import { useI18n } from '../i18n/I18nProvider'
 import { countryBreakdownsForDisplay } from '../lib/countryBreakdowns'
 import { formatFreshnessTimestamp } from '../lib/i18n'
-import { getUseCase } from '../lib/useCases'
+import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 
 export function AnalyticsPage() {
   const { formatNumber, locale, t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
-  const trackingEnabled = campaign
-    ? getUseCase(campaign.use_case).trackingEnabled
+  const trackingActive = campaign
+    ? isCampaignTrackingActive(campaign)
     : false
   const {
     stats,
     loading: statsLoading,
     error: statsError,
     reload,
-  } = usePlacementStats(id, trackingEnabled)
+  } = usePlacementStats(id, trackingActive)
   const {
     breakdowns,
     loading: breakdownsLoading,
     error: breakdownsError,
     reload: reloadBreakdowns,
-  } = useCampaignBreakdowns(id, trackingEnabled)
+  } = useCampaignBreakdowns(id, trackingActive)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const analyticsLoading = statsLoading || breakdownsLoading
@@ -51,7 +51,7 @@ export function AnalyticsPage() {
     if (
       previousLoad.current.loading
       && !analyticsLoading
-      && trackingEnabled
+      && trackingActive
       && !statsError
       && !breakdownsError
     ) {
@@ -87,7 +87,7 @@ export function AnalyticsPage() {
       </AppShell>
     )
   }
-  if (!trackingEnabled) {
+  if (!trackingActive) {
     return <Navigate to={`/campaigns/${campaign.id}`} replace />
   }
 

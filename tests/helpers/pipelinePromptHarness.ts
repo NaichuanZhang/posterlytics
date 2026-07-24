@@ -77,6 +77,11 @@ export interface PipelinePromptGoldens {
   }
 }
 
+export interface SocialCoverQrPromptGoldens {
+  designer: { system: string; user: string }
+  hero: string
+}
+
 export interface RedNotePipelineDiagnostics {
   analyzeChatCalls: number
   analyzeImageCalls: number
@@ -293,6 +298,20 @@ export async function captureCurrentPipelinePromptGoldens(): Promise<PipelinePro
       rednote_post: await captureHeroPrompt('rednote_post', 'product'),
       event: await captureHeroPrompt('event', 'event'),
     },
+  }
+}
+
+export async function captureSocialCoverQrPromptGoldens(): Promise<
+  SocialCoverQrPromptGoldens
+> {
+  const designerState = createSocialCoverQrState()
+  const heroState = createSocialCoverQrState()
+  return {
+    designer: await captureDesignerPromptForState(
+      designerState,
+      'social_cover_qr',
+    ),
+    hero: await captureHeroPromptForState(heroState, 'social_cover_qr'),
   }
 }
 
@@ -646,6 +665,13 @@ async function captureDesignerPrompt(
       ? 'https://www.amazon.com/dp/B0FIXTURE1'
       : 'https://example.com/products/northstar'
   const state = createState(useCase, productUrl, 'product')
+  return captureDesignerPromptForState(state, useCase)
+}
+
+async function captureDesignerPromptForState(
+  state: HarnessState,
+  label: string,
+): Promise<{ system: string; user: string }> {
   const response = await withHarnessGlobals(
     state,
     designerResponse(),
@@ -661,7 +687,7 @@ async function captureDesignerPrompt(
   const payload = await response.json() as {
     prompt?: { system?: unknown; user?: unknown }
   }
-  return requireChatPrompt(payload.prompt, `designer:${useCase}`)
+  return requireChatPrompt(payload.prompt, `designer:${label}`)
 }
 
 async function captureRedNoteDesignerArtifact(): Promise<
@@ -1070,6 +1096,14 @@ function createState(
     chatRequests: 0,
     imageRequests: 0,
   }
+}
+
+function createSocialCoverQrState(): HarnessState {
+  const state = createState('social_cover', null, 'product')
+  state.campaign.destination_url = 'https://example.com/social'
+  state.campaign.poster_format = 'rednote_3x4'
+  state.generation.poster_format = 'rednote_3x4'
+  return state
 }
 
 function createHarnessClient(state: HarnessState) {

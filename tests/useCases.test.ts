@@ -65,6 +65,14 @@ const placementsHookSource = readFileSync(
   new URL('../src/hooks/usePlacements.ts', import.meta.url),
   'utf8',
 )
+const trackingPolicySource = readFileSync(
+  new URL('../src/lib/trackingPolicy.ts', import.meta.url),
+  'utf8',
+)
+const campaignListSource = readFileSync(
+  new URL('../src/pages/CampaignsListPage.tsx', import.meta.url),
+  'utf8',
+)
 
 test('registry contains the four creatable use cases plus historical event', () => {
   assert.deepEqual(USE_CASE_IDS, [
@@ -108,7 +116,7 @@ test('website and Amazon preserve current input requirements', () => {
   assert.equal(amazon.inputFields.productUrl.sourceKind, 'amazon')
 })
 
-test('social cover is creatable from references with no URL or tracking fields', () => {
+test('social cover is creatable from references with an opt-in tracked QR format', () => {
   const social = getUseCase('social_cover')
 
   assert.equal(social.creationEnabled, true)
@@ -126,26 +134,35 @@ test('social cover is creatable from references with no URL or tracking fields',
     requirement: 'required',
     minimumCount: 1,
   })
-  assert.deepEqual(social.allowedPosterFormats, ['rednote_cover_3x4'])
+  assert.deepEqual(social.allowedPosterFormats, [
+    'rednote_cover_3x4',
+    'rednote_3x4',
+  ])
   assert.equal(social.defaultPosterFormat, 'rednote_cover_3x4')
-  assert.equal(social.trackingEnabled, false)
+  assert.equal(social.trackingEnabled, true)
 })
 
-test('RedNote requires draft copy and otherwise mirrors social cover', () => {
-  const social = getUseCase('social_cover')
+test('RedNote independently stays full-bleed, reference-only, and untracked', () => {
   const redNote = getUseCase('rednote_post')
 
-  assert.deepEqual(redNote, {
-    ...social,
-    id: 'rednote_post',
-    label: 'RedNote post',
-    creationDescription:
-      'Create a 3:4 RedNote cover from draft copy and creative references.',
-    inputFields: {
-      ...social.inputFields,
-      referenceContext: 'required',
-    },
+  assert.equal(redNote.creationEnabled, true)
+  assert.deepEqual(redNote.inputFields.productUrl, {
+    requirement: 'hidden',
+    sourceKind: 'none',
   })
+  assert.equal(redNote.inputFields.productName, 'required')
+  assert.equal(redNote.inputFields.tagline, 'optional')
+  assert.equal(redNote.inputFields.ctaText, 'hidden')
+  assert.equal(redNote.inputFields.destinationUrl, 'hidden')
+  assert.equal(redNote.inputFields.referenceContext, 'required')
+  assert.equal(redNote.inputFields.platformHint, 'optional')
+  assert.deepEqual(redNote.inputFields.referenceImages, {
+    requirement: 'required',
+    minimumCount: 1,
+  })
+  assert.deepEqual(redNote.allowedPosterFormats, ['rednote_cover_3x4'])
+  assert.equal(redNote.defaultPosterFormat, 'rednote_cover_3x4')
+  assert.equal(redNote.trackingEnabled, false)
   assert.equal(isReferenceOnlyUseCaseId('social_cover'), true)
   assert.equal(isReferenceOnlyUseCaseId('rednote_post'), true)
   assert.equal(isReferenceOnlyUseCaseId('website_product'), false)
@@ -186,9 +203,12 @@ test('event remains a non-creatable historical registry entry', () => {
 test('website, Amazon, and event retain all formats, A4 defaults, and tracking', () => {
   const formatSlugs = POSTER_SIZES.map((size) => size.slug)
 
-  for (const useCase of USE_CASES.filter(({ id }) =>
-    !isReferenceOnlyUseCaseId(id)
-  )) {
+  for (const id of [
+    'website_product',
+    'amazon_listing',
+    'event',
+  ] as const) {
+    const useCase = getUseCase(id)
     assert.deepEqual(useCase.allowedPosterFormats, formatSlugs)
     assert.equal(useCase.defaultPosterFormat, 'a4_2x3')
     assert.equal(
@@ -303,11 +323,11 @@ test('wizard persists spec-driven nullable sources and the platform target atomi
   )
   assert.match(
     wizard,
-    /const resolvedDestinationUrl = fields\.destinationUrl === 'hidden'\s+\? null/,
+    /const resolvedDestinationUrl = qrEnabled\s+\? destinationUrl\.trim\(\)\s+: fields\.destinationUrl === 'hidden'\s+\? null/,
   )
   assert.match(
     wizard,
-    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: selectedUseCaseId,[\s\S]*product_url: resolvedProductUrl,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: fields\.platformHint === 'hidden'[\s\S]*normalizePlatformHint\(platformHint\)/,
+    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: selectedUseCaseId,[\s\S]*product_url: resolvedProductUrl,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: fields\.platformHint === 'hidden'[\s\S]*normalizePlatformHint\(platformHint\)[\s\S]*poster_format: selectedUseCaseId === 'social_cover'[\s\S]*'rednote_3x4'[\s\S]*'rednote_cover_3x4'/,
   )
   assert.match(
     wizard,
@@ -395,38 +415,47 @@ test('editor and preflight consume persisted intent while reference-only modes a
 test('tracking policy suppresses placement UI, default creation, and direct routes', () => {
   assert.match(
     appShellSource,
-    /\.filter\(\s*\(tab\) => tab\.section === 'poster' \|\| useCase\.trackingEnabled/,
+    /const trackingActive = isCampaignTrackingActive\(campaign\)/,
+  )
+  assert.match(
+    appShellSource,
+    /\.filter\(\s*\(tab\) => tab\.section === 'poster' \|\| trackingActive/,
   )
   assert.match(
     editorSource,
-    /usePlacements\(\s*id,\s*user\?\.id,\s*campaignTrackingEnabled/,
+    /usePlacements\(\s*id,\s*user\?\.id,\s*campaignTrackingActive/,
   )
   assert.match(
     editorSource,
-    /user\?\.id && campaignTrackingEnabled\) void ensureDefault\(\)/,
+    /if \(!user\?\.id \|\| !campaignTrackingActive\) return/,
   )
   assert.match(
     editorSource,
-    /\{campaignTrackingEnabled && previewIncludesQrBand && selectedPlacement && \([\s\S]*?Copy tracked link/,
+    /\{campaignTrackingActive && previewIncludesQrBand && selectedPlacement && \([\s\S]*?Copy tracked link/,
   )
   assert.match(
     editorSource,
-    /\{campaignTrackingEnabled && \(\s*<>\s*<Link[\s\S]*?Manage placements[\s\S]*?View analytics/,
+    /\{campaignTrackingActive && \(\s*<>\s*<Link[\s\S]*?Manage placements[\s\S]*?View analytics/,
   )
   for (const source of [placementsPageSource, analyticsPageSource]) {
-    assert.match(source, /getUseCase\(campaign\.use_case\)\.trackingEnabled/)
+    assert.match(source, /isCampaignTrackingActive\(campaign\)/)
     assert.match(
       source,
-      /if \(!trackingEnabled\) \{\s+return <Navigate to=\{`\/campaigns\/\$\{campaign\.id\}`\} replace \/>/,
+      /if \(!trackingActive\) \{\s+return <Navigate to=\{`\/campaigns\/\$\{campaign\.id\}`\} replace \/>/,
     )
   }
+  assert.match(campaignListSource, /isCampaignTrackingActive\(campaign\)/)
   assert.match(
-    placementsHookSource,
-    /if \(!campaignId \|\| !enabled\)/,
+    trackingPolicySource,
+    /getUseCase\(campaign\.use_case\)\.trackingEnabled[\s\S]*typeof campaign\.destination_url === 'string'[\s\S]*campaign\.destination_url\.trim\(\)\.length > 0/,
   )
   assert.match(
     placementsHookSource,
-    /if \(!enabled \|\| !campaignId \|\| !userId\)/,
+    /if \(!campaignId \|\| \(!enabled && !force\)\)/,
+  )
+  assert.match(
+    placementsHookSource,
+    /if \(\(!enabled && !force\) \|\| !campaignId \|\| !userId\)/,
   )
 })
 

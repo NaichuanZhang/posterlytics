@@ -10,8 +10,10 @@ import {
   captureCurrentPipelinePromptGoldens,
   captureHeroArtifactValidationDiagnostics,
   captureRedNotePipelineDiagnostics,
+  captureSocialCoverQrPromptGoldens,
   type HeroArtifactValidationDiagnostics,
   type PipelinePromptGoldens,
+  type SocialCoverQrPromptGoldens,
 } from './helpers/pipelinePromptHarness.ts'
 import {
   projectRedNotePostPlanToPosterContent,
@@ -56,6 +58,10 @@ const redNoteBackgroundExpected = JSON.parse(readFileSync(
   designer: PipelinePromptGoldens['designer']['rednote_post']
   hero: PipelinePromptGoldens['hero']['rednote_post']
 }
+const socialQrExpected = JSON.parse(readFileSync(
+  new URL('./fixtures/socialCoverQrPromptGoldens.json', import.meta.url),
+  'utf8',
+)) as SocialCoverQrPromptGoldens
 const actualPromise = captureCurrentPipelinePromptGoldens()
 const redNoteDiagnosticsPromise = actualPromise.then(
   () => captureRedNotePipelineDiagnostics(),
@@ -65,6 +71,9 @@ const redNoteFallbackPromise = redNoteDiagnosticsPromise.then(
 )
 const emojiHeroPromptPromise = redNoteFallbackPromise.then(
   () => captureEmojiStrippedHeroPrompt(),
+)
+const socialQrPromise = emojiHeroPromptPromise.then(
+  () => captureSocialCoverQrPromptGoldens(),
 )
 
 test('website and Amazon analyze prompts match the pre-recipe byte goldens', async () => {
@@ -118,6 +127,17 @@ test('social analyze, designer, and hero prompts match their own goldens', async
   assert.deepEqual(actual.analyze.social_cover, socialExpected.analyze)
   assert.deepEqual(actual.designer.social_cover, socialExpected.designer)
   assert.equal(actual.hero.social_cover, socialExpected.hero)
+})
+
+test('banded social designer and hero prompts match their QR-footer golden', async () => {
+  const actual = await socialQrPromise
+
+  assert.deepEqual(actual, socialQrExpected)
+  assert.match(actual.designer.system, /tracked QR footer bar/)
+  assert.match(actual.designer.user, /QR footer is the action/)
+  assert.match(actual.hero, /scannable QR footer bar/)
+  assert.doesNotMatch(actual.designer.system, /no footer or tracking mechanics/)
+  assert.doesNotMatch(actual.hero, /FULL-BLEED SOCIAL ARTWORK/)
 })
 
 test('RedNote pins its own analyze, deterministic designer, and background hero contracts', async () => {

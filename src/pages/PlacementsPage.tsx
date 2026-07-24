@@ -13,9 +13,9 @@ import { usePlacements } from '../hooks/usePlacements'
 import { usePosterGenerations } from '../hooks/usePosterGenerations'
 import { overlayGeneration } from '../lib/generations'
 import { getPosterSize, hasPosterQrBand } from '../lib/posterSize'
+import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 import { buildViewUrl } from '../lib/viewUrl'
 import { useI18n } from '../i18n/I18nProvider'
-import { getUseCase } from '../lib/useCases'
 
 export function PlacementsPage() {
   const { formatDate, t } = useI18n()
@@ -23,8 +23,8 @@ export function PlacementsPage() {
   const { user } = useAuth()
   const { notify } = useToast()
   const { campaign, loading } = useCampaign(id)
-  const trackingEnabled = campaign
-    ? getUseCase(campaign.use_case).trackingEnabled
+  const trackingActive = campaign
+    ? isCampaignTrackingActive(campaign)
     : false
   const {
     generations,
@@ -34,7 +34,7 @@ export function PlacementsPage() {
   const { placements, addPlacement, removePlacement } = usePlacements(
     id,
     user?.id,
-    trackingEnabled,
+    trackingActive,
   )
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +97,7 @@ export function PlacementsPage() {
       </AppShell>
     )
   }
-  if (!trackingEnabled) {
+  if (!trackingActive) {
     return <Navigate to={`/campaigns/${campaign.id}`} replace />
   }
 

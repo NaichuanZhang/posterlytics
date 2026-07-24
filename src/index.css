@@ -749,6 +749,111 @@ img {
   line-height: 1.4;
 }
 
+.social-cover-qr-settings {
+  display: grid;
+  gap: 14px;
+}
+
+.switch-control {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+  cursor: pointer;
+}
+
+.switch-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.switch-copy strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.switch-copy > span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.switch-input {
+  position: relative;
+  display: block;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 36px;
+}
+
+.switch-input input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch-input > span {
+  display: block;
+  width: 36px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  transition: border-color var(--control-transition), background var(--control-transition);
+}
+
+.switch-input > span::after {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(34, 35, 41, 0.24);
+  content: '';
+  transition: transform var(--control-transition);
+}
+
+.switch-input input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switch-input input:checked + span::after {
+  transform: translateX(16px);
+}
+
+.switch-input input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch-control:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.switch-input input:disabled {
+  cursor: not-allowed;
+}
+
+.social-cover-qr-destination {
+  max-width: 560px;
+}
+
 .required-label,
 .optional-label {
   margin-left: 5px;
@@ -2857,6 +2962,23 @@ img {
   font-size: 12px;
 }
 
+.canvas-placement-state {
+  display: grid;
+  min-width: 0;
+  min-height: 260px;
+  flex: 1;
+  place-items: center;
+  padding: 24px;
+}
+
+.canvas-placement-state .inline-notice {
+  width: min(420px, 100%);
+}
+
+.canvas-placement-state .inline-notice > div {
+  display: grid;
+}
+
 .canvas-control-row {
   position: absolute;
   bottom: 12px;
@@ -3001,6 +3123,21 @@ img {
 .inspector-section .reference-dropzone {
   min-height: 70px;
   padding: 9px;
+}
+
+.editor-social-cover-qr {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.editor-social-cover-qr > .button {
+  justify-self: start;
+}
+
+.placement-provisioning-state {
+  display: grid;
+  gap: 7px;
 }
 
 .check-control {

@@ -273,17 +273,16 @@ test('scaled product prompts retain the placement QR footer contract', () => {
   assert.match(instructions.designerRequest, /QR footer is the action/i)
 })
 
-test('reference-only policy suppresses tracking even for a malformed banded format', () => {
-  for (const useCase of ['social_cover', 'rednote_post'] as const) {
-    const instructions = productPosterActionInstructions(
-      getPosterSize('a4_2x3'),
-      resolveProductUseCaseRecipe(useCase),
-    )
+test('QR-band instructions take precedence over reference-only artwork policy', () => {
+  const instructions = productPosterActionInstructions(
+    getPosterSize('rednote_3x4'),
+    resolveProductUseCaseRecipe('social_cover'),
+  )
 
-    assert.match(instructions.designerRule, /no footer or tracking mechanics/i)
-    assert.match(instructions.painterRule, /FULL-BLEED SOCIAL ARTWORK/)
-    assert.doesNotMatch(instructions.painterRule, /scannable QR footer/i)
-  }
+  assert.match(instructions.designerRule, /tracked QR footer bar.*IS the call-to-action/i)
+  assert.match(instructions.painterRule, /scannable QR footer bar.*IS the call-to-action/i)
+  assert.doesNotMatch(instructions.designerRule, /no footer or tracking mechanics/i)
+  assert.doesNotMatch(instructions.painterRule, /FULL-BLEED SOCIAL ARTWORK/)
 })
 
 test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', () => {

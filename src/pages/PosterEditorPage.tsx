@@ -34,6 +34,10 @@ import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterCanvas } from '../components/PosterCanvas'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
+import {
+  isValidSocialCoverDestination,
+  SocialCoverQrSettings,
+} from '../components/SocialCoverQrSettings'
 import { PosterTranscript } from '../components/PosterTranscript'
 import { PosterVersionHistory } from '../components/PosterVersionHistory'
 import { InlineNotice } from '../components/ui/Feedback'
@@ -66,6 +70,7 @@ import {
 } from '../lib/posterSize'
 import { normalizePlatformHint } from '../lib/platformHints'
 import { derivePosterTranscript } from '../lib/posterTranscript'
+import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 import {
   clampRedNotePageIndex,
   resolveRedNoteRenderState,
@@ -102,6 +107,7 @@ type BusyAction =
   | 'delete'
   | 'format'
   | 'platform'
+  | 'qr-settings'
 type MobileSection = 'versions' | 'create' | 'export'
 
 export function PosterEditorPage() {
@@ -124,13 +130,17 @@ export function PosterEditorPage() {
     error: generationsError,
     reload: reloadGenerations,
   } = usePosterGenerations(id)
-  const campaignTrackingEnabled = campaign
-    ? getUseCase(campaign.use_case).trackingEnabled
+  const campaignTrackingActive = campaign
+    ? isCampaignTrackingActive(campaign)
     : false
-  const { placements, ensureDefault } = usePlacements(
+  const {
+    placements,
+    ensureDefault,
+    defaultPlacementError,
+  } = usePlacements(
     id,
     user?.id,
-    campaignTrackingEnabled,
+    campaignTrackingActive,
   )
   const { preferences, updatePreferences } = useWorkspacePreferences()
   const isMobileWorkspace = useMediaQuery('(max-width: 899px)')
@@ -152,6 +162,11 @@ export function PosterEditorPage() {
     useState<LocalDraftFileReference[]>([])
   const [refreshWebsite, setRefreshWebsite] = useState(false)
   const [generationError, setGenerationError] = useState<string | null>(null)
+  const [socialCoverQrEnabled, setSocialCoverQrEnabled] = useState(false)
+  const [socialCoverDestination, setSocialCoverDestination] = useState('')
+  const [placementProvisioning, setPlacementProvisioning] = useState(false)
+  const [placementProvisioningError, setPlacementProvisioningError] =
+    useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [versionsDrawerOpen, setVersionsDrawerOpen] = useState(false)
   const [mobileSection, setMobileSection] = useState<MobileSection>('create')
@@ -168,8 +183,32 @@ export function PosterEditorPage() {
   pendingReferencesRef.current = pendingReferences
 
   useEffect(() => {
-    if (user?.id && campaignTrackingEnabled) void ensureDefault()
-  }, [campaignTrackingEnabled, user?.id, ensureDefault])
+    if (!user?.id || !campaignTrackingActive) return
+    void ensureDefault().then((placementError) => {
+      if (placementError) {
+        setPlacementProvisioningError(
+          t('The primary placement could not be prepared.'),
+        )
+      }
+    })
+  }, [campaignTrackingActive, ensureDefault, t, user?.id])
+
+  useEffect(() => {
+    if (!campaign || campaign.use_case !== 'social_cover') {
+      setSocialCoverQrEnabled(false)
+      setSocialCoverDestination('')
+      setPlacementProvisioningError(null)
+      return
+    }
+    const enabled = campaign.poster_format === 'rednote_3x4'
+    setSocialCoverQrEnabled(enabled)
+    setSocialCoverDestination(enabled ? campaign.destination_url ?? '' : '')
+  }, [
+    campaign?.destination_url,
+    campaign?.id,
+    campaign?.poster_format,
+    campaign?.use_case,
+  ])
 
   useEffect(() => {
     setDraftReady(false)
@@ -387,7 +426,7 @@ export function PosterEditorPage() {
   }
   const campaignId = campaign.id
   const campaignPlatformHint = campaign.platform_hint
-  const previewCode = campaignTrackingEnabled
+  const previewCode = campaignTrackingActive
     ? selectedPlacement?.code ?? null
     : null
   const previewPosterSize = getPosterSize(
@@ -411,6 +450,22 @@ export function PosterEditorPage() {
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
   const campaignUseCase = getUseCase(campaign.use_case)
+  const socialCover = campaignUseCase.id === 'social_cover'
+  const persistedSocialCoverQrEnabled = (
+    socialCover
+    && campaign.poster_format === 'rednote_3x4'
+  )
+  const socialCoverQrSettingsDirty = socialCover && (
+    socialCoverQrEnabled !== persistedSocialCoverQrEnabled
+    || (
+      socialCoverQrEnabled
+      && socialCoverDestination.trim() !== (campaign.destination_url ?? '').trim()
+    )
+  )
+  const socialCoverQrDestinationValid = (
+    !socialCoverQrEnabled
+    || isValidSocialCoverDestination(socialCoverDestination)
+  )
   const amazonReferenceMode = campaignUseCase.id === 'amazon_listing'
   const referenceOnlyMode = isReferenceOnlyUseCaseId(campaignUseCase.id)
   const redNotePost = campaignUseCase.id === 'rednote_post'
@@ -437,15 +492,23 @@ export function PosterEditorPage() {
     || normalizeReferenceContext(instruction) !== null
   )
   const pendingReferencesAreReady = pendingReferencesReady(pendingReferences)
-  const generationBlocker = !referenceContextRequirementMet
-    ? t('RedNote post generation requires draft copy.')
-    : !referenceMinimumMet
-      ? t('Add at least {count} images.', {
-          count: minimumReferenceImages,
-        })
-      : !pendingReferencesAreReady
-        ? t('Remove any image URL that could not load, or wait for its preview to finish.')
-        : null
+  const generationBlocker = socialCoverQrSettingsDirty
+    ? t('Save QR settings before generating a version.')
+    : persistedSocialCoverQrEnabled && placements.length === 0
+      ? t('Prepare the primary placement before generating a QR poster.')
+      : !referenceContextRequirementMet
+        ? t('RedNote post generation requires draft copy.')
+        : !referenceMinimumMet
+          ? t('Add at least {count} images.', {
+              count: minimumReferenceImages,
+            })
+          : !pendingReferencesAreReady
+            ? t('Remove any image URL that could not load, or wait for its preview to finish.')
+            : null
+  const primaryPlacementError = placementProvisioningError
+    ?? (defaultPlacementError
+      ? t('The primary placement could not be prepared.')
+      : null)
   const generationPreflight = deriveGenerationPreflight({
     campaign,
     currentGeneration,
@@ -655,6 +718,78 @@ export function PosterEditorPage() {
     }
   }
 
+  async function saveSocialCoverQrSettings() {
+    if (!socialCover || !socialCoverQrSettingsDirty) return
+    if (!socialCoverQrDestinationValid) {
+      setGenerationError(t('Use a complete HTTP or HTTPS destination URL.'))
+      return
+    }
+
+    setBusy('qr-settings')
+    setGenerationError(null)
+    setPlacementProvisioningError(null)
+    try {
+      const destination = socialCoverQrEnabled
+        ? socialCoverDestination.trim()
+        : null
+      const { error } = await insforge.database
+        .from('campaigns')
+        .update({
+          poster_format: socialCoverQrEnabled
+            ? 'rednote_3x4'
+            : 'rednote_cover_3x4',
+          destination_url: destination,
+        })
+        .eq('id', campaignId)
+      if (error) throw new Error(error.message)
+
+      let placementError: string | null = null
+      if (socialCoverQrEnabled) {
+        setPlacementProvisioning(true)
+        placementError = await ensureDefault(true)
+        setPlacementProvisioning(false)
+      }
+      await reload()
+
+      if (placementError) {
+        setPlacementProvisioningError(
+          t('QR settings were saved, but the primary placement could not be prepared.'),
+        )
+        notify(
+          t('QR settings were saved, but the primary placement could not be prepared.'),
+          'error',
+        )
+        return
+      }
+
+      setPlacementProvisioningError(null)
+      notify(t('QR settings saved.'), 'success')
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setGenerationError(message)
+      notify(t('QR settings could not be saved.'), 'error')
+    } finally {
+      setPlacementProvisioning(false)
+      setBusy(null)
+    }
+  }
+
+  async function retryPrimaryPlacement() {
+    setPlacementProvisioning(true)
+    setPlacementProvisioningError(null)
+    const placementError = await ensureDefault(true)
+    await reload()
+    setPlacementProvisioning(false)
+    if (placementError) {
+      setPlacementProvisioningError(
+        t('The primary placement could not be prepared.'),
+      )
+      notify(t('The primary placement could not be prepared.'), 'error')
+      return
+    }
+    notify(t('Primary placement ready.'), 'success')
+  }
+
   async function setStatus(status: 'published' | 'draft') {
     setBusy(status)
     try {
@@ -780,13 +915,59 @@ export function PosterEditorPage() {
           )}
         </div>
       )}
-      <PosterFormatSelect
-        id="next-poster-format"
-        value={targetPosterSize.slug}
-        disabled={generationInputsDisabled || !!busy}
-        allowedFormats={campaignUseCase.allowedPosterFormats}
-        onChange={(posterFormat) => void updatePosterFormat(posterFormat)}
-      />
+      {socialCover ? (
+        <div className="editor-social-cover-qr">
+          <SocialCoverQrSettings
+            idPrefix="editor-social-cover-qr"
+            enabled={socialCoverQrEnabled}
+            destinationUrl={socialCoverDestination}
+            disabled={generationInputsDisabled || !!busy}
+            onEnabledChange={(enabled) => {
+              setSocialCoverQrEnabled(enabled)
+              setPlacementProvisioningError(null)
+              if (!enabled) setSocialCoverDestination('')
+            }}
+            onDestinationUrlChange={(value) => {
+              setSocialCoverDestination(value)
+              setPlacementProvisioningError(null)
+            }}
+          />
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            disabled={
+              generationInputsDisabled
+              || !!busy
+              || !socialCoverQrSettingsDirty
+              || !socialCoverQrDestinationValid
+            }
+            onClick={() => void saveSocialCoverQrSettings()}
+          >
+            {busy === 'qr-settings' ? t('Saving…') : t('Save QR settings')}
+          </button>
+          {primaryPlacementError && (
+            <InlineNotice tone="error">
+              <strong>{primaryPlacementError}</strong>
+              <button
+                type="button"
+                className="text-button"
+                disabled={placementProvisioning || !!busy}
+                onClick={() => void retryPrimaryPlacement()}
+              >
+                {t('Retry primary placement')}
+              </button>
+            </InlineNotice>
+          )}
+        </div>
+      ) : (
+        <PosterFormatSelect
+          id="next-poster-format"
+          value={targetPosterSize.slug}
+          disabled={generationInputsDisabled || !!busy}
+          allowedFormats={campaignUseCase.allowedPosterFormats}
+          onChange={(posterFormat) => void updatePosterFormat(posterFormat)}
+        />
+      )}
       {campaignUseCase.inputFields.platformHint !== 'hidden' && (
         <>
           <PlatformHintField
@@ -892,19 +1073,35 @@ export function PosterEditorPage() {
     <section className="inspector-section" aria-labelledby="export-heading">
       <div className="panel-heading">
         <div>
-          {campaignTrackingEnabled
+          {campaignTrackingActive
             ? <MapPin size={16} aria-hidden="true" />
             : <Download size={16} aria-hidden="true" />}
           <h2 id="export-heading">
-            {campaignTrackingEnabled ? t('Placement & export') : t('Export artwork')}
+            {campaignTrackingActive ? t('Placement & export') : t('Export artwork')}
           </h2>
         </div>
       </div>
-      {campaignTrackingEnabled && previewIncludesQrBand && placements.length === 0 ? (
-        <p className="panel-empty">{t('Preparing the primary placement.')}</p>
+      {campaignTrackingActive && previewIncludesQrBand && placements.length === 0 ? (
+        <div className="panel-empty placement-provisioning-state">
+          <span>
+            {placementProvisioning
+              ? t('Preparing the primary placement.')
+              : primaryPlacementError ?? t('Preparing the primary placement.')}
+          </span>
+          {primaryPlacementError && (
+            <button
+              type="button"
+              className="text-button"
+              disabled={placementProvisioning || !!busy}
+              onClick={() => void retryPrimaryPlacement()}
+            >
+              {t('Retry primary placement')}
+            </button>
+          )}
+        </div>
       ) : (
         <>
-          {campaignTrackingEnabled && previewIncludesQrBand && (
+          {campaignTrackingActive && previewIncludesQrBand && (
             <div className="field">
               <label htmlFor="placement-select">{t('Placement')}</label>
               <select
@@ -926,17 +1123,17 @@ export function PosterEditorPage() {
               })}
             </p>
           )}
-          {(!campaignTrackingEnabled || !previewIncludesQrBand) && (
+          {(!campaignTrackingActive || !previewIncludesQrBand) && (
             <p className="selection-note">
               {t('Artwork-only export. No QR code or placement tracking is included.')}
             </p>
           )}
           <div className="inspector-actions">
-            {(!campaignTrackingEnabled || !previewIncludesQrBand || selectedPlacement) && (
+            {(!campaignTrackingActive || !previewIncludesQrBand || selectedPlacement) && (
               <PosterExportButton
                 campaign={previewCampaign}
                 placement={
-                  campaignTrackingEnabled && previewIncludesQrBand
+                  campaignTrackingActive && previewIncludesQrBand
                     ? selectedPlacement
                     : undefined
                 }
@@ -946,13 +1143,13 @@ export function PosterEditorPage() {
                 showAllPagesExport
               />
             )}
-            {campaignTrackingEnabled && previewIncludesQrBand && selectedPlacement && (
+            {campaignTrackingActive && previewIncludesQrBand && selectedPlacement && (
               <button type="button" className="button button-secondary button-small" onClick={copyLink}>
                 <Copy size={15} aria-hidden="true" />
                 {t('Copy tracked link')}
               </button>
             )}
-            {campaignTrackingEnabled && (
+            {campaignTrackingActive && (
               <>
                 <Link to={`/campaigns/${campaign.id}/placements`} className="button button-secondary button-small">
                   <MapPin size={15} aria-hidden="true" />
@@ -1007,7 +1204,7 @@ export function PosterEditorPage() {
           >
             <PanelRight size={17} aria-hidden="true" />
           </button>
-          {campaignTrackingEnabled && (
+          {campaignTrackingActive && (
             <>
               <span className="toolbar-divider" />
               <button
@@ -1039,7 +1236,7 @@ export function PosterEditorPage() {
               >
                 <strong>{t('Delete this campaign?')}</strong>
                 <span>
-                  {campaignTrackingEnabled
+                  {campaignTrackingActive
                     ? t('All versions and placements will be removed.')
                     : t('All artwork versions will be removed.')}
                 </span>
@@ -1102,7 +1299,7 @@ export function PosterEditorPage() {
         )}
 
         <section className="editor-canvas-column">
-          {campaignTrackingEnabled && !published && (
+          {campaignTrackingActive && !published && (
             <div className="draft-banner">
               <span>{t('Draft')}</span>
               {t('Scans open an unpublished page until this campaign is published.')}
@@ -1131,20 +1328,47 @@ export function PosterEditorPage() {
             </div>
           )}
           <figure className="poster-figure">
-            <PosterCanvas
-              campaign={previewCampaign}
-              code={previewCode}
-              imageAlt={posterTranscript.shortAlt}
-              zoom={preferences.zoom}
-              posterSize={previewPosterSize}
-              pageIndex={effectivePageIndex}
-              pageCount={redNotePageCount ?? undefined}
-              versionLabel={selectedGeneration
-                ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
-                : t('Current poster')}
-              onZoomChange={(zoom) => updatePreferences({ zoom })}
-              onPageIndexChange={changeRedNotePageIndex}
-            />
+            {previewIncludesQrBand && !previewCode ? (
+              <div className="canvas-placement-state">
+                <InlineNotice tone={primaryPlacementError ? 'error' : 'info'}>
+                  <strong>
+                    {campaignTrackingActive
+                      ? primaryPlacementError ?? t('Preparing the primary placement.')
+                      : t('This version needs a tracked placement before it can be previewed.')}
+                  </strong>
+                  {campaignTrackingActive && (
+                    <span>
+                      {t('The poster preview will appear when its tracked code is ready.')}
+                    </span>
+                  )}
+                  {campaignTrackingActive && primaryPlacementError && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={placementProvisioning || !!busy}
+                      onClick={() => void retryPrimaryPlacement()}
+                    >
+                      {t('Retry primary placement')}
+                    </button>
+                  )}
+                </InlineNotice>
+              </div>
+            ) : (
+              <PosterCanvas
+                campaign={previewCampaign}
+                code={previewCode}
+                imageAlt={posterTranscript.shortAlt}
+                zoom={preferences.zoom}
+                posterSize={previewPosterSize}
+                pageIndex={effectivePageIndex}
+                pageCount={redNotePageCount ?? undefined}
+                versionLabel={selectedGeneration
+                  ? t('Version {number}', { number: selectedGeneration.version_number ?? '-' })
+                  : t('Current poster')}
+                onZoomChange={(zoom) => updatePreferences({ zoom })}
+                onPageIndexChange={changeRedNotePageIndex}
+              />
+            )}
             <PosterTranscript transcript={posterTranscript} />
           </figure>
 

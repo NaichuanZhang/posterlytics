@@ -2157,19 +2157,6 @@ export function productPosterActionInstructions(
   painterRule: string;
   painterAvoid: string;
 } {
-  if (isReferenceOnlyProductRecipe(recipe)) {
-    return {
-      designerRule:
-        'CRITICAL: this is full-bleed artwork with no footer or tracking mechanics. Do NOT add a QR code, barcode, call-to-action, painted button, pill, badge, or platform interface. Use the "lower" zone for a closing visual or supporting detail instead. ',
-      designerRequest:
-        'Design the full-bleed artwork layout JSON now (no tracking marks, call-to-action, button, pill, badge, or platform interface).',
-      painterRule:
-        'This is FULL-BLEED SOCIAL ARTWORK, not an interface: do NOT draw buttons, pills, tabs, badges, platform chrome, or clickable controls. Do NOT render any QR code, barcode, or call-to-action.',
-      painterAvoid:
-        'any QR code or barcode drawn by you, any call-to-action, and any platform interface',
-    };
-  }
-
   if (hasPosterQrBand(posterSize)) {
     return {
       designerRule:
@@ -2180,6 +2167,19 @@ export function productPosterActionInstructions(
         'This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.',
       painterAvoid:
         'any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you',
+    };
+  }
+
+  if (isReferenceOnlyProductRecipe(recipe)) {
+    return {
+      designerRule:
+        'CRITICAL: this is full-bleed artwork with no footer or tracking mechanics. Do NOT add a QR code, barcode, call-to-action, painted button, pill, badge, or platform interface. Use the "lower" zone for a closing visual or supporting detail instead. ',
+      designerRequest:
+        'Design the full-bleed artwork layout JSON now (no tracking marks, call-to-action, button, pill, badge, or platform interface).',
+      painterRule:
+        'This is FULL-BLEED SOCIAL ARTWORK, not an interface: do NOT draw buttons, pills, tabs, badges, platform chrome, or clickable controls. Do NOT render any QR code, barcode, or call-to-action.',
+      painterAvoid:
+        'any QR code or barcode drawn by you, any call-to-action, and any platform interface',
     };
   }
 

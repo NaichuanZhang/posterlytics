@@ -79,6 +79,8 @@ test('bandless poster export snapshot never requires a QR image', () => {
     campaign: {
       product_name: 'Full bleed cover',
       hero_image_url: 'https://example.com/full-bleed.png',
+      use_case: 'social_cover',
+      destination_url: null,
     } as unknown as Campaign,
     placement: {
       label: 'Ignored placement',
@@ -93,6 +95,42 @@ test('bandless poster export snapshot never requires a QR image', () => {
   assert.equal(run.includesQrBand, false)
   assert.equal(run.requiresQrImage, false)
   assert.equal(run.naming.placementLabel, undefined)
+})
+
+test('banded social-cover export requires and preserves its placement QR', () => {
+  const campaign = {
+    product_name: 'Tracked social cover',
+    hero_image_url: 'https://example.com/social.png',
+    use_case: 'social_cover',
+    destination_url: 'https://example.com/social',
+  } as unknown as Campaign
+  const placement = {
+    label: 'Launch lobby',
+    code: 'social-launch',
+  } as unknown as Placement
+  const posterSize = getPosterSize('rednote_3x4')
+
+  assert.throws(
+    () => buildPosterExportRunSnapshot({
+      campaign,
+      posterSize,
+      pageIndex: 0,
+      pageCount: null,
+    }),
+    RangeError,
+  )
+
+  const run = buildPosterExportRunSnapshot({
+    campaign,
+    placement,
+    posterSize,
+    pageIndex: 0,
+    pageCount: null,
+  })
+  assert.equal(run.includesQrBand, true)
+  assert.equal(run.requiresQrImage, true)
+  assert.equal(run.placementCode, 'social-launch')
+  assert.equal(run.naming.placementLabel, 'Launch lobby')
 })
 
 test('poster export filename remains unchanged when no page is supplied', () => {

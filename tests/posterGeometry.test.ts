@@ -18,6 +18,7 @@ import {
   POSTER_WIDTH,
   SHEET_MARGIN_Y,
 } from '../src/lib/posterSize.ts'
+import { getUseCase } from '../src/lib/useCases.ts'
 
 const PRESET_EXPECTATIONS = [
   {
@@ -122,6 +123,26 @@ test('default registry entry preserves the established A4 descriptor exactly', (
   assert.equal(DEFAULT_POSTER_SIZE.export.pixelRatio, 2)
   assert.equal(DEFAULT_POSTER_SIZE.export.filenameSuffix, 'A4')
   assert.deepEqual(DEFAULT_POSTER_SIZE.qrBand, { mode: 'scaled', scale: 1 })
+})
+
+test('both social-cover modes reuse the existing 1242x1656 descriptors', () => {
+  const social = getUseCase('social_cover')
+  const modes = social.allowedPosterFormats.map((slug) => getPosterSize(slug))
+
+  assert.deepEqual(
+    modes.map((size) => size.slug),
+    ['rednote_cover_3x4', 'rednote_3x4'],
+  )
+  assert.deepEqual(
+    modes.map((size) => size.sheet),
+    [
+      { width: 1242, height: 1656 },
+      { width: 1242, height: 1656 },
+    ],
+  )
+  assert.equal(hasPosterQrBand(modes[0]), false)
+  assert.equal(hasPosterQrBand(modes[1]), true)
+  assert.equal(POSTER_SIZES.length, PRESET_EXPECTATIONS.length)
 })
 
 test('only a missing legacy slug falls back to the default registry entry', () => {

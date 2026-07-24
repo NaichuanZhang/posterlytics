@@ -249,6 +249,10 @@ export const ENGLISH_MESSAGE_IDS = [
   'Call to action',
   'Start free trial',
   'Destination URL',
+  'Add a tracked QR footer',
+  'Add a scannable QR footer and track visits to a destination.',
+  'Use a complete HTTP or HTTPS destination URL.',
+  'https://yourproduct.com',
   'Generation references',
   'Add direction or images that are not present on the website.',
   'Listing copy and product images',
@@ -285,6 +289,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Artwork details',
   'Artwork output',
   'Name the artwork and choose its full-bleed output format.',
+  'Keep the full-bleed default or add a tracked QR footer.',
   'Artwork name',
   'Summer launch cover',
   'Supporting line',
@@ -300,6 +305,18 @@ export const ENGLISH_MESSAGE_IDS = [
   'Enter another platform',
   'Used as creative context for the next generated version.',
   'Save platform hint',
+  'Save QR settings',
+  'QR settings saved.',
+  'QR settings could not be saved.',
+  'QR settings were saved, but the primary placement could not be prepared.',
+  'The campaign was saved, but its primary placement could not be prepared.',
+  'The primary placement could not be prepared.',
+  'Primary placement ready.',
+  'Retry primary placement',
+  'Save QR settings before generating a version.',
+  'Prepare the primary placement before generating a QR poster.',
+  'This version needs a tracked placement before it can be previewed.',
+  'The poster preview will appear when its tracked code is ready.',
   'Target platform updated for the next version.',
   'Target platform could not be updated.',
   'Amazon seller reference mode',
@@ -986,6 +1003,12 @@ export const zhCN: Record<TranslationKey, string> = {
   'Call to action': '行动号召',
   'Start free trial': '开始免费试用',
   'Destination URL': '目标 URL',
+  'Add a tracked QR footer': '添加追踪二维码页脚',
+  'Add a scannable QR footer and track visits to a destination.':
+    '添加可扫描的二维码页脚，并追踪前往目标地址的访问。',
+  'Use a complete HTTP or HTTPS destination URL.':
+    '请输入完整的 HTTP 或 HTTPS 目标 URL。',
+  'https://yourproduct.com': 'https://yourproduct.com',
   'Generation references': '生成参考素材',
   'Add direction or images that are not present on the website.': '补充网站中没有的创意方向或图片。',
   'Listing copy and product images': '商品文案与产品图片',
@@ -1043,6 +1066,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'Artwork output': '画面输出',
   'Name the artwork and choose its full-bleed output format.':
     '为画面命名，并选择满版输出格式。',
+  'Keep the full-bleed default or add a tracked QR footer.':
+    '保留默认满版画面，或添加追踪二维码页脚。',
   'Artwork name': '画面名称',
   'Summer launch cover': '夏日发布封面',
   'Supporting line': '辅助文案',
@@ -1059,6 +1084,24 @@ export const zhCN: Record<TranslationKey, string> = {
   'Used as creative context for the next generated version.':
     '将作为下一生成版本的创意背景。',
   'Save platform hint': '保存平台提示',
+  'Save QR settings': '保存二维码设置',
+  'QR settings saved.': '已保存二维码设置。',
+  'QR settings could not be saved.': '无法保存二维码设置。',
+  'QR settings were saved, but the primary placement could not be prepared.':
+    '二维码设置已保存，但无法准备主要投放点。',
+  'The campaign was saved, but its primary placement could not be prepared.':
+    '推广活动已保存，但无法准备主要投放点。',
+  'The primary placement could not be prepared.': '无法准备主要投放点。',
+  'Primary placement ready.': '主要投放点已就绪。',
+  'Retry primary placement': '重试准备主要投放点',
+  'Save QR settings before generating a version.':
+    '请先保存二维码设置，再生成新版本。',
+  'Prepare the primary placement before generating a QR poster.':
+    '请先准备主要投放点，再生成二维码海报。',
+  'This version needs a tracked placement before it can be previewed.':
+    '此版本需要追踪投放点后才能预览。',
+  'The poster preview will appear when its tracked code is ready.':
+    '追踪代码准备好后将显示海报预览。',
   'Target platform updated for the next version.': '已更新下一版本的目标平台。',
   'Target platform could not be updated.': '无法更新目标平台。',
   'Amazon seller reference mode': '亚马逊卖家参考素材模式',

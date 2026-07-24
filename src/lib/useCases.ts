@@ -112,9 +112,9 @@ export const USE_CASES = [
       platformHint: 'optional',
       referenceImages: { requirement: 'required', minimumCount: 1 },
     },
-    allowedPosterFormats: ['rednote_cover_3x4'],
+    allowedPosterFormats: ['rednote_cover_3x4', 'rednote_3x4'],
     defaultPosterFormat: 'rednote_cover_3x4',
-    trackingEnabled: false,
+    trackingEnabled: true,
   },
   {
     id: 'rednote_post',

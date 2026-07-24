@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { insforge } from '../lib/insforge'
 import { mintCode } from '../lib/codes'
+import { ensureDefaultCampaignPlacement } from '../lib/placementService'
 import type { Placement } from '../lib/types'
 import { useI18n } from '../i18n/I18nProvider'
 
@@ -11,18 +12,22 @@ export function usePlacements(
 ) {
   const { t } = useI18n()
   const [placements, setPlacements] = useState<Placement[]>([])
+  const [defaultPlacementError, setDefaultPlacementError] =
+    useState<string | null>(null)
 
-  const reload = useCallback(async () => {
-    if (!campaignId || !enabled) {
+  const reload = useCallback(async (force = false): Promise<string | null> => {
+    if (!campaignId || (!enabled && !force)) {
       setPlacements([])
-      return
+      return null
     }
     const { data, error } = await insforge.database
       .from('placements')
       .select('*')
       .eq('campaign_id', campaignId)
       .order('created_at', { ascending: true })
-    if (!error) setPlacements((data ?? []) as Placement[])
+    if (error) return error.message
+    setPlacements((data ?? []) as Placement[])
+    return null
   }, [campaignId, enabled])
 
   useEffect(() => {
@@ -62,18 +67,61 @@ export function usePlacements(
   // encodes a real (trackable, once published) code rather than a dead preview.
   // Idempotent: re-reads first and only inserts when truly empty.
   const ensuredFor = useRef<string | null>(null)
-  const ensureDefault = useCallback(async () => {
-    if (!enabled || !campaignId || !userId) return
-    if (ensuredFor.current === campaignId) return
-    ensuredFor.current = campaignId
-    const { data } = await insforge.database
-      .from('placements')
-      .select('id')
-      .eq('campaign_id', campaignId)
-      .limit(1)
-    if (data && data.length > 0) return
-    await addPlacement(t('Primary'))
-  }, [campaignId, enabled, userId, addPlacement, t])
+  const ensureInFlight = useRef<Promise<string | null> | null>(null)
+  const ensureDefault = useCallback((
+    force = false,
+  ): Promise<string | null> => {
+    if ((!enabled && !force) || !campaignId || !userId) {
+      return Promise.resolve(null)
+    }
+    if (!force && ensuredFor.current === campaignId) {
+      return Promise.resolve(null)
+    }
+    if (ensureInFlight.current) return ensureInFlight.current
 
-  return { placements, reload, addPlacement, removePlacement, ensureDefault }
+    setDefaultPlacementError(null)
+    const operation = (async () => {
+      try {
+        const placementError = await ensureDefaultCampaignPlacement({
+          campaignId,
+          userId,
+          label: t('Primary'),
+        })
+        const reloadError = await reload(true)
+        const error = placementError ?? reloadError
+        if (!error) {
+          ensuredFor.current = campaignId
+          return null
+        }
+        ensuredFor.current = null
+        setDefaultPlacementError(error)
+        return error
+      } catch (cause) {
+        const error = cause instanceof Error ? cause.message : String(cause)
+        ensuredFor.current = null
+        setDefaultPlacementError(error)
+        return error
+      }
+    })()
+    ensureInFlight.current = operation
+    void operation.finally(() => {
+      if (ensureInFlight.current === operation) ensureInFlight.current = null
+    })
+    return operation
+  }, [campaignId, enabled, reload, t, userId])
+
+  useEffect(() => {
+    ensuredFor.current = null
+    ensureInFlight.current = null
+    setDefaultPlacementError(null)
+  }, [campaignId])
+
+  return {
+    placements,
+    reload,
+    addPlacement,
+    removePlacement,
+    ensureDefault,
+    defaultPlacementError,
+  }
 }

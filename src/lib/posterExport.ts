@@ -2,6 +2,7 @@ import {
   hasPosterQrBand,
   type PosterSize,
 } from './posterSize'
+import { isCampaignTrackingActive } from './trackingPolicy'
 import type { Campaign, Placement } from './types'
 
 export interface PosterExportPage {
@@ -67,6 +68,13 @@ export function buildPosterExportRunSnapshot({
   const runCampaign = campaign
   const includesQrBand = hasPosterQrBand(posterSize)
   const placementCode = placement?.code ?? null
+  if (
+    includesQrBand
+    && isCampaignTrackingActive(runCampaign)
+    && !placementCode
+  ) {
+    throw new RangeError('Tracked QR export requires a prepared placement code.')
+  }
   const selected = pageCount === null
     ? undefined
     : { pageIndex, pageCount }

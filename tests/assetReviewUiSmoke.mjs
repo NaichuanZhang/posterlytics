@@ -53,6 +53,7 @@ try {
   await testFailedGenerationDetails(browser)
   await testCampaignWizardUseCases(browser)
   await testCampaignWizardAccessibility(browser)
+  await testSocialCoverQrLifecycle(browser)
   await testCampaignWizardTextResize(browser)
   await testAmazonProductTitleAssist(browser)
   await testWebsiteCapturePreview(browser)
@@ -461,8 +462,19 @@ async function testCampaignWizardUseCases(browserInstance) {
   assert.equal(await page.locator('#destination-url').count(), 0)
   assert.equal(await page.locator('#cta-text').count(), 0)
   assert.equal(await page.locator('#platform-hint').count(), 1)
-  assert.equal(await page.locator('#poster-format option').count(), 1)
-  assert.equal(await page.locator('#poster-format').inputValue(), 'rednote_cover_3x4')
+  assert.equal(await page.locator('#poster-format').count(), 0)
+  const socialQrSwitch = page.getByRole('switch', {
+    name: /Add a tracked QR footer/,
+  })
+  assert.equal(await socialQrSwitch.isChecked(), false)
+  assert.equal(await page.locator('#social-cover-qr-destination').count(), 0)
+  await socialQrSwitch.click()
+  const socialDestination = page.locator('#social-cover-qr-destination')
+  await socialDestination.waitFor()
+  assert.equal(await socialDestination.getAttribute('required'), '')
+  assert.equal(await socialDestination.getAttribute('pattern'), 'https?://.+')
+  await socialQrSwitch.click()
+  assert.equal(await page.locator('#social-cover-qr-destination').count(), 0)
   const socialReferences = page.locator('section[aria-labelledby="references-heading"]')
   assert.equal(
     await socialReferences.locator('.generation-references label').first().innerText(),
@@ -512,6 +524,11 @@ async function testCampaignWizardUseCases(browserInstance) {
   await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
   await selectWizardUseCase(page, 'RedNote post')
   assert.equal(await page.locator('#poster-format').inputValue(), 'rednote_cover_3x4')
+  assert.equal(await page.locator('#poster-format option').count(), 1)
+  assert.equal(
+    await page.getByRole('switch', { name: /Add a tracked QR footer/ }).count(),
+    0,
+  )
   assert.equal(
     await page.getByText(
       'Artwork-only export. No QR code or placement tracking is included.',
@@ -723,8 +740,243 @@ async function testCampaignWizardAccessibility(browserInstance) {
   await socialPage.getByRole('heading', { name: 'Generation assets' }).waitFor()
   await waitForFocused(socialPage, '.asset-review-header h1')
   assert.deepEqual(socialState.enqueueModes, ['editor'])
+  const socialCreate = socialState.campaignWrites.find(
+    (write) => write.method === 'POST',
+  )
+  assert.ok(socialCreate)
+  assert.equal(socialCreate.body[0].poster_format, 'rednote_cover_3x4')
+  assert.equal(socialCreate.body[0].destination_url, null)
+  assert.deepEqual(socialState.placementWrites, [])
   assert.deepEqual(socialErrors, [])
   await socialContext.close()
+}
+
+async function testSocialCoverQrLifecycle(browserInstance) {
+  const wizardContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const wizardState = createState()
+  wizardState.placements = []
+  await installBackendMock(wizardContext, wizardState)
+  const wizardPage = await wizardContext.newPage()
+  const wizardErrors = []
+  wizardPage.on('pageerror', (error) => wizardErrors.push(error))
+
+  await openWizardForm(wizardPage, 'Social cover')
+  const wizardSwitch = wizardPage.getByRole('switch', {
+    name: /Add a tracked QR footer/,
+  })
+  assert.equal(await wizardSwitch.isChecked(), false)
+  await wizardPage.locator('#product-name').fill('Tracked social launch')
+  await wizardPage.getByTestId('reference-file-input')
+    .setInputFiles(referenceImageFile('tracked-social.png'))
+  await wizardPage.locator('.reference-tile').waitFor()
+  await wizardSwitch.click()
+
+  const wizardDestination = wizardPage.locator(
+    '#social-cover-qr-destination',
+  )
+  await wizardDestination.fill('ftp://example.com/not-trackable')
+  assert.equal(
+    await wizardDestination.evaluate((element) => element.checkValidity()),
+    false,
+  )
+  await wizardPage.getByRole('button', {
+    name: 'Generate poster',
+    exact: true,
+  }).click()
+  await waitForFocused(wizardPage, wizardDestination)
+  assert.deepEqual(wizardState.campaignWrites, [])
+
+  await wizardDestination.fill('https://example.com/social-launch')
+  await wizardPage.getByRole('button', {
+    name: 'Generate poster',
+    exact: true,
+  }).click()
+  await waitFor(() => wizardState.enqueueRequests.length === 1)
+
+  const wizardCreate = wizardState.campaignWrites.find(
+    (write) => write.method === 'POST',
+  )
+  assert.ok(wizardCreate)
+  assert.equal(wizardCreate.body.length, 1)
+  assert.equal(wizardCreate.body[0].poster_format, 'rednote_3x4')
+  assert.equal(
+    wizardCreate.body[0].destination_url,
+    'https://example.com/social-launch',
+  )
+  assert.equal(wizardState.placementWrites.length, 1)
+  assertOperationOrder(wizardState, [
+    'campaign-create',
+    'campaign-qr-update',
+    'placement-lookup',
+    'placement-create',
+    'enqueue',
+  ])
+  assert.deepEqual(wizardErrors, [])
+  await wizardContext.close()
+
+  const editorContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const editorState = createState({
+    editorReady: true,
+    placementCreateFailuresRemaining: 20,
+  })
+  configureSocialCoverState(editorState, { qrEnabled: false })
+  await installBackendMock(editorContext, editorState)
+  const editorPage = await editorContext.newPage()
+  const editorErrors = []
+  editorPage.on('pageerror', (error) => editorErrors.push(error))
+
+  await editorPage.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await editorPage.getByRole('heading', { name: 'Create next version' }).waitFor()
+  assert.deepEqual(
+    await editorPage.locator('.campaign-tabs a').allTextContents(),
+    ['Poster'],
+  )
+  assert.equal(
+    await editorPage.getByRole('button', { name: 'Publish', exact: true }).count(),
+    0,
+  )
+  assert.equal(await editorPage.locator('#next-poster-format').count(), 0)
+  await editorPage.locator('[data-poster-hero]').waitFor()
+
+  const editorSwitch = editorPage.getByRole('switch', {
+    name: /Add a tracked QR footer/,
+  })
+  assert.equal(await editorSwitch.isChecked(), false)
+  assert.equal(
+    await editorPage.getByRole('button', { name: 'Generate version' }).isEnabled(),
+    true,
+  )
+  await editorSwitch.click()
+  await editorPage.getByText(
+    'Save QR settings before generating a version.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await editorPage.getByRole('button', { name: 'Generate version' }).isDisabled(),
+    true,
+  )
+
+  const editorDestination = editorPage.locator(
+    '#editor-social-cover-qr-destination',
+  )
+  const saveSettings = editorPage.getByRole('button', {
+    name: 'Save QR settings',
+  })
+  assert.equal(await saveSettings.isDisabled(), true)
+  await editorDestination.fill('ftp://example.com/not-trackable')
+  assert.equal(await saveSettings.isDisabled(), true)
+  await editorDestination.fill(' https://example.com/editor-social ')
+  assert.equal(await saveSettings.isEnabled(), true)
+
+  editorState.operationLog.length = 0
+  await saveSettings.click()
+  await editorPage.getByText(
+    'QR settings were saved, but the primary placement could not be prepared.',
+    { exact: true },
+  ).first().waitFor()
+  assert.deepEqual(editorState.campaignWrites.at(-1), {
+    method: 'PATCH',
+    body: {
+      poster_format: 'rednote_3x4',
+      destination_url: 'https://example.com/editor-social',
+    },
+  })
+  assert.equal(editorState.campaign.poster_format, 'rednote_3x4')
+  assert.equal(
+    editorState.campaign.destination_url,
+    'https://example.com/editor-social',
+  )
+  assertOperationOrder(editorState, [
+    'campaign-qr-update',
+    'placement-lookup',
+    'placement-create',
+    'placement-refresh',
+    'campaign-read',
+  ])
+  await editorPage.getByRole('link', { name: 'Placements', exact: true })
+    .waitFor()
+  await editorPage.getByRole('link', { name: 'Analytics', exact: true })
+    .waitFor()
+  await editorPage.getByRole('button', { name: 'Publish', exact: true })
+    .waitFor()
+
+  await editorPage.waitForTimeout(80)
+  editorState.placementCreateFailuresRemaining = 0
+  editorState.operationLog.length = 0
+  await editorPage.locator('.editor-social-cover-qr')
+    .getByRole('button', { name: 'Retry primary placement' })
+    .click()
+  await editorPage.getByText('Primary placement ready.', { exact: true })
+    .waitFor()
+  await waitFor(() => editorState.placements.length === 1)
+  assertOperationOrder(editorState, [
+    'placement-lookup',
+    'placement-create',
+    'placement-refresh',
+    'campaign-read',
+  ])
+  assert.equal(
+    await editorPage.getByRole('button', { name: 'Generate version' }).isEnabled(),
+    true,
+  )
+  assert.deepEqual(editorErrors, [])
+  await editorContext.close()
+
+  const recoveryContext = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const recoveryState = createState({
+    editorReady: true,
+    placementCreateFailuresRemaining: 20,
+  })
+  configureSocialCoverState(recoveryState, { qrEnabled: true })
+  await installBackendMock(recoveryContext, recoveryState)
+  const recoveryPage = await recoveryContext.newPage()
+  const recoveryErrors = []
+  recoveryPage.on('pageerror', (error) => recoveryErrors.push(error))
+
+  await recoveryPage.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await recoveryPage.getByText(
+    'The primary placement could not be prepared.',
+    { exact: true },
+  ).first().waitFor()
+  const canvasRecovery = recoveryPage.locator('.canvas-placement-state')
+  await canvasRecovery.waitFor()
+  assert.equal(await recoveryPage.locator('[data-poster-hero]').count(), 0)
+  assert.equal(await recoveryPage.locator('[data-poster-footer]').count(), 0)
+  assert.equal(
+    await recoveryPage.locator('[data-poster-size="rednote_3x4"]').count(),
+    0,
+  )
+
+  await recoveryPage.waitForTimeout(80)
+  recoveryState.placementCreateFailuresRemaining = 0
+  recoveryState.operationLog.length = 0
+  await canvasRecovery.getByRole('button', {
+    name: 'Retry primary placement',
+  }).click()
+  await waitFor(() => recoveryState.placements.length === 1)
+  await recoveryPage.locator('[data-poster-size="rednote_3x4"]')
+    .first().waitFor()
+  await recoveryPage.locator('[data-poster-footer]').first().waitFor()
+  assertOperationOrder(recoveryState, [
+    'placement-lookup',
+    'placement-create',
+    'placement-refresh',
+    'campaign-read',
+  ])
+  assert.deepEqual(recoveryErrors, [])
+  await recoveryContext.close()
 }
 
 async function testCampaignWizardTextResize(browserInstance) {
@@ -2267,6 +2519,19 @@ async function testRedNoteBundledCjkFontAndExports(browserInstance) {
 
   await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
   await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  assert.equal(await page.locator('#next-poster-format option').count(), 1)
+  assert.equal(
+    await page.locator('#next-poster-format').inputValue(),
+    'rednote_cover_3x4',
+  )
+  assert.equal(
+    await page.getByRole('switch', { name: /Add a tracked QR footer/ }).count(),
+    0,
+  )
+  assert.equal(
+    await page.getByRole('button', { name: 'Publish', exact: true }).count(),
+    0,
+  )
   await page.addStyleTag({
     content:
       '[data-rednote-page-index] {'
@@ -3264,6 +3529,12 @@ async function installBackendMock(context, state) {
       }
       if (method === 'PATCH') {
         state.campaignWrites.push({ method, body })
+        if (
+          Object.hasOwn(body, 'poster_format')
+          && Object.hasOwn(body, 'destination_url')
+        ) {
+          state.operationLog.push({ type: 'campaign-qr-update' })
+        }
         if (Object.hasOwn(body, 'eager_capture_url')) {
           state.operationLog.push({
             type: body.eager_capture_url
@@ -3282,6 +3553,7 @@ async function installBackendMock(context, state) {
         Object.assign(state.campaign, body)
         return json(route, [])
       }
+      state.operationLog.push({ type: 'campaign-read' })
       return json(route, [state.campaign])
     }
     if (path === '/api/database/records/poster_generations') {
@@ -3311,6 +3583,31 @@ async function installBackendMock(context, state) {
       )
     }
     if (path === '/api/database/records/placements') {
+      if (request.method() === 'POST') {
+        state.placementWrites.push(body)
+        state.operationLog.push({ type: 'placement-create' })
+        if (state.placementCreateFailuresRemaining > 0) {
+          state.placementCreateFailuresRemaining -= 1
+          return json(route, {
+            error: 'DATABASE_ERROR',
+            message: 'Mock placement creation failed.',
+            statusCode: 500,
+          }, 500)
+        }
+        const values = body[0]
+        const placement = {
+          id: `placement-${state.placementWrites.length}`,
+          created_at: state.now,
+          ...values,
+        }
+        state.placements.push(placement)
+        return json(route, [placement])
+      }
+      state.operationLog.push({
+        type: requestUrl.searchParams.get('select') === 'id'
+          ? 'placement-lookup'
+          : 'placement-refresh',
+      })
       return json(route, state.placements)
     }
     return json(route, [])
@@ -3338,6 +3635,7 @@ function createState({
   editorReady = false,
   eagerCampaignUpdateFailuresRemaining = 0,
   enqueueFailuresRemaining = 0,
+  placementCreateFailuresRemaining = 0,
   saveFailuresRemaining = 0,
   storageUploadFailuresRemaining = 0,
 } = {}) {
@@ -3475,6 +3773,8 @@ function createState({
     readyGenerations: [],
     failedGenerations: [],
     operationLog: [],
+    placementCreateFailuresRemaining,
+    placementWrites: [],
     storageRemovals: [],
     storageUploads: [],
     storageUploadFailuresRemaining,
@@ -3484,6 +3784,32 @@ function createState({
   }
   applySelection(state, selectedIds)
   return state
+}
+
+function configureSocialCoverState(state, { qrEnabled }) {
+  const reference = {
+    key: 'references/user-asset/social.png',
+    url: `${BASE_URL}/fixture/poster.svg`,
+    name: 'social.png',
+    mime_type: 'image/png',
+    size_bytes: 120,
+  }
+  const posterFormat = qrEnabled ? 'rednote_3x4' : 'rednote_cover_3x4'
+  Object.assign(state.campaign, {
+    product_url: null,
+    destination_url: qrEnabled ? 'https://example.com/social' : null,
+    use_case: 'social_cover',
+    platform_hint: 'Instagram',
+    poster_format: posterFormat,
+    reference_images: [reference],
+  })
+  Object.assign(state.currentGeneration, {
+    use_case: 'social_cover',
+    platform_hint: 'Instagram',
+    poster_format: posterFormat,
+    reference_images: [reference],
+  })
+  state.placements = []
 }
 
 function createTraceFixtures(state) {
