@@ -56,6 +56,7 @@ export function SocialCoverQrSettings({
             type="url"
             inputMode="url"
             required
+            aria-required={true}
             pattern="https?://.+"
             disabled={disabled}
             placeholder={t('https://yourproduct.com')}

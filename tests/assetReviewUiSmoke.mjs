@@ -472,6 +472,7 @@ async function testCampaignWizardUseCases(browserInstance) {
   const socialDestination = page.locator('#social-cover-qr-destination')
   await socialDestination.waitFor()
   assert.equal(await socialDestination.getAttribute('required'), '')
+  assert.equal(await socialDestination.getAttribute('aria-required'), 'true')
   assert.equal(await socialDestination.getAttribute('pattern'), 'https?://.+')
   await socialQrSwitch.click()
   assert.equal(await page.locator('#social-cover-qr-destination').count(), 0)
@@ -497,6 +498,23 @@ async function testCampaignWizardUseCases(browserInstance) {
     await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
     ['Product source', 'Campaign action', 'Generation references'],
   )
+  for (const [selector, expectedRequired] of [
+    ['#product-url', true],
+    ['#product-name', true],
+    ['#cta-text', true],
+    ['#destination-url', true],
+    ['#tagline', false],
+  ]) {
+    const control = page.locator(selector)
+    assert.equal(
+      await control.evaluate((element) => element.required),
+      expectedRequired,
+    )
+    assert.equal(
+      await control.getAttribute('aria-required'),
+      String(expectedRequired),
+    )
+  }
   assert.equal(await page.locator('#product-url').getAttribute('placeholder'), 'https://yourproduct.com')
   assert.equal(
     await page.locator('#destination-url').getAttribute('placeholder'),

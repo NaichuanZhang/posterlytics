@@ -738,7 +738,7 @@ export function CampaignWizardPage() {
               <input
                 id="cta-text"
                 className="input"
-                required={fields.ctaText === 'required'}
+                {...requiredInputProps(fields.ctaText === 'required')}
                 placeholder={t('Start free trial')}
                 value={ctaText}
                 onChange={(event) => setCtaText(event.target.value)}
@@ -755,7 +755,7 @@ export function CampaignWizardPage() {
                 id="destination-url"
                 className="input"
                 type="url"
-                required={fields.destinationUrl === 'required'}
+                {...requiredInputProps(fields.destinationUrl === 'required')}
                 placeholder="https://yourproduct.com/signup"
                 value={destinationUrl}
                 onChange={(event) => setDestinationUrl(event.target.value)}
@@ -781,7 +781,7 @@ export function CampaignWizardPage() {
             <input
               id="tagline"
               className="input"
-              required={fields.tagline === 'required'}
+              {...requiredInputProps(fields.tagline === 'required')}
               placeholder={referenceOnlyMode
                 ? t('A short optional line')
                 : t('Reports your team can act on')}
@@ -1159,7 +1159,9 @@ export function CampaignWizardPage() {
                       id="product-url"
                       className="input"
                       type="url"
-                      required={inputFields.productUrl.requirement === 'required'}
+                      {...requiredInputProps(
+                        inputFields.productUrl.requirement === 'required',
+                      )}
                       placeholder={amazonListing
                         ? t('https://www.amazon.com/dp/B0EXAMPLE')
                         : 'https://yourproduct.com'}
@@ -1242,8 +1244,7 @@ export function CampaignWizardPage() {
                     <input
                       id="product-name"
                       className="input"
-                      required={inputFields.productName === 'required'}
-                      aria-required={productNameRequired}
+                      {...requiredInputProps(productNameRequired)}
                       aria-invalid={productNameValidity.invalid}
                       placeholder={referenceOnlyMode ? t('Summer launch cover') : 'Northstar Reports'}
                       value={productName}
@@ -1464,6 +1465,13 @@ function summarizeUrl(value: string) {
 
 function isAbortError(value: unknown): boolean {
   return value instanceof DOMException && value.name === 'AbortError'
+}
+
+function requiredInputProps(required: boolean) {
+  return {
+    required,
+    'aria-required': required,
+  }
 }
 
 function FieldRequirement({
