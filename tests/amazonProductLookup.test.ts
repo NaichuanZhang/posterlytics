@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
+  MAX_AMAZON_PRODUCT_HTML_BYTES,
   fetchAmazonProductPage,
   lookupAmazonProductTitle,
   validateAmazonProductLookupRequest,
@@ -9,6 +10,7 @@ import {
 import {
   createAmazonProductLookupHandler,
 } from '../functions/amazon-product-lookup.ts'
+import { extractAmazonProductTitle } from '../src/lib/amazonProduct.ts'
 import type { CaptureResult } from '../functions/_shared.ts'
 
 const ASIN = 'B0TITLE001'
@@ -114,7 +116,7 @@ test('Amazon HTML fetch blocks unsafe redirect DNS before the second request', a
   }
 })
 
-test('Amazon HTML fetch rejects non-Amazon redirects, ASIN changes, and oversized bodies', async () => {
+test('Amazon HTML fetch rejects unsafe redirects and ASIN changes', async () => {
   let fetchCalls = 0
   await assert.rejects(
     fetchAmazonProductPage(CANONICAL_URL, ASIN, {
@@ -141,14 +143,98 @@ test('Amazon HTML fetch rejects non-Amazon redirects, ASIN changes, and oversize
         : htmlResponse(fixture('product-title.html')),
     }),
   )
+})
 
-  await assert.rejects(
-    fetchAmazonProductPage(CANONICAL_URL, ASIN, {
-      resolveHostname: resolvePublic,
-      maxBytes: 16,
-      fetchImpl: async () => htmlResponse('x'.repeat(17)),
+test('Amazon HTML fetch truncates at the exact byte cap and cancels the stream', async () => {
+  const retainedPrefix =
+    '<html><body><span id="productTitle">Early Product Title</span>'
+  const maxBytes = retainedPrefix.length
+  const body = `${retainedPrefix}${'x'.repeat(64)}</body></html>`
+  const encodedBody = new TextEncoder().encode(body)
+  let streamCancelled = false
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encodedBody)
+    },
+    cancel() {
+      streamCancelled = true
+    },
+  })
+
+  const result = await fetchAmazonProductPage(CANONICAL_URL, ASIN, {
+    resolveHostname: resolvePublic,
+    maxBytes,
+    fetchImpl: async () => new Response(stream, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Length': String(encodedBody.byteLength),
+      },
     }),
+  })
+
+  assert.equal(result.html.length, maxBytes)
+  assert.equal(result.html, body.slice(0, maxBytes))
+  assert.equal(extractAmazonProductTitle(result.html), 'Early Product Title')
+  assert.equal(streamCancelled, true)
+})
+
+test('Amazon lookup finds a title in an oversized retained prefix without capture', async () => {
+  const documentStart = '<html><body>'
+  const titleOffset = 446_000
+  const beforeTitle =
+    documentStart + 'x'.repeat(titleOffset - documentStart.length)
+  const titleMarkup =
+    '<span id="productTitle">Real Product Name</span>'
+  const body = beforeTitle
+    + titleMarkup
+    + 'x'.repeat(
+      MAX_AMAZON_PRODUCT_HTML_BYTES
+        - beforeTitle.length
+        - titleMarkup.length
+        + 128,
+    )
+    + '</body></html>'
+
+  assert.equal(body.indexOf(titleMarkup), titleOffset)
+  assert.ok(body.length > MAX_AMAZON_PRODUCT_HTML_BYTES)
+
+  const result = await lookupAmazonProductTitle(
+    { asin: ASIN, canonicalUrl: CANONICAL_URL },
+    {
+      resolveHostname: resolvePublic,
+      fetchImpl: async () => htmlResponse(body),
+      capture: async () => {
+        throw new Error('Capture unavailable.')
+      },
+    },
   )
+
+  assert.deepEqual(result, {
+    status: 'found',
+    title: 'Real Product Name',
+  })
+})
+
+test('Amazon lookup treats an oversized CAPTCHA prefix as unavailable', async () => {
+  const captcha = fixture('captcha.html')
+  const body = captcha
+    + 'x'.repeat(MAX_AMAZON_PRODUCT_HTML_BYTES - captcha.length + 128)
+
+  assert.ok(body.length > MAX_AMAZON_PRODUCT_HTML_BYTES)
+
+  const result = await lookupAmazonProductTitle(
+    { asin: ASIN, canonicalUrl: CANONICAL_URL },
+    {
+      resolveHostname: resolvePublic,
+      fetchImpl: async () => htmlResponse(body),
+      capture: async () => {
+        throw new Error('Capture unavailable.')
+      },
+    },
+  )
+
+  assert.deepEqual(result, { status: 'unavailable' })
 })
 
 test('Amazon lookup prefers HTML title evidence while starting capture concurrently', async () => {

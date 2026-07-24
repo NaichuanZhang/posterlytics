@@ -350,25 +350,26 @@ async function readBoundedHtml(
   response: Response,
   maxBytes: number,
 ): Promise<string> {
-  const contentLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new Error('Amazon product response exceeded the size limit.');
-  }
   if (!response.body) throw new Error('Amazon product response was empty.');
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
+  while (total < maxBytes) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > maxBytes) {
+    if (!value || value.byteLength === 0) continue;
+
+    const remaining = maxBytes - total;
+    const retained = value.byteLength > remaining
+      ? value.slice(0, remaining)
+      : value;
+    chunks.push(retained);
+    total += retained.byteLength;
+    if (total === maxBytes) {
       await reader.cancel().catch(() => {});
-      throw new Error('Amazon product response exceeded the size limit.');
+      break;
     }
-    chunks.push(value);
   }
   if (total === 0) throw new Error('Amazon product response was empty.');
 
