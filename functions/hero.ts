@@ -479,14 +479,23 @@ export async function runHeroStage(
     return jsonResponse({ error: details.message, code: details.code, retryable: details.retryable }, 502);
   }
 
+  interface UploadedPoster {
+    url: string;
+    key: string;
+    mimeType: string;
+    sizeBytes: number;
+  }
+
   const posterKey = `poster/${campaign.id}/${generation.id}/poster.png`;
+  const retryPosterKey =
+    `poster/${campaign.id}/${generation.id}/poster.retry.png`;
   const uploadPosterBlob = async (
     blob: Blob,
-  ): Promise<{ url: string; key: string }> => {
-    await client.storage.from('assets').remove(posterKey).catch(() => {});
+    objectKey: string,
+  ): Promise<UploadedPoster> => {
     const { data, error } = await client.storage
       .from('assets')
-      .upload(posterKey, blob);
+      .upload(objectKey, blob);
     if (error || !data) {
       const uploadError = new Error(error?.message ?? 'upload failed') as Error & {
         code?: string;
@@ -494,21 +503,18 @@ export async function runHeroStage(
       uploadError.code = 'poster_upload_failed';
       throw uploadError;
     }
-    return { url: data.url, key: data.key };
+    return {
+      url: data.url,
+      key: data.key,
+      mimeType: blob.type || 'image/png',
+      sizeBytes: blob.size,
+    };
   };
 
-  let initialBlob: Blob;
-  let url: string;
-  let key: string;
-  let posterMimeType = 'image/png';
-  let posterSizeBytes = 0;
+  let initialPoster: UploadedPoster;
   try {
-    initialBlob = await imageSourceToBlob(imageSource);
-    posterMimeType = initialBlob.type || posterMimeType;
-    posterSizeBytes = initialBlob.size;
-    const uploaded = await uploadPosterBlob(initialBlob);
-    url = uploaded.url;
-    key = uploaded.key;
+    const initialBlob = await imageSourceToBlob(imageSource);
+    initialPoster = await uploadPosterBlob(initialBlob, posterKey);
   } catch (e) {
     if (finalizeFailure) {
       await trace.fail(e, 'poster_upload_failed');
@@ -532,6 +538,8 @@ export async function runHeroStage(
     });
     return jsonResponse({ error: String(e) }, 500);
   }
+  let selectedPoster = initialPoster;
+  let unselectedPosterKey: string | null = null;
 
   let painterValidationMetadata: Record<string, unknown> | null = null;
   if (painterValidationEnabled()) {
@@ -600,7 +608,7 @@ export async function runHeroStage(
     try {
       validationCalls += 1;
       initialVerdict = await validateUploadedPoster(
-        url,
+        selectedPoster.url,
         initialPrompt,
         'initial',
       );
@@ -634,18 +642,16 @@ export async function runHeroStage(
         } else {
           retryAttempted = true;
           const retryPrompt = buildAttemptPrompt(detectedClasses);
-          let retryUpload: {
-            url: string;
-            key: string;
-            blob: Blob;
-          } | null = null;
-          let keepRetryUpload = false;
 
           try {
             const retrySource = await paintPoster(retryPrompt, true);
             const retryBlob = await imageSourceToBlob(retrySource);
-            const uploadedRetry = await uploadPosterBlob(retryBlob);
-            retryUpload = { ...uploadedRetry, blob: retryBlob };
+            unselectedPosterKey = retryPosterKey;
+            const uploadedRetry = await uploadPosterBlob(
+              retryBlob,
+              retryPosterKey,
+            );
+            unselectedPosterKey = uploadedRetry.key;
 
             validationCalls += 1;
             retryVerdict = await validateUploadedPoster(
@@ -655,13 +661,10 @@ export async function runHeroStage(
             );
             const retryArtifacts = classifyDetectedArtifacts(retryVerdict);
             if (retryArtifacts.length === 0) {
-              keepRetryUpload = true;
               selectedAttempt = 'retry';
               selectedPrompt = retryPrompt;
-              url = uploadedRetry.url;
-              key = uploadedRetry.key;
-              posterMimeType = retryBlob.type || 'image/png';
-              posterSizeBytes = retryBlob.size;
+              selectedPoster = uploadedRetry;
+              unselectedPosterKey = initialPoster.key;
               outcome = 'corrected';
             } else {
               outcome = 'residual';
@@ -672,7 +675,7 @@ export async function runHeroStage(
                 status: 'degraded',
                 code: 'painter_artifact_residual',
                 detail:
-                  `The single retry still contained: ${retryArtifacts.join(', ')}; restoring the initial poster.`,
+                  `The single retry still contained: ${retryArtifacts.join(', ')}; keeping the initial poster.`,
               });
             }
           } catch (retryError) {
@@ -683,38 +686,9 @@ export async function runHeroStage(
               generationId: generation.id,
               status: 'degraded',
               code: 'painter_artifact_retry_failed',
-              detail: 'The single painter artifact retry failed; restoring the initial poster.',
+              detail: 'The single painter artifact retry failed; keeping the initial poster.',
               error: retryError,
             });
-          } finally {
-            if (retryUpload && !keepRetryUpload) {
-              try {
-                const restored = await uploadPosterBlob(initialBlob);
-                url = restored.url;
-                key = restored.key;
-                selectedAttempt = 'initial';
-                selectedPrompt = initialPrompt;
-                posterMimeType = initialBlob.type || 'image/png';
-                posterSizeBytes = initialBlob.size;
-              } catch (restoreError) {
-                selectedAttempt = 'retry';
-                selectedPrompt = retryPrompt;
-                url = retryUpload.url;
-                key = retryUpload.key;
-                posterMimeType = retryUpload.blob.type || 'image/png';
-                posterSizeBytes = retryUpload.blob.size;
-                outcome = 'retry_failed';
-                logPipelineEvent({
-                  source: 'hero',
-                  campaignId: campaign.id,
-                  generationId: generation.id,
-                  status: 'degraded',
-                  code: 'painter_artifact_retry_failed',
-                  detail: 'The initial poster could not be restored after retry validation; persisting the available retry poster.',
-                  error: restoreError,
-                });
-              }
-            }
           }
         }
       }
@@ -747,27 +721,27 @@ export async function runHeroStage(
 
   await trace.addArtifact({
     kind: 'poster',
-    url,
-    key,
-    mime_type: posterMimeType,
-    size_bytes: posterSizeBytes,
+    url: selectedPoster.url,
+    key: selectedPoster.key,
+    mime_type: selectedPoster.mimeType,
+    size_bytes: selectedPoster.sizeBytes,
   });
 
   const completionRpc = serverOwned
     ? client.database.rpc('complete_poster_generation_for_worker', {
         p_generation_id: generation.id,
         p_user_id: userId,
-        p_hero_image_url: url,
-        p_hero_image_key: key,
+        p_hero_image_url: selectedPoster.url,
+        p_hero_image_key: selectedPoster.key,
       })
     : client.database.rpc('complete_poster_generation', {
         p_generation_id: generation.id,
-        p_hero_image_url: url,
-        p_hero_image_key: key,
+        p_hero_image_url: selectedPoster.url,
+        p_hero_image_key: selectedPoster.key,
       });
   const { data: completedGeneration, error: completeError } = await completionRpc;
   if (completeError) {
-    await client.storage.from('assets').remove(key).catch(() => {});
+    await client.storage.from('assets').remove(selectedPoster.key).catch(() => {});
     if (finalizeFailure) {
       await trace.fail(completeError, 'generation_completion_failed');
       await markGenerationFailed(
@@ -790,6 +764,28 @@ export async function runHeroStage(
     });
     return jsonResponse({ error: completeError.message }, 500);
   }
+  if (
+    unselectedPosterKey
+    && unselectedPosterKey !== selectedPoster.key
+  ) {
+    try {
+      const { error: cleanupError } = await client.storage
+        .from('assets')
+        .remove(unselectedPosterKey);
+      if (cleanupError) throw cleanupError;
+    } catch (cleanupError) {
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        generationId: generation.id,
+        status: 'degraded',
+        code: 'painter_artifact_loser_cleanup_failed',
+        detail:
+          'The unselected poster could not be deleted after generation completion.',
+        error: cleanupError,
+      });
+    }
+  }
   if (painterValidationMetadata) {
     await trace.succeed({ painter_validation: painterValidationMetadata });
   } else {
@@ -798,7 +794,7 @@ export async function runHeroStage(
 
   // Return the compiled text-to-image prompt for the generation loading UI.
   return jsonResponse({
-    poster_image_url: url,
+    poster_image_url: selectedPoster.url,
     generation: completedGeneration,
     prompt: { image: selectedPrompt },
   });

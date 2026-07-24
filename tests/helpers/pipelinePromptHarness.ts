@@ -36,6 +36,9 @@ interface HarnessState {
   storageUploadBodies: Array<{ key: string; bytes: number[] }>
   storageRemovals: string[]
   storageObjects: Map<string, number[]>
+  failStorageUploadKeys: Set<string>
+  failStorageRemoveKeys: Set<string>
+  operationLog: string[]
   sourceHtmlOverride: string | null
   imageUrls: Set<string>
   sourceImageRequests: string[]
@@ -104,7 +107,11 @@ export interface HeroArtifactValidationDiagnostics {
   chatBodies: Array<Record<string, unknown>>
   storageUploads: string[]
   storageRemovals: string[]
+  initialPosterKey: string
+  retryPosterKey: string
+  storedPosterKeys: string[]
   finalPosterBytes: number[] | null
+  operationLog: string[]
   warningLogs: string[]
   rpcCalls: string[]
   modelCalls: unknown[]
@@ -114,6 +121,10 @@ export interface HeroArtifactValidationDiagnostics {
 const USER_ID = 'user-fixture'
 const CAMPAIGN_ID = 'campaign-fixture'
 const GENERATION_ID = 'generation-fixture'
+export const HERO_FIXTURE_POSTER_KEY =
+  `poster/${CAMPAIGN_ID}/${GENERATION_ID}/poster.png`
+export const HERO_FIXTURE_RETRY_POSTER_KEY =
+  `poster/${CAMPAIGN_ID}/${GENERATION_ID}/poster.retry.png`
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const CAPTURE_SERVICE_URL = 'https://capture.fixture'
 const SOCIAL_REFERENCE_URL = 'https://assets.example/social-reference.png'
@@ -734,6 +745,8 @@ export async function captureHeroArtifactValidationDiagnostics(
     painterValidationEnabled?: string
     serverOwned?: boolean
     finalizeFailure?: boolean
+    failStorageUploadKeys?: readonly string[]
+    failStorageRemoveKeys?: readonly string[]
   } = {},
 ): Promise<HeroArtifactValidationDiagnostics> {
   const state = createState(
@@ -746,6 +759,8 @@ export async function captureHeroArtifactValidationDiagnostics(
     'data:image/png;base64,Ag==',
   ])]
   state.painterValidationEnabled = options.painterValidationEnabled
+  state.failStorageUploadKeys = new Set(options.failStorageUploadKeys)
+  state.failStorageRemoveKeys = new Set(options.failStorageRemoveKeys)
   const chatFixtures: ChatFixture[] = [
     ...(options.chatResponses ?? [CLEAN_PAINTER_VERDICT]),
   ].map((fixture, index) =>
@@ -766,7 +781,9 @@ export async function captureHeroArtifactValidationDiagnostics(
   const payload = await response.json() as {
     prompt?: { image?: unknown }
   }
-  const posterKey = `poster/${CAMPAIGN_ID}/${GENERATION_ID}/poster.png`
+  const selectedPosterKey = typeof state.generation.hero_image_key === 'string'
+    ? state.generation.hero_image_key
+    : null
   const traceMetadata = state.traces.hero.failure_metadata?.painter_validation
 
   return {
@@ -787,7 +804,13 @@ export async function captureHeroArtifactValidationDiagnostics(
     )),
     storageUploads: [...state.storageUploads],
     storageRemovals: [...state.storageRemovals],
-    finalPosterBytes: state.storageObjects.get(posterKey) ?? null,
+    initialPosterKey: HERO_FIXTURE_POSTER_KEY,
+    retryPosterKey: HERO_FIXTURE_RETRY_POSTER_KEY,
+    storedPosterKeys: [...state.storageObjects.keys()].sort(),
+    finalPosterBytes: selectedPosterKey
+      ? state.storageObjects.get(selectedPosterKey) ?? null
+      : null,
+    operationLog: [...state.operationLog],
     warningLogs: [...state.warningLogs],
     rpcCalls: [...state.rpcCalls],
     modelCalls: structuredClone(state.traces.hero.model_calls),
@@ -1033,6 +1056,9 @@ function createState(
     storageUploadBodies: [],
     storageRemovals: [],
     storageObjects: new Map(),
+    failStorageUploadKeys: new Set(),
+    failStorageRemoveKeys: new Set(),
+    operationLog: [],
     sourceHtmlOverride: null,
     imageUrls: new Set(),
     sourceImageRequests: [],
@@ -1054,6 +1080,7 @@ function createHarnessClient(state: HarnessState) {
       },
       async rpc(name: string, args: Record<string, unknown> = {}) {
         state.rpcCalls.push(name)
+        state.operationLog.push(`rpc:${name}`)
         if (
           name === 'complete_poster_generation_for_worker'
           || name === 'complete_poster_generation'
@@ -1082,13 +1109,27 @@ function createHarnessClient(state: HarnessState) {
         return {
           async remove(key: string) {
             state.storageRemovals.push(key)
+            state.operationLog.push(`storage.remove:${key}`)
+            if (state.failStorageRemoveKeys.has(key)) {
+              return {
+                data: null,
+                error: { message: `Fixture storage remove failure for ${key}` },
+              }
+            }
             state.storageObjects.delete(key)
             return { data: null, error: null }
           },
           async upload(key: string, file: Blob) {
+            state.operationLog.push(`storage.upload:${key}`)
             const bytes = Array.from(new Uint8Array(await file.arrayBuffer()))
             state.storageUploads.push(key)
             state.storageUploadBodies.push({ key, bytes })
+            if (state.failStorageUploadKeys.has(key)) {
+              return {
+                data: null,
+                error: { message: `Fixture storage upload failure for ${key}` },
+              }
+            }
             state.storageObjects.set(key, bytes)
             const url = `https://assets.example/${key}`
             state.imageUrls.add(url)

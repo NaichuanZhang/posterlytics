@@ -1,5 +1,4 @@
 import {
-  extractJson,
   resolvedChatModelId,
   userContentWithImages,
   type TraceContentManifestEntry,
@@ -11,6 +10,7 @@ export const PAINTER_RETRY_START_DEADLINE_MS = 105_000;
 
 const MAX_VERDICT_BYTES = 4 * 1024;
 const MAX_NOTES_CODE_POINTS = 240;
+const SINGLE_JSON_FENCE = /^```json[ \t]*\r?\n([\s\S]*?)\r?\n```$/iu;
 
 export type PainterArtifactClass =
   | 'decorative_glyphs'
@@ -123,9 +123,20 @@ export function parsePainterArtifactVerdict(
     throw invalidVerdict('Painter artifact verdict exceeded 4 KiB.');
   }
 
+  const trimmed = raw.trim();
+  const fenced = SINGLE_JSON_FENCE.exec(trimmed);
+  if (trimmed.includes('```')) {
+    const fenceMarkers = trimmed.match(/```/gu) ?? [];
+    if (!fenced || fenceMarkers.length !== 2) {
+      throw invalidVerdict(
+        'Painter artifact verdict must be bare JSON or one JSON code fence.',
+      );
+    }
+  }
+
   let parsed: unknown;
   try {
-    parsed = extractJson(raw);
+    parsed = JSON.parse(fenced ? fenced[1].trim() : trimmed);
   } catch (error) {
     throw invalidVerdict(
       error instanceof Error ? error.message : 'Painter artifact verdict was not JSON.',
@@ -166,6 +177,9 @@ export function parsePainterArtifactVerdict(
     || record.has_adjacent_duplicate_words;
   if (hasArtifact && !notes) {
     throw invalidVerdict('A positive painter artifact verdict requires notes.');
+  }
+  if (!hasArtifact && notes) {
+    throw invalidVerdict('A clean painter artifact verdict requires empty notes.');
   }
 
   return {

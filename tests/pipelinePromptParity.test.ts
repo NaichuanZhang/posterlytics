@@ -2,12 +2,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
+  HERO_FIXTURE_POSTER_KEY,
+  HERO_FIXTURE_RETRY_POSTER_KEY,
   captureEmojiStrippedHeroPrompt,
   captureRedNoteAnalyzeFallbackDiagnostics,
   captureAnalyzeSourceMode,
   captureCurrentPipelinePromptGoldens,
   captureHeroArtifactValidationDiagnostics,
   captureRedNotePipelineDiagnostics,
+  type HeroArtifactValidationDiagnostics,
   type PipelinePromptGoldens,
 } from './helpers/pipelinePromptHarness.ts'
 import {
@@ -227,6 +230,23 @@ test('hero stage strips source-approved emoji from the returned painter prompt',
   )
 })
 
+test('hero validation keeps a clean initial poster at the canonical key', async () => {
+  const result = await captureHeroArtifactValidationDiagnostics()
+
+  assert.equal(result.responseStatus, 200)
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 1)
+  assert.equal(result.chatRequests, 1)
+  assert.equal(result.responsePrompt, expected.hero.website_product)
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageUploads, [HERO_FIXTURE_POSTER_KEY])
+  assert.deepEqual(result.storageRemovals, [])
+  assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_POSTER_KEY])
+  assert.equal(result.traceMetadata.outcome, 'clean')
+  assert.equal(result.traceMetadata.selected_attempt, 'initial')
+  assert.equal(result.traceMetadata.validation_calls, 1)
+})
+
 test('hero validation retries once on detected pixels and accepts only a clean uploaded replacement', async () => {
   const result = await captureHeroArtifactValidationDiagnostics({
     chatResponses: [
@@ -255,9 +275,20 @@ test('hero validation retries once on detected pixels and accepts only a clean u
   assert.match(result.imagePrompts[1], /decorative icon glyphs/)
   assert.doesNotMatch(result.imagePrompts[1], /Brain icon beside/)
   assert.equal(result.responsePrompt, result.imagePrompts[1])
-  assert.deepEqual(result.finalPosterBytes, [2])
-  assert.equal(new Set(result.storageUploads).size, 1)
-  assert.equal(result.storageUploads.length, 2)
+  assertSelectedPoster(result, HERO_FIXTURE_RETRY_POSTER_KEY, [2])
+  assert.deepEqual(result.storageUploads, [
+    HERO_FIXTURE_POSTER_KEY,
+    HERO_FIXTURE_RETRY_POSTER_KEY,
+  ])
+  assert.deepEqual(result.storageRemovals, [HERO_FIXTURE_POSTER_KEY])
+  assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_RETRY_POSTER_KEY])
+  assert.deepEqual(result.operationLog, [
+    `storage.upload:${HERO_FIXTURE_POSTER_KEY}`,
+    `storage.upload:${HERO_FIXTURE_RETRY_POSTER_KEY}`,
+    'rpc:complete_poster_generation_for_worker',
+    `storage.remove:${HERO_FIXTURE_POSTER_KEY}`,
+  ])
+  assertCompletionPrecedesRemoval(result, HERO_FIXTURE_POSTER_KEY)
   assert.deepEqual(result.rpcCalls, ['complete_poster_generation_for_worker'])
   assert.deepEqual(
     (result.modelCalls as Array<{ operation: string }>).map((call) => call.operation),
@@ -270,6 +301,8 @@ test('hero validation retries once on detected pixels and accepts only a clean u
     JSON.stringify(result.modelCalls).includes('data:image'),
     false,
   )
+  assert.match(chatImageUrl(result.chatBodies[0]), /\/poster\.png\?/)
+  assert.match(chatImageUrl(result.chatBodies[1]), /\/poster\.retry\.png\?/)
   for (const body of result.chatBodies) {
     assert.match(chatImageUrl(body), /^https:\/\/assets\.example\//)
     assert.doesNotMatch(chatImageUrl(body), /^data:/)
@@ -291,8 +324,10 @@ test('hero validation failure is fail-open in worker and standalone modes', asyn
     assert.equal(result.generationStatus, 'ready')
     assert.equal(result.imageRequests, 1)
     assert.equal(result.chatRequests, 1)
-    assert.equal(result.storageUploads.length, 1)
-    assert.deepEqual(result.finalPosterBytes, [1])
+    assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+    assert.deepEqual(result.storageUploads, [HERO_FIXTURE_POSTER_KEY])
+    assert.deepEqual(result.storageRemovals, [])
+    assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_POSTER_KEY])
     assert.deepEqual(result.rpcCalls, [mode.rpc])
     assert.equal(result.traceMetadata.outcome, 'unavailable')
     assert.equal(result.traceMetadata.selected_attempt, 'initial')
@@ -300,7 +335,7 @@ test('hero validation failure is fail-open in worker and standalone modes', asyn
   }
 })
 
-test('residual retry restores and persists the initial uploaded poster', async () => {
+test('residual retry keeps the initial poster and deletes the candidate', async () => {
   const artifactVerdict = {
     has_decorative_glyphs: false,
     has_slot_label_words: false,
@@ -314,9 +349,14 @@ test('residual retry restores and persists the initial uploaded poster', async (
   assert.equal(result.generationStatus, 'ready')
   assert.equal(result.imageRequests, 2)
   assert.equal(result.chatRequests, 2)
-  assert.equal(result.storageUploads.length, 3)
-  assert.equal(new Set(result.storageUploads).size, 1)
-  assert.deepEqual(result.finalPosterBytes, [1])
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageUploads, [
+    HERO_FIXTURE_POSTER_KEY,
+    HERO_FIXTURE_RETRY_POSTER_KEY,
+  ])
+  assert.deepEqual(result.storageRemovals, [HERO_FIXTURE_RETRY_POSTER_KEY])
+  assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_POSTER_KEY])
+  assertCompletionPrecedesRemoval(result, HERO_FIXTURE_RETRY_POSTER_KEY)
   assert.equal(result.responsePrompt, result.imagePrompts[0])
   assert.equal(result.traceMetadata.outcome, 'residual')
   assert.equal(result.traceMetadata.selected_attempt, 'initial')
@@ -325,6 +365,34 @@ test('residual retry restores and persists the initial uploaded poster', async (
     (result.modelCalls as Array<{ operation: string }>).map((call) => call.operation),
     ['image', 'chat', 'image', 'chat'],
   )
+})
+
+test('retry upload failure keeps the initial poster and cleans the candidate key', async () => {
+  const result = await captureHeroArtifactValidationDiagnostics({
+    chatResponses: [{
+      has_decorative_glyphs: true,
+      has_slot_label_words: false,
+      has_adjacent_duplicate_words: false,
+      notes: 'Brain icon beside the first bullet.',
+    }],
+    failStorageUploadKeys: [HERO_FIXTURE_RETRY_POSTER_KEY],
+  })
+
+  assert.equal(result.responseStatus, 200)
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 2)
+  assert.equal(result.chatRequests, 1)
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageUploads, [
+    HERO_FIXTURE_POSTER_KEY,
+    HERO_FIXTURE_RETRY_POSTER_KEY,
+  ])
+  assert.deepEqual(result.storageRemovals, [HERO_FIXTURE_RETRY_POSTER_KEY])
+  assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_POSTER_KEY])
+  assertCompletionPrecedesRemoval(result, HERO_FIXTURE_RETRY_POSTER_KEY)
+  assert.equal(result.traceMetadata.outcome, 'retry_failed')
+  assert.equal(result.traceMetadata.selected_attempt, 'initial')
+  assert.match(result.warningLogs.join('\n'), /painter_artifact_retry_failed/)
 })
 
 test('retry decode failure keeps the initial uploaded poster', async () => {
@@ -344,11 +412,79 @@ test('retry decode failure keeps the initial uploaded poster', async () => {
   assert.equal(result.generationStatus, 'ready')
   assert.equal(result.imageRequests, 2)
   assert.equal(result.chatRequests, 1)
-  assert.equal(result.storageUploads.length, 1)
-  assert.deepEqual(result.finalPosterBytes, [1])
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageUploads, [HERO_FIXTURE_POSTER_KEY])
+  assert.deepEqual(result.storageRemovals, [])
+  assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_POSTER_KEY])
   assert.equal(result.traceMetadata.outcome, 'retry_failed')
   assert.equal(result.traceMetadata.selected_attempt, 'initial')
   assert.match(result.warningLogs.join('\n'), /painter_artifact_retry_failed/)
+})
+
+test('retry judge failure keeps the initial poster and deletes the uploaded candidate', async () => {
+  const result = await captureHeroArtifactValidationDiagnostics({
+    chatResponses: [
+      {
+        has_decorative_glyphs: false,
+        has_slot_label_words: true,
+        has_adjacent_duplicate_words: false,
+        notes: 'CTA appears in the lower corner.',
+      },
+      {
+        has_decorative_glyphs: false,
+        has_slot_label_words: false,
+        has_adjacent_duplicate_words: false,
+        notes: '',
+      },
+    ],
+    failChatAt: 1,
+  })
+
+  assert.equal(result.responseStatus, 200)
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 2)
+  assert.equal(result.chatRequests, 2)
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageUploads, [
+    HERO_FIXTURE_POSTER_KEY,
+    HERO_FIXTURE_RETRY_POSTER_KEY,
+  ])
+  assert.deepEqual(result.storageRemovals, [HERO_FIXTURE_RETRY_POSTER_KEY])
+  assert.deepEqual(result.storedPosterKeys, [HERO_FIXTURE_POSTER_KEY])
+  assertCompletionPrecedesRemoval(result, HERO_FIXTURE_RETRY_POSTER_KEY)
+  assert.equal(result.traceMetadata.outcome, 'retry_failed')
+  assert.equal(result.traceMetadata.selected_attempt, 'initial')
+  assert.equal(result.traceMetadata.validation_calls, 2)
+  assert.match(result.warningLogs.join('\n'), /painter_artifact_retry_failed/)
+})
+
+test('loser cleanup failure is logged without changing the ready selection', async () => {
+  const artifactVerdict = {
+    has_decorative_glyphs: false,
+    has_slot_label_words: false,
+    has_adjacent_duplicate_words: true,
+    notes: 'The lower line reads management management.',
+  }
+  const result = await captureHeroArtifactValidationDiagnostics({
+    chatResponses: [artifactVerdict, artifactVerdict],
+    failStorageRemoveKeys: [HERO_FIXTURE_RETRY_POSTER_KEY],
+  })
+
+  assert.equal(result.responseStatus, 200)
+  assert.equal(result.generationStatus, 'ready')
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageRemovals, [HERO_FIXTURE_RETRY_POSTER_KEY])
+  assert.deepEqual(result.storedPosterKeys, [
+    HERO_FIXTURE_POSTER_KEY,
+    HERO_FIXTURE_RETRY_POSTER_KEY,
+  ])
+  assertCompletionPrecedesRemoval(result, HERO_FIXTURE_RETRY_POSTER_KEY)
+  assert.equal(result.traceMetadata.outcome, 'residual')
+  assert.equal(result.traceMetadata.selected_attempt, 'initial')
+  assert.match(
+    result.warningLogs.join('\n'),
+    /painter_artifact_loser_cleanup_failed/,
+  )
 })
 
 test('painter validation kill switch preserves the pre-validation hero path', async () => {
@@ -360,8 +496,9 @@ test('painter validation kill switch preserves the pre-validation hero path', as
   assert.equal(result.imageRequests, 1)
   assert.equal(result.chatRequests, 0)
   assert.equal(result.responsePrompt, expected.hero.website_product)
-  assert.equal(result.storageUploads.length, 1)
-  assert.deepEqual(result.finalPosterBytes, [1])
+  assertSelectedPoster(result, HERO_FIXTURE_POSTER_KEY, [1])
+  assert.deepEqual(result.storageUploads, [HERO_FIXTURE_POSTER_KEY])
+  assert.deepEqual(result.storageRemovals, [])
   assert.deepEqual(result.traceMetadata, {})
 })
 
@@ -394,6 +531,31 @@ function chatImageUrl(body: Record<string, unknown>): string {
   return typeof image?.image_url?.url === 'string'
     ? image.image_url.url
     : ''
+}
+
+function assertSelectedPoster(
+  result: HeroArtifactValidationDiagnostics,
+  expectedKey: string,
+  expectedBytes: number[],
+): void {
+  assert.equal(result.heroImageKey, expectedKey)
+  assert.deepEqual(result.finalPosterBytes, expectedBytes)
+  assert.equal(result.storedPosterKeys.includes(expectedKey), true)
+}
+
+function assertCompletionPrecedesRemoval(
+  result: HeroArtifactValidationDiagnostics,
+  removedKey: string,
+): void {
+  const completionIndex = result.operationLog.indexOf(
+    'rpc:complete_poster_generation_for_worker',
+  )
+  const removalIndex = result.operationLog.indexOf(
+    `storage.remove:${removedKey}`,
+  )
+  assert.notEqual(completionIndex, -1)
+  assert.notEqual(removalIndex, -1)
+  assert.ok(completionIndex < removalIndex)
 }
 
 test('analyze trace metadata exposes every product source mode', async () => {

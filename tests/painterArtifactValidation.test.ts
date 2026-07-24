@@ -36,6 +36,40 @@ ${JSON.stringify({
       notes: 'Brain icon beside the first bullet.',
     },
   )
+  assert.deepEqual(
+    parsePainterArtifactVerdict(
+      `\`\`\`JSON\r\n${JSON.stringify(CLEAN_VERDICT)}\r\n\`\`\``,
+    ),
+    CLEAN_VERDICT,
+  )
+})
+
+test('parsePainterArtifactVerdict rejects prose and multiple JSON fences', () => {
+  const cleanJson = JSON.stringify(CLEAN_VERDICT)
+  const invalidOutputs = [
+    `Verdict: ${cleanJson}`,
+    `Verdict:
+\`\`\`json
+${cleanJson}
+\`\`\``,
+    `\`\`\`json
+${cleanJson}
+\`\`\`
+Done.`,
+    `\`\`\`json
+${cleanJson}
+\`\`\`
+\`\`\`json
+${cleanJson}
+\`\`\``,
+  ]
+
+  for (const output of invalidOutputs) {
+    assert.throws(
+      () => parsePainterArtifactVerdict(output),
+      hasInvalidVerdictCode,
+    )
+  }
 })
 
 test('parsePainterArtifactVerdict rejects missing, extra, and wrongly typed fields', () => {
@@ -74,6 +108,16 @@ test('parsePainterArtifactVerdict rejects oversized output and positive empty no
     () => parsePainterArtifactVerdict(JSON.stringify({
       ...CLEAN_VERDICT,
       has_slot_label_words: true,
+    })),
+    hasInvalidVerdictCode,
+  )
+})
+
+test('parsePainterArtifactVerdict rejects clean verdicts with non-empty notes', () => {
+  assert.throws(
+    () => parsePainterArtifactVerdict(JSON.stringify({
+      ...CLEAN_VERDICT,
+      notes: 'No visible artifact.',
     })),
     hasInvalidVerdictCode,
   )
