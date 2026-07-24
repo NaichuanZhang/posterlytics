@@ -867,19 +867,50 @@ async function testSocialCoverQrLifecycle(browserInstance) {
   const editorSwitch = editorPage.getByRole('switch', {
     name: /Add a tracked QR footer/,
   })
+  const generateVersionButton = editorPage.getByRole('button', {
+    name: 'Generate version',
+  })
   assert.equal(await editorSwitch.isChecked(), false)
-  assert.equal(
-    await editorPage.getByRole('button', { name: 'Generate version' }).isEnabled(),
-    true,
+  assert.equal(await generateVersionButton.isEnabled(), true)
+  await waitForComputedStyle(
+    generateVersionButton,
+    'backgroundColor',
+    'rgb(59, 78, 224)',
   )
+  const enabledGenerateBackground = await generateVersionButton.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  )
+  assert.equal(enabledGenerateBackground, 'rgb(59, 78, 224)')
   await editorSwitch.click()
   await editorPage.getByText(
     'Save QR settings before generating a version.',
     { exact: true },
   ).waitFor()
+  assert.equal(await generateVersionButton.isDisabled(), true)
+  await waitForComputedStyle(
+    generateVersionButton,
+    'backgroundColor',
+    'rgb(241, 241, 243)',
+  )
+  const disabledGenerateAppearance = await generateVersionButton.evaluate(
+    (element) => {
+      const style = getComputedStyle(element)
+      return {
+        backgroundColor: style.backgroundColor,
+        color: style.color,
+        opacity: style.opacity,
+      }
+    },
+  )
   assert.equal(
-    await editorPage.getByRole('button', { name: 'Generate version' }).isDisabled(),
-    true,
+    disabledGenerateAppearance.backgroundColor,
+    'rgb(241, 241, 243)',
+  )
+  assert.equal(disabledGenerateAppearance.color, 'rgb(79, 81, 90)')
+  assert.equal(disabledGenerateAppearance.opacity, '1')
+  assert.notEqual(
+    disabledGenerateAppearance.backgroundColor,
+    enabledGenerateBackground,
   )
 
   const editorDestination = editorPage.locator(
@@ -941,10 +972,7 @@ async function testSocialCoverQrLifecycle(browserInstance) {
     'placement-refresh',
     'campaign-read',
   ])
-  assert.equal(
-    await editorPage.getByRole('button', { name: 'Generate version' }).isEnabled(),
-    true,
-  )
+  assert.equal(await generateVersionButton.isEnabled(), true)
   assert.deepEqual(editorErrors, [])
   await editorContext.close()
 
