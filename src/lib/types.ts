@@ -578,6 +578,8 @@ export interface BreakdownBucket {
 
 // Campaign-wide audience breakdowns from the `campaign_breakdowns` RPC.
 export interface CampaignBreakdowns {
+  visits: number
+  unique_visitors: number
   devices: BreakdownBucket[]
   os: BreakdownBucket[]
   countries: BreakdownBucket[]

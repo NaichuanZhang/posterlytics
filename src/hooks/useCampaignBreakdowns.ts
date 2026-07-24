@@ -3,13 +3,15 @@ import { insforge } from '../lib/insforge'
 import type { CampaignBreakdowns } from '../lib/types'
 
 const EMPTY: CampaignBreakdowns = {
+  visits: 0,
+  unique_visitors: 0,
   devices: [],
   os: [],
   countries: [],
   bots_filtered: 0,
 }
 
-// Campaign-wide audience breakdowns (device / OS / country). The
+// Campaign-wide totals and audience breakdowns (device / OS / country). The
 // campaign_breakdowns RPC returns a single JSONB object — not a row set — so we
 // use `data` directly with an EMPTY fallback.
 export function useCampaignBreakdowns(
@@ -41,6 +43,8 @@ export function useCampaignBreakdowns(
           visits: Number(bucket.visits ?? bucket.scans ?? 0),
         }))
       setBreakdowns({
+        visits: Number(raw.visits ?? 0),
+        unique_visitors: Number(raw.unique_visitors ?? 0),
         devices: normalize(raw.devices),
         os: normalize(raw.os),
         countries: normalize(raw.countries),

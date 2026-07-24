@@ -957,7 +957,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
   WITH owned_scans AS (
-    SELECT s.device, s.os, s.country
+    SELECT s.device, s.os, s.country, s.visitor_hash
     FROM public.scans s
     WHERE s.campaign_id = p_campaign_id
       AND s.user_id = (SELECT auth.uid())
@@ -966,9 +966,16 @@ AS $$
     SELECT
       COALESCE(NULLIF(device, ''), 'Unknown') AS device,
       COALESCE(NULLIF(os, ''), 'Unknown') AS os,
-      COALESCE(NULLIF(country, ''), 'Unknown') AS country
+      COALESCE(NULLIF(country, ''), 'Unknown') AS country,
+      visitor_hash
     FROM owned_scans
     WHERE device IS DISTINCT FROM 'bot'
+  ),
+  totals AS (
+    SELECT
+      COUNT(*) AS visits,
+      COUNT(DISTINCT visitor_hash) AS unique_visitors
+    FROM filtered
   ),
   devices AS (
     SELECT jsonb_agg(
@@ -1004,6 +1011,8 @@ AS $$
     ) rows
   )
   SELECT jsonb_build_object(
+    'visits', (SELECT visits FROM totals),
+    'unique_visitors', (SELECT unique_visitors FROM totals),
     'devices', COALESCE((SELECT items FROM devices), '[]'::jsonb),
     'os', COALESCE((SELECT items FROM operating_systems), '[]'::jsonb),
     'countries', COALESCE((SELECT items FROM countries), '[]'::jsonb),

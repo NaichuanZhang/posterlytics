@@ -91,15 +91,10 @@ export function AnalyticsPage() {
     return <Navigate to={`/campaigns/${campaign.id}`} replace />
   }
 
-  const totals = stats.reduce(
-    (accumulator, stat) => ({
-      visits: accumulator.visits + stat.visits,
-      unique: accumulator.unique + stat.unique_visitors,
-    }),
-    { visits: 0, unique: 0 },
-  )
-  const returnRate = totals.visits > 0
-    ? Math.max(0, Math.round(((totals.visits - totals.unique) / totals.visits) * 100))
+  const totalVisits = breakdowns.visits
+  const uniqueVisitors = breakdowns.unique_visitors
+  const returnRate = totalVisits > 0
+    ? Math.max(0, Math.round(((totalVisits - uniqueVisitors) / totalVisits) * 100))
     : 0
   const countryBreakdown = countryBreakdownsForDisplay(
     breakdowns.countries,
@@ -155,7 +150,7 @@ export function AnalyticsPage() {
         </span>
       </div>
 
-      {statsLoading ? (
+      {breakdownsLoading ? (
         <div className="metric-strip" aria-label={t('Loading metrics')} aria-busy="true">
           {Array.from({ length: 3 }, (_, index) => (
             <div className="metric" key={index}>
@@ -166,9 +161,18 @@ export function AnalyticsPage() {
         </div>
       ) : (
         <section className="metric-strip" aria-label={t('Campaign summary')}>
-          <Metric label={t('Total visits')} value={formatNumber(totals.visits)} />
-          <Metric label={t('Unique visitors')} value={formatNumber(totals.unique)} />
-          <Metric label={t('Repeat visit share')} value={`${formatNumber(returnRate)}%`} />
+          <Metric
+            label={t('Total visits')}
+            value={breakdownsError ? '\u2014' : formatNumber(totalVisits)}
+          />
+          <Metric
+            label={t('Unique visitors')}
+            value={breakdownsError ? '\u2014' : formatNumber(uniqueVisitors)}
+          />
+          <Metric
+            label={t('Repeat visit share')}
+            value={breakdownsError ? '\u2014' : `${formatNumber(returnRate)}%`}
+          />
         </section>
       )}
       {!breakdownsLoading && !breakdownsError && (

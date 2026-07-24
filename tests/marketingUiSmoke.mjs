@@ -118,6 +118,7 @@ try {
   await testPosterBreakpoints(browser)
   await testFormatStudy(browser)
   await testProtectedReturnPath(browser)
+  await testAnalyticsBreakdownFailure(browser)
   await testChineseLocale(browser)
   await captureVisualMatrix(browser)
 
@@ -1135,6 +1136,18 @@ async function testProtectedReturnPath(browserInstance) {
   assert.ok(freshnessDateTime)
   assert.ok(Number.isFinite(Date.parse(freshnessDateTime)))
   assert.match(await freshnessTime.innerText(), /^View updated:/)
+  const campaignSummary = page.getByRole('region', { name: 'Campaign summary' })
+  assert.deepEqual(
+    await campaignSummary.locator('.metric strong').allInnerTexts(),
+    ['2', '1', '50%'],
+  )
+  const placementRows = page.locator('.stats tbody tr')
+  await placementRows.first().waitFor()
+  assert.equal(await placementRows.count(), 2)
+  assert.deepEqual(
+    await placementRows.locator('td:nth-child(3)').allInnerTexts(),
+    ['1', '1'],
+  )
 
   const returnedUrl = new URL(page.url())
   assert.equal(
@@ -1142,6 +1155,30 @@ async function testProtectedReturnPath(browserInstance) {
     returnPath,
   )
   assert.equal(authState.authenticated, true)
+
+  await context.close()
+}
+
+async function testAnalyticsBreakdownFailure(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1024, height: 768 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, {
+    authenticated: true,
+    campaignBreakdownsFailure: true,
+  })
+  const page = await context.newPage()
+
+  await page.goto(`${BASE_URL}/campaigns/sample-campaign/analytics`)
+  await page.getByText('Some analytics could not be loaded.', { exact: true }).waitFor()
+  const campaignSummary = page.getByRole('region', { name: 'Campaign summary' })
+  await campaignSummary.waitFor()
+  assert.deepEqual(
+    await campaignSummary.locator('.metric strong').allInnerTexts(),
+    ['\u2014', '\u2014', '\u2014'],
+  )
 
   await context.close()
 }
@@ -1347,6 +1384,13 @@ async function installBackendMock(context, authState) {
     }
 
     if (path === '/api/database/rpc/campaign_breakdowns') {
+      if (authState.campaignBreakdownsFailure) {
+        return json(route, {
+          error: 'CAMPAIGN_BREAKDOWNS_UNAVAILABLE',
+          message: 'Campaign breakdowns are unavailable.',
+          statusCode: 503,
+        }, 503)
+      }
       return json(route, fixtures.breakdowns)
     }
 
@@ -1465,25 +1509,37 @@ function createFixtures() {
     trace_schema_version: 1,
     trace_incomplete: false,
   }
-  const placements = [{
-    id: 'sample-placement',
-    campaign_id: campaign.id,
-    user_id: user.id,
-    label: 'Launch lobby',
-    code: 'sample-launch-lobby',
-    created_at: campaign.created_at,
-  }]
-  const stats = [{
-    placement_id: placements[0].id,
-    label: placements[0].label,
-    code: placements[0].code,
-    visits: 184,
-    unique_visitors: 149,
-  }]
+  const placements = [
+    {
+      id: 'sample-placement',
+      campaign_id: campaign.id,
+      user_id: user.id,
+      label: 'Launch lobby',
+      code: 'sample-launch-lobby',
+      created_at: campaign.created_at,
+    },
+    {
+      id: 'sample-placement-counter',
+      campaign_id: campaign.id,
+      user_id: user.id,
+      label: 'Checkout counter',
+      code: 'sample-checkout-counter',
+      created_at: campaign.created_at,
+    },
+  ]
+  const stats = placements.map((placement) => ({
+    placement_id: placement.id,
+    label: placement.label,
+    code: placement.code,
+    visits: 1,
+    unique_visitors: 1,
+  }))
   const breakdowns = {
-    devices: [{ key: 'Mobile', visits: 161 }, { key: 'Desktop', visits: 23 }],
-    os: [{ key: 'iOS', visits: 111 }, { key: 'Android', visits: 73 }],
-    countries: [{ key: 'United States', visits: 122 }, { key: 'Canada', visits: 62 }],
+    visits: 2,
+    unique_visitors: 1,
+    devices: [{ key: 'Mobile', visits: 2 }],
+    os: [{ key: 'iOS', visits: 2 }],
+    countries: [{ key: 'United States', visits: 2 }],
     bots_filtered: 17,
   }
 
