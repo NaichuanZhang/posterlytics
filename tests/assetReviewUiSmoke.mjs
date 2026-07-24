@@ -8,6 +8,7 @@ const HOST = '127.0.0.1'
 const PORT = 4174
 const BASE_URL = `http://${HOST}:${PORT}`
 const OUTPUT_DIR = 'test-results/asset-review'
+const REDNOTE_FONT_EMBED_CSS_MAX_CHARS = 1_639_424
 const EDITOR_MODE_DESCRIPTION = 'Review, include, exclude, and reorder images before generation.'
 const YOLO_MODE_DESCRIPTION = 'Let AI select and order images automatically, with no manual review step.'
 const EAGER_STYLE_BOARD_DATA_URL =
@@ -65,6 +66,7 @@ try {
   await testQrFooterRasterFontParity(browser)
   await testQrBandSamplingFallback(browser)
   await testRedNoteCoverFormat(browser)
+  await testRedNoteBundledCjkFontAndExports(browser)
   await testRedNotePostPagerAndCurrentPageExport(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
@@ -1973,6 +1975,11 @@ async function testQrFooterRasterFontParity(browserInstance) {
       ),
       `${format.slug} export did not embed Space Grotesk as a data URL: ${auditDetails}`,
     )
+    assert.equal(
+      formatAudits.some((audit) => audit.hasRedNoteCjk),
+      false,
+      `${format.slug} QR export unexpectedly embedded the RedNote CJK face: ${auditDetails}`,
+    )
 
     await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
   }
@@ -2141,6 +2148,190 @@ async function testRedNoteCoverFormat(browserInstance) {
     fullPage: true,
   })
   assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testRedNoteBundledCjkFontAndExports(browserInstance) {
+  const context = await browserInstance.newContext({
+    acceptDownloads: true,
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installPosterExportSvgAudit(context)
+  const state = createState({ editorReady: true })
+  const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  const redNotePlan = {
+    schema_version: 1,
+    pages: [
+      {
+        kind: 'cover',
+        title: '中文封面测试',
+        subtitle: '今天一起看上海',
+      },
+      {
+        kind: 'content',
+        heading: '第一步',
+        blocks: ['从这里开始。'],
+      },
+    ],
+  }
+  const redNoteContent = {
+    headline: redNotePlan.pages[0].title,
+    what_it_does: redNotePlan.pages[0].subtitle,
+    how_it_works: [],
+    why_use_it: [],
+    features: [redNotePlan.pages[1].heading],
+    cta: '',
+    rednote_post: redNotePlan,
+  }
+  const markedLayout = {
+    ...posterLayout([]),
+    render_mode: 'rednote-background-v1',
+  }
+  for (const record of [state.campaign, state.currentGeneration]) {
+    Object.assign(record, {
+      use_case: 'rednote_post',
+      poster_format: 'rednote_cover_3x4',
+      poster_content: redNoteContent,
+      poster_layout: markedLayout,
+      hero_image_url: edgePosterUrl,
+      hero_image_key: 'poster/rednote-cjk-background.png',
+    })
+  }
+  state.placements = []
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  await page.addStyleTag({
+    content:
+      '[data-rednote-page-index] {'
+      + 'font-family:"Posterlytics RedNote CJK","__missing_cjk__" !important;'
+      + '}',
+  })
+  const renderedPage = page.locator(
+    '.canvas-stage '
+    + '[data-rednote-page-index="0"]'
+    + '[data-rednote-font-status="loaded"]'
+    + '[data-poster-render-status="not-applicable"]',
+  )
+  await renderedPage.waitFor()
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  })
+
+  const title = renderedPage.locator('[data-rednote-title]')
+  const fontState = await title.evaluate((element) => {
+    const family = 'Posterlytics RedNote CJK'
+    const faces = Array.from(document.fonts)
+      .filter((face) => face.family.replace(/["']/g, '') === family)
+      .map((face) => ({ family: face.family, status: face.status }))
+    return {
+      check: document.fonts.check(`500 16px "${family}"`, element.textContent ?? ''),
+      computedFamily: getComputedStyle(element).fontFamily,
+      faces,
+    }
+  })
+  const fontDetails = JSON.stringify(fontState)
+  assert.equal(fontState.check, true, fontDetails)
+  assert.match(fontState.computedFamily, /^"Posterlytics RedNote CJK"/, fontDetails)
+  assert.ok(
+    fontState.faces.some((face) => face.status === 'loaded'),
+    fontDetails,
+  )
+
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('DOM.enable')
+  await cdp.send('CSS.enable')
+  const { root } = await cdp.send('DOM.getDocument')
+  const { nodeId } = await cdp.send('DOM.querySelector', {
+    nodeId: root.nodeId,
+    selector: '.canvas-stage [data-rednote-title]',
+  })
+  assert.ok(nodeId, 'RedNote title DOM node was not available to CDP.')
+  const platformFonts = await cdp.send('CSS.getPlatformFontsForNode', { nodeId })
+  const titleGlyphCount = Array.from(redNotePlan.pages[0].title).length
+  const customGlyphCount = platformFonts.fonts
+    .filter((font) => font.isCustomFont === true)
+    .reduce((sum, font) => sum + font.glyphCount, 0)
+  assert.equal(
+    customGlyphCount,
+    titleGlyphCount,
+    JSON.stringify(platformFonts.fonts),
+  )
+  assert.equal(
+    platformFonts.fonts.some((font) =>
+      font.glyphCount > 0
+      && font.isCustomFont === false
+    ),
+    false,
+    JSON.stringify(platformFonts.fonts),
+  )
+
+  await page.evaluate(() => {
+    window.__posterExportSvgAudits.length = 0
+  })
+  let downloadPromise = page.waitForEvent('download', { timeout: 90_000 })
+  await page.getByRole('button', {
+    name: 'Export page 1 of 2 as Portrait 3:4 full bleed PNG',
+  }).click()
+  let download = await downloadPromise
+  let downloadPath = await download.path()
+  assert.ok(downloadPath)
+  assert.deepEqual(
+    await probePngDimensions(page, await readFile(downloadPath)),
+    { width: 1242, height: 1656 },
+  )
+  assertRedNoteFontAudits(
+    await page.evaluate(() => window.__posterExportSvgAudits),
+    1,
+  )
+  await page.locator('[data-poster-export-render]').waitFor({ state: 'detached' })
+
+  await page.evaluate(() => {
+    window.__posterExportSvgAudits.length = 0
+  })
+  downloadPromise = page.waitForEvent('download', { timeout: 180_000 })
+  await page.getByRole('button', {
+    name: 'Export all 2 pages as Portrait 3:4 full bleed ZIP',
+  }).click()
+  download = await downloadPromise
+  downloadPath = await download.path()
+  assert.ok(downloadPath)
+  const zipEntries = execFileSync(
+    '/usr/bin/unzip',
+    ['-Z1', downloadPath],
+    { encoding: 'utf8' },
+  ).trim().split('\n')
+  assert.deepEqual(zipEntries, [
+    'Signal-Studio-v1-FullBleed-3x4-page-01-of-02.png',
+    'Signal-Studio-v1-FullBleed-3x4-page-02-of-02.png',
+  ])
+  for (const filename of zipEntries) {
+    const png = execFileSync(
+      '/usr/bin/unzip',
+      ['-p', downloadPath, filename],
+      { maxBuffer: 64 * 1024 * 1024 },
+    )
+    assert.deepEqual(
+      await probePngDimensions(page, png),
+      { width: 1242, height: 1656 },
+      filename,
+    )
+  }
+  assertRedNoteFontAudits(
+    await page.evaluate(() => window.__posterExportSvgAudits),
+    2,
+  )
+
+  await assertNoOverflow(page)
+  assert.deepEqual(pageErrors, [])
+  await cdp.detach()
   await context.close()
 }
 
@@ -3434,9 +3625,13 @@ async function installPosterExportSvgAudit(context) {
         const poster = foreignObject?.querySelector('[data-poster-size]')
         if (!poster) return serialized
 
-        const fontStyle = Array.from(poster.querySelectorAll('style'))
+        const fontStyles = Array.from(poster.querySelectorAll('style'))
           .map((style) => style.textContent ?? '')
-          .find((css) => css.includes('@font-face') && css.includes('Space Grotesk'))
+          .filter((css) => css.includes('@font-face'))
+        const fontStyle = fontStyles.find((css) => css.includes('Space Grotesk'))
+        const redNoteFontStyle = fontStyles.find((css) =>
+          css.includes('Posterlytics RedNote CJK')
+        )
         const fontUrlIndex = fontStyle?.indexOf('url(') ?? -1
         window.__posterExportSvgAudits.push({
           posterSize: poster.getAttribute('data-poster-size'),
@@ -3448,6 +3643,12 @@ async function installPosterExportSvgAudit(context) {
           fontSource: fontStyle && fontUrlIndex >= 0
             ? fontStyle.slice(fontUrlIndex, fontUrlIndex + 160)
             : null,
+          hasRedNoteCjk: !!redNoteFontStyle,
+          redNoteFontCssLength: redNoteFontStyle?.length ?? 0,
+          redNoteHasEmbeddedFontData: !!redNoteFontStyle
+            && /url\(\s*["']?data:font\/woff2;base64,/i.test(redNoteFontStyle),
+          redNoteHasBareFontUrl: !!redNoteFontStyle
+            && /url\(\s*["']?(?!data:)[^)]*\.woff2/i.test(redNoteFontStyle),
         })
       } catch (error) {
         window.__posterExportSvgAudits.push({
@@ -3458,6 +3659,25 @@ async function installPosterExportSvgAudit(context) {
       return serialized
     }
   })
+}
+
+function assertRedNoteFontAudits(audits, expectedCount) {
+  const redNoteAudits = audits.filter((audit) =>
+    audit.posterSize === 'rednote_cover_3x4'
+  )
+  const details = JSON.stringify(redNoteAudits)
+  assert.equal(redNoteAudits.length, expectedCount, details)
+  for (const audit of redNoteAudits) {
+    assert.equal(audit.hasRedNoteCjk, true, details)
+    assert.equal(audit.redNoteHasEmbeddedFontData, true, details)
+    assert.equal(audit.redNoteHasBareFontUrl, false, details)
+    assert.equal(audit.hasSpaceGrotesk, false, details)
+    assert.ok(audit.redNoteFontCssLength > 0, details)
+    assert.ok(
+      audit.redNoteFontCssLength <= REDNOTE_FONT_EMBED_CSS_MAX_CHARS,
+      details,
+    )
+  }
 }
 
 async function installPosterExportRunAudit(context) {

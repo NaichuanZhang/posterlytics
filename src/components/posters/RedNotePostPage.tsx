@@ -7,6 +7,11 @@ import {
   type CSSProperties,
 } from 'react'
 import {
+  REDNOTE_CJK_FONT_FAMILY,
+  REDNOTE_CJK_FONT_LOAD,
+  getRedNotePageFontUsage,
+} from '../../lib/redNoteFont'
+import {
   getRedNotePageRenderModel,
   resolveRedNotePalette,
 } from '../../lib/redNoteRender'
@@ -17,6 +22,7 @@ import {
 } from '../../lib/posterSize'
 import type { Campaign } from '../../lib/types'
 import type { PosterRenderReady } from './AiPoster'
+import './RedNotePostPage.css'
 
 interface Props {
   campaign: Campaign
@@ -29,7 +35,15 @@ interface Props {
 }
 
 const TEXT_FONT =
-  'Arial, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif'
+  `"${REDNOTE_CJK_FONT_FAMILY}", Arial, "Microsoft YaHei", `
+  + '"PingFang SC", "Noto Sans CJK SC", sans-serif'
+
+type RedNoteFontStatus = 'loading' | 'loaded' | 'not-required' | 'failed'
+
+interface FontLoadState {
+  readonly key: string
+  readonly status: Exclude<RedNoteFontStatus, 'not-required'>
+}
 
 export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
   function RedNotePostPage(
@@ -45,16 +59,28 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
     ref,
   ) {
     const imageSrc = imageSrcOverride ?? campaign.hero_image_url
-    const [imageLoaded, setImageLoaded] = useState(false)
-    const [fontsLoaded, setFontsLoaded] = useState(
-      typeof document === 'undefined' || !document.fonts,
-    )
-    const notifiedReady = useRef<string | null>(null)
-    const readinessKey = imageSrc ? `${pageIndex}:${imageSrc}` : null
     const model = useMemo(
       () => getRedNotePageRenderModel(plan, pageIndex),
       [pageIndex, plan],
     )
+    const fontUsage = useMemo(
+      () => getRedNotePageFontUsage(plan, pageIndex),
+      [pageIndex, plan],
+    )
+    const fontLoadKey = `${pageIndex}:${fontUsage.cjkText}`
+    const [imageLoaded, setImageLoaded] = useState(false)
+    const [fontLoad, setFontLoad] = useState<FontLoadState | null>(null)
+    const notifiedReady = useRef<string | null>(null)
+    const readinessKey = imageSrc
+      ? `${pageIndex}:${imageSrc}:${fontLoadKey}`
+      : null
+    const fontStatus: RedNoteFontStatus = !fontUsage.needsBundledFace
+      ? 'not-required'
+      : fontLoad?.key === fontLoadKey
+        ? fontLoad.status
+        : 'loading'
+    const fontsLoaded =
+      fontStatus === 'loaded' || fontStatus === 'not-required'
     const palette = useMemo(
       () => resolveRedNotePalette(campaign.poster_layout),
       [campaign.poster_layout],
@@ -62,20 +88,40 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
 
     useLayoutEffect(() => {
       let active = true
-      if (!document.fonts) return
-      setFontsLoaded(false)
-      void document.fonts.ready.then(
-        () => {
-          if (active) setFontsLoaded(true)
-        },
-        () => {
-          if (active) setFontsLoaded(true)
-        },
-      )
+      if (!fontUsage.needsBundledFace) {
+        setFontLoad(null)
+        return
+      }
+      setFontLoad({ key: fontLoadKey, status: 'loading' })
+      if (typeof document === 'undefined' || !document.fonts) {
+        setFontLoad({ key: fontLoadKey, status: 'failed' })
+        return
+      }
+      void document.fonts.load(
+        REDNOTE_CJK_FONT_LOAD,
+        fontUsage.cjkText,
+      ).then((faces) => {
+        if (!active) return
+        const loadedSpecificFace = faces.some((face) =>
+          face.family.replace(/["']/g, '') === REDNOTE_CJK_FONT_FAMILY
+          && face.status === 'loaded'
+        )
+        setFontLoad({
+          key: fontLoadKey,
+          status: loadedSpecificFace ? 'loaded' : 'failed',
+        })
+      }, () => {
+        if (active) setFontLoad({ key: fontLoadKey, status: 'failed' })
+      })
       return () => {
         active = false
       }
-    }, [])
+    }, [
+      fontLoadKey,
+      fontUsage.cjkText,
+      fontUsage.needsBundledFace,
+      pageIndex,
+    ])
 
     useLayoutEffect(() => {
       setImageLoaded(false)
@@ -110,6 +156,7 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
         data-poster-render-status={
           imageLoaded && fontsLoaded ? 'not-applicable' : 'pending'
         }
+        data-rednote-font-status={fontStatus}
         data-rednote-page-index={pageIndex}
         style={{
           position: 'relative',
@@ -164,6 +211,7 @@ export const RedNotePostPage = forwardRef<HTMLDivElement, Props>(
               }}
             >
               <strong
+                data-rednote-title
                 style={{
                   display: 'block',
                   fontSize: model.titleSize,

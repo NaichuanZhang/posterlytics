@@ -1,7 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import { Download } from 'lucide-react'
+import redNoteCjkFontUrl from '../assets/fonts/rednote-noto-sans-sc-gb2312-l1-500.woff2?url'
 import type { Campaign, Placement } from '../lib/types'
+import {
+  fetchRedNoteFontEmbedCss,
+  getRedNotePageFontUsage,
+  selectRedNoteFontEmbedCss,
+} from '../lib/redNoteFont'
 import {
   DEFAULT_POSTER_SIZE,
   hasPosterQrBand,
@@ -88,6 +94,7 @@ export function PosterExportButton({
   const offscreenRef = useRef<HTMLDivElement>(null)
   const renderSequence = useRef(0)
   const pendingRenderReady = useRef<PendingRenderReady | null>(null)
+  const redNoteFontEmbedCss = useRef<Promise<string> | null>(null)
   const [activity, setActivity] = useState<ExportActivity>({ kind: 'idle' })
   const [renderAttempt, setRenderAttempt] = useState<ExportRenderAttempt | null>(null)
   const { notify } = useToast()
@@ -174,12 +181,38 @@ export function PosterExportButton({
       offscreenRef.current,
       attempt.run.requiresQrImage,
     )
+    const fontEmbedCSS = await resolveFontEmbedCss(attempt)
     return toPng(offscreenRef.current, {
       width: attempt.run.capture.width,
       height: attempt.run.capture.height,
       pixelRatio: attempt.run.capture.pixelRatio,
       cacheBust: true,
+      ...(fontEmbedCSS === undefined ? {} : { fontEmbedCSS }),
     })
+  }
+
+  async function resolveFontEmbedCss(
+    attempt: ExportRenderAttempt,
+  ): Promise<string | undefined> {
+    const renderState = resolveRedNoteRenderState(attempt.run.campaign)
+    if (typeof renderState !== 'object') return undefined
+    const usage = getRedNotePageFontUsage(
+      renderState.plan,
+      attempt.pageIndex,
+    )
+    if (!usage.needsBundledFace) return ''
+
+    const pending = redNoteFontEmbedCss.current
+      ?? fetchRedNoteFontEmbedCss(redNoteCjkFontUrl)
+    redNoteFontEmbedCss.current = pending
+    try {
+      return selectRedNoteFontEmbedCss(usage, await pending)
+    } catch (error) {
+      if (redNoteFontEmbedCss.current === pending) {
+        redNoteFontEmbedCss.current = null
+      }
+      throw error
+    }
   }
 
   async function handleExport() {

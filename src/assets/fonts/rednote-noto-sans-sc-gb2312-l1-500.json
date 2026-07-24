@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "package": "@fontsource/noto-sans-sc",
+    "version": "5.2.8",
+    "file": "files/noto-sans-sc-chinese-simplified-500-normal.woff2",
+    "sha256": "beb1344739bee4f45a96d019fbe37a0022848652a8016b3c2d8a8bf63fd6264f"
+  },
+  "corpus": {
+    "file": "scripts/fonts/rednote-gb2312-level1.txt",
+    "codePoints": 3818,
+    "sha256": "e20fe2586377c1d67fa31681655e42a903490a1415bc8e6c71c653f8c664e967"
+  },
+  "generator": {
+    "package": "subset-font",
+    "version": "2.4.0"
+  },
+  "output": {
+    "file": "src/assets/fonts/rednote-noto-sans-sc-gb2312-l1-500.woff2",
+    "format": "woff2",
+    "bytes": 539968,
+    "maxBytes": 1228800,
+    "sha256": "19ca33c30a5c811a5f21706cb0d287a91e3a18cfdc3eb82295c4e1db368396e6"
+  }
+}
