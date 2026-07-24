@@ -342,10 +342,10 @@ function AnalyticsSection() {
         <SectionIntro
           index="04"
           icon={<BarChart3 size={19} />}
-          heading={t('Know what got scanned.')}
+          heading={t('See traffic by placement.')}
           id="analytics-heading"
         >
-          {t('Compare visits and unique visitors by placement, then read the device, operating system, and country breakdown behind the response.')}
+          {t('Compare tracked-link visits and estimated unique visitors by placement, then inspect device, operating system, and available country data.')}
         </SectionIntro>
       </Reveal>
       <div className="analytics-layout">

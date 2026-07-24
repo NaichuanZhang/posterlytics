@@ -159,6 +159,18 @@ async function testStaticFirstPaintHtml() {
       `${pathname} is missing the inline first-paint styles`,
     )
     assert.match(html, /<main\b[^>]*data-noscript-fallback/)
+    if (pathname === '/') {
+      assert.match(
+        html,
+        /<meta\s+name="description"\s+content="Turn any product website into an on-brand poster, create a distinct tracked QR for every placement, and compare tracked-link visits\."\s*\/>/,
+      )
+      assert.match(
+        html,
+        /<meta\s+property="og:description"\s+content="Turn any product website into an on-brand poster, then track link visits by placement\."\s*\/>/,
+      )
+      assert.equal(html.includes('see what gets scanned'), false)
+      assert.equal(html.includes('track every scan'), false)
+    }
   }
 }
 
@@ -219,6 +231,17 @@ async function testGuestHome(browserInstance) {
   assert.equal(new URL(page.url()).pathname, '/')
   assert.equal(new URL(page.url()).searchParams.get('reason'), null)
   assert.equal(await page.getByRole('heading', { name: 'Campaigns' }).count(), 0)
+  await page.getByText(
+    'Turn any product website into an on-brand poster, then track link visits by placement.',
+    { exact: true },
+  ).waitFor()
+  await page.getByRole('heading', { name: 'See traffic by placement.', exact: true }).waitFor()
+  await page.getByText(
+    'Compare tracked-link visits and estimated unique visitors by placement, then inspect device, operating system, and available country data.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(await page.getByText(/track every scan/i).count(), 0)
+  assert.equal(await page.getByText('Know what got scanned.', { exact: true }).count(), 0)
 
   await context.close()
 }
@@ -1380,7 +1403,7 @@ async function testChineseLocale(browserInstance) {
 
   await page.goto(`${BASE_URL}/`)
   await page.getByText(
-    '把任意产品网站变成贴合品牌的海报，再按投放点追踪每一次扫码。',
+    '把任意产品网站变成贴合品牌的海报，再按投放点查看追踪链接访问量。',
     { exact: true },
   ).waitFor()
   assert.equal(

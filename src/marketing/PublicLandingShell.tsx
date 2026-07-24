@@ -147,7 +147,7 @@ function StaticHero() {
         <div className="public-hero-copy">
           <span className="public-overline">{t('Website in / poster out / signal back')}</span>
           <h1 id="hero-heading">Posterlytics</h1>
-          <p>{t('Turn any product website into an on-brand poster, then track every scan by placement.')}</p>
+          <p>{t('Turn any product website into an on-brand poster, then track link visits by placement.')}</p>
           <div className="public-hero-actions">
             <a className="public-button public-button-primary" href={CREATE_ACCOUNT_PATH}>
               {t('Create account')}

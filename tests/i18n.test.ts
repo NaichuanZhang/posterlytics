@@ -152,7 +152,11 @@ test('Chinese product glossary and transcreated marketing headings stay consiste
     'Scan for Citrus 01': '扫码了解 Citrus 01',
     'Posterlytics House / Citrus 01': 'Posterlytics House / Citrus 01',
     'Refine without starting over.': '迭代，不必推倒重来。',
-    'Know what got scanned.': '每次扫码，都有迹可循。',
+    'Turn any product website into an on-brand poster, then track link visits by placement.':
+      '把任意产品网站变成贴合品牌的海报，再按投放点查看追踪链接访问量。',
+    'See traffic by placement.': '按投放点查看流量。',
+    'Compare tracked-link visits and estimated unique visitors by placement, then inspect device, operating system, and available country data.':
+      '比较各投放点的追踪链接访问量与估算独立访客数，并查看设备、操作系统和可用的国家或地区数据。',
     'Campaign type does not match its source.': '推广活动类型与来源不匹配。',
     'Choose a campaign type': '选择推广活动类型',
     'Create from a product website and its visual identity.':

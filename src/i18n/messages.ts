@@ -25,7 +25,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Create account',
   'Create an account',
   'Website in / poster out / signal back',
-  'Turn any product website into an on-brand poster, then track every scan by placement.',
+  'Turn any product website into an on-brand poster, then track link visits by placement.',
   'See the workflow',
   'Three sample product posters',
   'Website to poster. Placement to signal.',
@@ -68,8 +68,8 @@ export const ENGLISH_MESSAGE_IDS = [
   'Launch lobby',
   'Conference wall',
   'Placement poster exports',
-  'Know what got scanned.',
-  'Compare visits and unique visitors by placement, then read the device, operating system, and country breakdown behind the response.',
+  'See traffic by placement.',
+  'Compare tracked-link visits and estimated unique visitors by placement, then inspect device, operating system, and available country data.',
   'Posterlytics analytics page showing sample placement traffic and audience breakdowns',
   'Campaign analytics',
   'Available analytics',
@@ -781,8 +781,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'Create account': '创建账户',
   'Create an account': '创建新账户',
   'Website in / poster out / signal back': '网站进 / 海报出 / 反馈回',
-  'Turn any product website into an on-brand poster, then track every scan by placement.':
-    '把任意产品网站变成贴合品牌的海报，再按投放点追踪每一次扫码。',
+  'Turn any product website into an on-brand poster, then track link visits by placement.':
+    '把任意产品网站变成贴合品牌的海报，再按投放点查看追踪链接访问量。',
   'See the workflow': '查看工作流程',
   'Three sample product posters': '三张产品海报示例',
   'Website to poster. Placement to signal.': '网站变海报，投放见成效。',
@@ -832,9 +832,9 @@ export const zhCN: Record<TranslationKey, string> = {
   'Launch lobby': '发布大厅',
   'Conference wall': '会场展墙',
   'Placement poster exports': '投放点海报导出',
-  'Know what got scanned.': '每次扫码，都有迹可循。',
-  'Compare visits and unique visitors by placement, then read the device, operating system, and country breakdown behind the response.':
-    '比较各投放点的访问量与独立访客，并查看设备、操作系统和国家或地区分布。',
+  'See traffic by placement.': '按投放点查看流量。',
+  'Compare tracked-link visits and estimated unique visitors by placement, then inspect device, operating system, and available country data.':
+    '比较各投放点的追踪链接访问量与估算独立访客数，并查看设备、操作系统和可用的国家或地区数据。',
   'Posterlytics analytics page showing sample placement traffic and audience breakdowns':
     'Posterlytics 数据分析页面，展示投放流量和受众分布示例',
   'Campaign analytics': '推广活动数据',
