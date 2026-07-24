@@ -196,6 +196,26 @@ test('view unpublished status copy remains localized and gains recovery', () => 
   assert.match(unpublished, new RegExp(`href="${POSTERLYTICS_HOME}"`))
 })
 
+test('view status pages expose accessible recovery and byline styles', () => {
+  const locales = ['en-US', 'zh-CN'] as const
+  const kinds = ['invalid', 'missing', 'unpublished'] as const
+  const recoveryStyle =
+    'style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 16px;box-sizing:border-box;margin-top:12px;color:#3d5f56;font-weight:650"'
+  const bylineStyle =
+    'style="font-size:.78rem;color:#5b5b5b;margin-top:18px"'
+
+  for (const locale of locales) {
+    for (const kind of kinds) {
+      const html = statusHtml(kind, locale)
+      const context = `${locale}/${kind}`
+
+      assert.ok(html.includes(recoveryStyle), context)
+      assert.ok(html.includes(bylineStyle), context)
+      assert.ok(!html.includes('opacity:.4'), context)
+    }
+  }
+})
+
 function testRuntime(
   rpc: (
     name: string,
