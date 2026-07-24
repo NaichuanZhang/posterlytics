@@ -55,6 +55,7 @@ import {
   isActiveGenerationJob,
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
+import { resolveGenerationReferenceInput } from '../lib/generationReferenceInput'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
 import { insforge } from '../lib/insforge'
@@ -417,26 +418,48 @@ export function PosterEditorPage() {
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
   const generationInputsDisabled = uploadingInputs || generating
+  const usablePersistedReferences = campaign.reference_images.filter(
+    (image) => typeof image.url === 'string' && image.url.trim() !== '',
+  )
+  const referenceInputDecision = resolveGenerationReferenceInput({
+    requirement: campaignUseCase.inputFields.referenceImages.requirement,
+    minimumCount: campaignUseCase.inputFields.referenceImages.minimumCount,
+    firstVersion,
+    allowPersistedReuse: referenceOnlyMode,
+    persistedCount: usablePersistedReferences.length,
+    pendingCount: pendingReferences.length,
+  })
+  const minimumReferenceImages = referenceInputDecision.requiredCount
+  const referenceMinimumMet = referenceInputDecision.minimumMet
+  const reusePersistedReferences = referenceInputDecision.reusePersisted
+  const referenceContextRequirementMet = (
+    campaignUseCase.inputFields.referenceContext !== 'required'
+    || normalizeReferenceContext(instruction) !== null
+  )
+  const pendingReferencesAreReady = pendingReferencesReady(pendingReferences)
+  const generationBlocker = !referenceContextRequirementMet
+    ? t('RedNote post generation requires draft copy.')
+    : !referenceMinimumMet
+      ? t('Add at least {count} images.', {
+          count: minimumReferenceImages,
+        })
+      : !pendingReferencesAreReady
+        ? t('Remove any image URL that could not load, or wait for its preview to finish.')
+        : null
   const generationPreflight = deriveGenerationPreflight({
     campaign,
     currentGeneration,
     selectedGeneration,
     instruction,
     pendingReferences,
+    reusedReferenceImages: reusePersistedReferences
+      ? usablePersistedReferences
+      : undefined,
     refreshWebsite: effectiveRefreshWebsite,
     locale,
   })
   const showDesktopVersions = !isMobileWorkspace && (
     isVersionsDrawer ? versionsDrawerOpen : preferences.versionsPanelOpen
-  )
-  const minimumReferenceImages = Math.max(
-    campaignUseCase.inputFields.referenceImages.minimumCount,
-    campaignUseCase.inputFields.referenceImages.requirement === 'required' ? 1 : 0,
-  )
-  const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
-  const referenceContextRequirementMet = (
-    campaignUseCase.inputFields.referenceContext !== 'required'
-    || normalizeReferenceContext(instruction) !== null
   )
   const useCaseReferenceProps = amazonReferenceMode
     ? {
@@ -452,7 +475,7 @@ export function PosterEditorPage() {
           contextPlaceholder: t('Paste the full draft copy for this RedNote post.'),
           contextHint: t('The draft copy is interpreted together with the reference images.'),
           referenceImagesLabel: t('Creative references'),
-          referenceImagesHint: t('Add at least one fresh reference for this version.'),
+          referenceImagesHint: t('Existing reference images are reused when no new images are added.'),
         }
       : referenceOnlyMode
         ? {
@@ -460,7 +483,7 @@ export function PosterEditorPage() {
           contextPlaceholder: t('Describe the mood, visual hook, audience, and what should change.'),
           contextHint: t('The supplied references are re-analyzed for every new version.'),
           referenceImagesLabel: t('Creative references'),
-          referenceImagesHint: t('Add at least one fresh reference for this version.'),
+          referenceImagesHint: t('Existing reference images are reused when no new images are added.'),
         }
         : {
             contextLabel: t('What should change?'),
@@ -501,18 +524,8 @@ export function PosterEditorPage() {
 
   async function generateVersion() {
     if (!user || generating || uploadingInputs) return
-    if (!referenceContextRequirementMet) {
-      setGenerationError(t('RedNote post generation requires draft copy.'))
-      return
-    }
-    if (!referenceMinimumMet) {
-      setGenerationError(t('Add at least {count} images.', {
-        count: minimumReferenceImages,
-      }))
-      return
-    }
-    if (!pendingReferencesReady(pendingReferences)) {
-      setGenerationError(t('Remove any image URL that could not load, or wait for its preview to finish.'))
+    if (generationBlocker) {
+      setGenerationError(generationBlocker)
       return
     }
 
@@ -533,10 +546,13 @@ export function PosterEditorPage() {
         pendingReferences,
         locale,
       )
+      const generationReferenceImages = reusePersistedReferences
+        ? usablePersistedReferences.map((image) => ({ ...image }))
+        : uploaded
       const result = await enqueuePosterGeneration({
         campaignId,
         instruction: normalizeReferenceContext(instruction),
-        referenceImages: uploaded,
+        referenceImages: generationReferenceImages,
         refreshWebsite: effectiveRefreshWebsite,
         assetSelectionMode: preferences.assetSelectionMode,
         colorScheme,
@@ -805,6 +821,7 @@ export function PosterEditorPage() {
         contextRequirement={campaignUseCase.inputFields.referenceContext}
         referenceImagesRequirement={campaignUseCase.inputFields.referenceImages.requirement}
         referenceImagesMinimumCount={campaignUseCase.inputFields.referenceImages.minimumCount}
+        referenceImagesMinimumMet={referenceMinimumMet}
         {...useCaseReferenceProps}
       />
       {restoredFileReferences.length > 0 && (
@@ -849,12 +866,11 @@ export function PosterEditorPage() {
       <button
         type="button"
         className="button button-primary inspector-primary"
+        aria-describedby={generationBlocker ? 'generate-version-blocker' : undefined}
         disabled={
           generationInputsDisabled
           || !!busy
-          || !referenceContextRequirementMet
-          || !referenceMinimumMet
-          || !pendingReferencesReady(pendingReferences)
+          || !!generationBlocker
         }
         onClick={() => void generateVersion()}
       >
@@ -865,6 +881,9 @@ export function PosterEditorPage() {
             ? t('Generation started')
             : t('Generate version')}
       </button>
+      {generationBlocker && (
+        <p className="hint" id="generate-version-blocker">{generationBlocker}</p>
+      )}
       {generationError && <InlineNotice tone="error">{generationError}</InlineNotice>}
     </section>
   )

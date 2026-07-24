@@ -3,6 +3,7 @@ import type { TranslationKey } from '../i18n/messages'
 import type {
   Campaign,
   PosterGeneration,
+  ReferenceImage,
   TraceImageAsset,
   TraceImageSource,
 } from './types'
@@ -114,6 +115,7 @@ export function deriveGenerationPreflight(args: {
   selectedGeneration: PosterGeneration | null
   instruction: string
   pendingReferences: readonly PendingReference[]
+  reusedReferenceImages?: readonly ReferenceImage[]
   refreshWebsite: boolean
   locale?: SupportedLocale
 }): GenerationPreflight {
@@ -123,6 +125,7 @@ export function deriveGenerationPreflight(args: {
     selectedGeneration,
     instruction,
     pendingReferences,
+    reusedReferenceImages = [],
     refreshWebsite,
     locale = DEFAULT_LOCALE,
   } = args
@@ -139,6 +142,18 @@ export function deriveGenerationPreflight(args: {
         number: currentGeneration.version_number ?? '-',
       }),
       url: currentGeneration.hero_image_url,
+      runtime: false,
+    })
+  }
+
+  for (const [index, image] of reusedReferenceImages.entries()) {
+    assets.push({
+      id: `reused-${image.key || image.url}-${index}`,
+      source: 'user-reference',
+      label: translate(locale, 'Supporting image {number}', { number: index + 1 }),
+      purpose: translate(locale, 'User-supplied supporting image snapshot.'),
+      filename: image.name,
+      url: image.url,
       runtime: false,
     })
   }

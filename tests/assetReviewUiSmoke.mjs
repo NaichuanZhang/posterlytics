@@ -60,6 +60,7 @@ try {
   await testCampaignWizardDraftSwitch(browser)
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
+  await testReferenceOnlyEditorReusesPersistedImages(browser)
   await testPosterTranscriptVersionSwitch(browser)
   await testSocialCoverFrozenHint(browser)
   await testQrBandEdgeSamplingAndExport(browser)
@@ -1582,6 +1583,65 @@ async function testEditorUseCaseInputs(browserInstance) {
     path: `${OUTPUT_DIR}/amazon-editor-inputs-desktop.png`,
     fullPage: true,
   })
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testReferenceOnlyEditorReusesPersistedImages(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  const persistedReference = {
+    key: 'references/user-asset/current.png',
+    url: `${BASE_URL}/fixture/poster.svg`,
+    name: 'current.png',
+    mime_type: 'image/png',
+    size_bytes: 120,
+  }
+  Object.assign(state.campaign, {
+    product_url: null,
+    destination_url: null,
+    use_case: 'social_cover',
+    platform_hint: 'Instagram',
+    poster_format: 'rednote_cover_3x4',
+    reference_images: [persistedReference],
+  })
+  Object.assign(state.currentGeneration, {
+    use_case: 'social_cover',
+    platform_hint: 'Instagram',
+    poster_format: 'rednote_cover_3x4',
+    reference_images: [persistedReference],
+  })
+  state.placements = []
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  await page.getByText(
+    'Existing reference images are reused when no new images are added.',
+  ).first().waitFor()
+  await page.locator('.editor-inspector .generation-references textarea').fill(
+    'Keep the composition and make the headline more direct.',
+  )
+
+  const generate = page.getByRole('button', { name: 'Generate version' })
+  assert.equal(await generate.isEnabled(), true)
+  await generate.click()
+  await waitFor(() => state.enqueueRequests.length === 1)
+  assert.deepEqual(
+    state.enqueueRequests[0].p_reference_images,
+    [persistedReference],
+  )
+  assert.equal(
+    state.enqueueRequests[0].p_instruction,
+    'Keep the composition and make the headline more direct.',
+  )
   assert.deepEqual(pageErrors, [])
   await context.close()
 }

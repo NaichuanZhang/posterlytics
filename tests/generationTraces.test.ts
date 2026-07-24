@@ -147,6 +147,40 @@ test('reference-only refresh preflight contains only artwork and fresh reference
   }
 })
 
+test('reference-only preflight lists reused references after the parent poster', () => {
+  const preflight = deriveGenerationPreflight({
+    campaign: {
+      ...CAMPAIGN,
+      product_url: null,
+      destination_url: null,
+      use_case: 'social_cover',
+    },
+    currentGeneration: CURRENT,
+    selectedGeneration: CURRENT,
+    instruction: 'Keep the layout and sharpen the headline.',
+    pendingReferences: [],
+    reusedReferenceImages: [{
+      key: 'references/current.png',
+      url: 'https://assets.example/current.png',
+      name: 'current.png',
+      mime_type: 'image/png',
+      size_bytes: 120,
+    }],
+    refreshWebsite: true,
+  })
+
+  assert.deepEqual(
+    preflight.assets.map((asset) => ({
+      source: asset.source,
+      filename: asset.filename,
+    })),
+    [
+      { source: 'previous-poster', filename: 'Version 3' },
+      { source: 'user-reference', filename: 'current.png' },
+    ],
+  )
+})
+
 test('preflight follows persisted use case instead of sniffing the source URL', () => {
   const websiteIntent = deriveGenerationPreflight({
     campaign: {

@@ -43,6 +43,7 @@ interface Props {
   contextHint?: string
   referenceImagesRequirement?: UseCaseFieldRequirement
   referenceImagesMinimumCount?: number
+  referenceImagesMinimumMet?: boolean
   referenceImagesLabel?: string
   referenceImagesHint?: string
   validationAttempt?: number
@@ -66,6 +67,7 @@ export function GenerationReferences({
   contextHint,
   referenceImagesRequirement = 'optional',
   referenceImagesMinimumCount = 0,
+  referenceImagesMinimumMet,
   referenceImagesLabel,
   referenceImagesHint,
   validationAttempt = 0,
@@ -102,6 +104,8 @@ export function GenerationReferences({
     referenceImagesRequirement === 'required' ? 1 : 0,
   )
   const referenceImagesRequired = requiredImageCount > 0
+  const resolvedReferenceImagesMinimumMet = referenceImagesMinimumMet
+    ?? totalImages >= requiredImageCount
   const contextValidity = useRequiredFieldValidity({
     required: contextRequired,
     valid: context.trim().length > 0,
@@ -110,7 +114,7 @@ export function GenerationReferences({
   })
   const referenceImagesValidity = useRequiredFieldValidity({
     required: referenceImagesRequired,
-    valid: totalImages >= requiredImageCount,
+    valid: resolvedReferenceImagesMinimumMet,
     validationAttempt,
     resetKey: `${referenceImagesRequirement}:${requiredImageCount}`,
   })
@@ -401,7 +405,7 @@ export function GenerationReferences({
             {t('Up to {count} public HTTPS JPEG, PNG, or WebP images, 10 MB each.', {
               count: MAX_REFERENCE_IMAGES,
             })}
-            {referenceImagesMinimumCount > 0 && (
+            {referenceImagesMinimumCount > 0 && referenceImagesMinimumMet !== true && (
               <> {t('Add at least {count} images.', { count: referenceImagesMinimumCount })}</>
             )}
           </div>

@@ -370,7 +370,7 @@ test('editor and preflight consume persisted intent while reference-only modes a
   )
   assert.match(
     editorSource,
-    /pendingReferences\.length >= minimumReferenceImages/,
+    /resolveGenerationReferenceInput\(\{[\s\S]*allowPersistedReuse: referenceOnlyMode,[\s\S]*persistedCount: usablePersistedReferences\.length,[\s\S]*pendingCount: pendingReferences\.length/,
   )
   assert.match(editorSource, /allowedFormats=\{campaignUseCase\.allowedPosterFormats\}/)
   assert.match(

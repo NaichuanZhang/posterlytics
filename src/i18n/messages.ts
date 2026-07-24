@@ -269,7 +269,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'The supplied references are re-analyzed for every new version.',
   'Creative references',
   'Reference images are the primary visual source.',
-  'Add at least one fresh reference for this version.',
+  'Existing reference images are reused when no new images are added.',
   'Social cover generation requires at least one reference image.',
   'Reference-only generation requires at least one reference image.',
   'RedNote post generation requires at least one reference image.',
@@ -1016,7 +1016,8 @@ export const zhCN: Record<TranslationKey, string> = {
     '每个新版本都会重新分析本次提供的参考素材。',
   'Creative references': '创意参考图',
   'Reference images are the primary visual source.': '参考图片是主要视觉来源。',
-  'Add at least one fresh reference for this version.': '请为此版本添加至少一张新的参考图。',
+  'Existing reference images are reused when no new images are added.':
+    '未添加新图片时，将继续使用现有参考图片。',
   'Social cover generation requires at least one reference image.':
     '社交媒体封面生成至少需要一张参考图片。',
   'Reference-only generation requires at least one reference image.':
