@@ -72,6 +72,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   const img = imageSrcOverride ?? campaign.hero_image_url
   const [imageRender, setImageRender] = useState<ImageRenderState | null>(null)
   const settledImageSrc = useRef<string | null>(null)
+  const heroImageRef = useRef<HTMLImageElement>(null)
   const isEvent = campaign.scenario === 'event'
   // For events the poster_spec is an EventPosterSpec; its logistics lines were
   // computed deterministically by analyze (formatEventLines) so they're accurate.
@@ -118,11 +119,21 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     ? currentImageRender?.status ?? 'pending'
     : 'not-applicable'
 
+  // This intentionally tracks only source and eligibility; handleImageLoad
+  // claims each source once, so other render changes must not retrigger it.
   useLayoutEffect(() => {
     if (settledImageSrc.current !== img) {
       settledImageSrc.current = null
     }
-  }, [img])
+    if (
+      shouldSampleFooter
+      && img
+      && settledImageSrc.current !== img
+      && heroImageRef.current?.complete
+    ) {
+      handleImageLoad(heroImageRef.current)
+    }
+  }, [img, shouldSampleFooter])
 
   useLayoutEffect(() => {
     if (renderStatus === 'pending') return
@@ -211,7 +222,8 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
       >
         {img ? (
           <img
-            key={`${shouldSampleFooter ? 'sample' : 'display'}:${img}`}
+            ref={heroImageRef}
+            key={img}
             src={img}
             crossOrigin="anonymous"
             data-poster-hero

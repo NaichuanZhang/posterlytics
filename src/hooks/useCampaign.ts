@@ -1,23 +1,29 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { insforge } from '../lib/insforge'
 import { collectCampaignAssetKeys } from '../lib/generations'
+import { jsonDeepEqual } from '../lib/jsonDeepEqual'
 import type { Campaign, PosterGeneration } from '../lib/types'
 
 export function useCampaign(id: string | undefined) {
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const loadedIdRef = useRef<string | null>(null)
 
   const reload = useCallback(async () => {
     if (!id) return
-    setLoading(true)
+    if (loadedIdRef.current !== id) setLoading(true)
     const { data, error } = await insforge.database
       .from('campaigns')
       .select('*')
       .eq('id', id)
       .maybeSingle()
     if (error) setError(error.message)
-    else setCampaign(data as Campaign | null)
+    else {
+      const next = data as Campaign | null
+      setCampaign((current) => jsonDeepEqual(current, next) ? current : next)
+    }
+    loadedIdRef.current = id
     setLoading(false)
   }, [id])
 

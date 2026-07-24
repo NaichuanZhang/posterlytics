@@ -64,6 +64,8 @@ try {
   await testReferenceOnlyEditorReusesPersistedImages(browser)
   await testPosterTranscriptVersionSwitch(browser)
   await testSocialCoverFrozenHint(browser)
+  await testSocialCoverLateQrSampling(browser)
+  await testPosterBackgroundReloadPreservesHero(browser)
   await testQrBandEdgeSamplingAndExport(browser)
   await testQrFooterRasterFontParity(browser)
   await testQrBandSamplingFallback(browser)
@@ -2221,6 +2223,185 @@ async function testSocialCoverFrozenHint(browserInstance) {
   await context.close()
 }
 
+async function testSocialCoverLateQrSampling(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installPosterSamplingCounter(context)
+  const state = createState()
+  configureSocialCoverState(state, { qrEnabled: false })
+  state.campaign.current_generation_id = null
+  state.campaign.hero_image_url = `${BASE_URL}/fixture/edge-poster.svg`
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  const hero = page.locator(
+    '.canvas-stage [data-poster-size="rednote_cover_3x4"] [data-poster-hero]',
+  )
+  await waitForHeroComplete(hero)
+  assert.equal(
+    await posterSamplingCount(page),
+    0,
+    'the full-bleed social cover must not sample before QR eligibility',
+  )
+  await retainPosterHeroAndArmLoadCounter(hero)
+
+  await page.getByRole('switch', { name: /Add a tracked QR footer/ }).click()
+  await page.locator('#editor-social-cover-qr-destination')
+    .fill('https://example.com/late-qr')
+  await page.getByRole('button', { name: 'Save QR settings' }).click()
+
+  const footer = page.locator(
+    '.canvas-stage [data-poster-size="rednote_3x4"] '
+    + '[data-poster-footer][data-footer-color-source="sampled"]',
+  )
+  await footer.waitFor()
+  await waitForComputedStyle(footer, 'backgroundColor', 'rgb(237, 243, 238)')
+  const currentHero = page.locator(
+    '.canvas-stage [data-poster-size="rednote_3x4"] [data-poster-hero]',
+  )
+  assert.equal(
+    await isRetainedPosterHero(currentHero),
+    true,
+    'late QR eligibility must retain the completed hero element',
+  )
+  assert.equal(
+    await posterHeroLoadCount(page),
+    0,
+    'late QR eligibility must not load the retained hero again',
+  )
+  assert.equal(
+    await posterSamplingCount(page),
+    1,
+    'late QR eligibility must sample the retained hero exactly once',
+  )
+  assert.equal(await footer.getAttribute('data-footer-color'), '#edf3ee')
+  assert.equal(state.placementWrites.length, 1)
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testPosterBackgroundReloadPreservesHero(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  await installPosterSamplingCounter(context)
+  const state = createState({
+    awaitingReviewActivity: true,
+    editorReady: true,
+  })
+  const edgePosterUrl = `${BASE_URL}/fixture/edge-poster.svg`
+  state.campaign.hero_image_url = edgePosterUrl
+  state.currentGeneration.hero_image_url = edgePosterUrl
+
+  const initialCampaignGate = deferred()
+  const initialGenerationGate = deferred()
+  state.campaignReadGate = initialCampaignGate.promise
+  state.generationReadGate = initialGenerationGate.promise
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await waitFor(() => (
+    operationCount(state, 'campaign-read') >= 1
+    && operationCount(state, 'generation-read') >= 1
+  ))
+  await page.locator('.spinner-wrap.full').waitFor()
+  assert.equal(await page.locator('.canvas-stage [data-poster-hero]').count(), 0)
+
+  state.campaignReadGate = null
+  state.generationReadGate = null
+  initialCampaignGate.resolve()
+  initialGenerationGate.resolve()
+
+  const footer = page.locator(
+    '.canvas-stage [data-poster-size="a4_2x3"] '
+    + '[data-poster-footer][data-footer-color-source="sampled"]',
+  )
+  await footer.waitFor()
+  await page.locator('.editor-generation-status')
+    .getByRole('link', { name: 'Review assets' })
+    .waitFor()
+  await waitForAnimationFrames(page, 2)
+  const hero = page.locator(
+    '.canvas-stage [data-poster-size="a4_2x3"] [data-poster-hero]',
+  )
+  await waitForHeroComplete(hero)
+  assert.equal(await posterSamplingCount(page), 1)
+  await retainPosterHeroAndArmLoadCounter(hero)
+
+  const campaignReads = operationCount(state, 'campaign-read')
+  const generationReads = operationCount(state, 'generation-read')
+  const backgroundCampaignGate = deferred()
+  const backgroundGenerationGate = deferred()
+  state.campaignReadGate = backgroundCampaignGate.promise
+  state.generationReadGate = backgroundGenerationGate.promise
+  state.now = new Date(Date.parse(state.now) + 1000).toISOString()
+
+  const campaignResponse = page.waitForResponse((response) => (
+    response.request().method() === 'GET'
+    && new URL(response.url()).pathname === '/api/database/records/campaigns'
+  ))
+  const generationResponse = page.waitForResponse((response) => (
+    response.request().method() === 'GET'
+    && new URL(response.url()).pathname === '/api/database/records/poster_generations'
+  ))
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await waitFor(() => (
+    operationCount(state, 'campaign-read') > campaignReads
+    && operationCount(state, 'generation-read') > generationReads
+  ))
+
+  assert.equal(
+    await isRetainedPosterHero(hero),
+    true,
+    'a pending same-ID refresh must retain the mounted hero',
+  )
+  assert.equal(
+    await page.locator('.spinner-wrap.full').count(),
+    0,
+    'a pending same-ID refresh must not replace the editor with a full spinner',
+  )
+  assert.equal(await posterHeroLoadCount(page), 0)
+  assert.equal(await posterSamplingCount(page), 1)
+
+  state.campaignReadGate = null
+  state.generationReadGate = null
+  backgroundCampaignGate.resolve()
+  backgroundGenerationGate.resolve()
+  await Promise.all([campaignResponse, generationResponse])
+  await waitForAnimationFrames(page, 2)
+
+  assert.equal(
+    await isRetainedPosterHero(hero),
+    true,
+    'an unchanged same-ID refresh must preserve hero identity after both responses',
+  )
+  assert.equal(await page.locator('.spinner-wrap.full').count(), 0)
+  assert.equal(
+    await posterHeroLoadCount(page),
+    0,
+    'an unchanged same-ID refresh must not load the hero again',
+  )
+  assert.equal(
+    await posterSamplingCount(page),
+    1,
+    'an unchanged same-ID refresh must retain the single preview sample',
+  )
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
 async function testQrBandEdgeSamplingAndExport(browserInstance) {
   const context = await browserInstance.newContext({
     acceptDownloads: true,
@@ -3715,9 +3896,14 @@ async function installBackendMock(context, state) {
         return json(route, [])
       }
       state.operationLog.push({ type: 'campaign-read' })
+      const campaignReadGate = state.campaignReadGate
+      if (campaignReadGate) await campaignReadGate
       return json(route, [state.campaign])
     }
     if (path === '/api/database/records/poster_generations') {
+      state.operationLog.push({ type: 'generation-read' })
+      const generationReadGate = state.generationReadGate
+      if (generationReadGate) await generationReadGate
       return json(route, state.editorReady
         ? [
             state.currentGeneration,
@@ -3917,6 +4103,8 @@ function createState({
     assets,
     awaitingReviewActivity,
     editorReady,
+    campaignReadGate: null,
+    generationReadGate: null,
     saveAttempts: [],
     saveFailuresRemaining,
     savedSelections: [],
@@ -4158,6 +4346,46 @@ async function installPosterSamplingCounter(context) {
 
 async function posterSamplingCount(page) {
   return page.evaluate(() => window.__posterEdgeSampleCount)
+}
+
+async function waitForHeroComplete(hero) {
+  await hero.waitFor()
+  await hero.evaluate(async (image) => {
+    if (!(image instanceof HTMLImageElement)) {
+      throw new Error('Poster hero is not an image.')
+    }
+    await image.decode()
+    if (!image.complete || image.naturalWidth === 0) {
+      throw new Error('Poster hero did not complete successfully.')
+    }
+  })
+}
+
+async function retainPosterHeroAndArmLoadCounter(hero) {
+  await hero.evaluate((image) => {
+    window.__retainedPosterHero = image
+    window.__posterHeroLoadCount = 0
+    document.addEventListener('load', (event) => {
+      if (
+        event.target instanceof HTMLImageElement
+        && event.target.matches('.canvas-stage [data-poster-hero]')
+      ) {
+        window.__posterHeroLoadCount += 1
+      }
+    }, true)
+  })
+}
+
+async function isRetainedPosterHero(hero) {
+  return hero.evaluate((image) => image === window.__retainedPosterHero)
+}
+
+async function posterHeroLoadCount(page) {
+  return page.evaluate(() => window.__posterHeroLoadCount)
+}
+
+function operationCount(state, type) {
+  return state.operationLog.filter((entry) => entry.type === type).length
 }
 
 async function installPosterExportSvgAudit(context) {

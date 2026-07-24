@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { insforge } from '../lib/insforge'
+import { jsonDeepEqual } from '../lib/jsonDeepEqual'
 import type { PosterGeneration } from '../lib/types'
 
 export function usePosterGenerations(campaignId: string | undefined) {
@@ -8,10 +9,11 @@ export function usePosterGenerations(campaignId: string | undefined) {
   const [failedGenerations, setFailedGenerations] = useState<PosterGeneration[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const loadedIdRef = useRef<string | null>(null)
 
   const reload = useCallback(async () => {
     if (!campaignId) return
-    setLoading(true)
+    if (loadedIdRef.current !== campaignId) setLoading(true)
     const { data, error: queryError } = await insforge.database
       .from('poster_generations')
       .select('*')
@@ -23,18 +25,20 @@ export function usePosterGenerations(campaignId: string | undefined) {
     } else {
       setError(null)
       const rows = (data ?? []) as PosterGeneration[]
-      setGenerations(
-        rows
-          .filter((generation) => generation.status === 'ready')
-          .sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0)),
-      )
-      setActiveGenerations(rows.filter((generation) =>
+      const ready = rows
+        .filter((generation) => generation.status === 'ready')
+        .sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0))
+      const active = rows.filter((generation) =>
         ['created', 'analyzing', 'reviewing', 'designing', 'painting'].includes(generation.status)
-      ))
-      setFailedGenerations(rows.filter((generation) =>
+      )
+      const failed = rows.filter((generation) =>
         generation.status === 'failed' || generation.status === 'canceled'
-      ))
+      )
+      setGenerations((current) => jsonDeepEqual(current, ready) ? current : ready)
+      setActiveGenerations((current) => jsonDeepEqual(current, active) ? current : active)
+      setFailedGenerations((current) => jsonDeepEqual(current, failed) ? current : failed)
     }
+    loadedIdRef.current = campaignId
     setLoading(false)
   }, [campaignId])
 
