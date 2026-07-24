@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import {
   useEffect,
+  useId,
   useRef,
   useState,
 } from 'react'
@@ -45,6 +46,7 @@ export function WebsiteCapturePreview({
   onCaptureInFlightChange?: (inFlight: boolean) => void
 }) {
   const { t } = useI18n()
+  const candidateCurationDescriptionId = useId()
   const [status, setStatus] = useState<CaptureStatus>('idle')
   const [preview, setPreview] = useState<CapturePreview | null>(null)
   const [selection, setSelection] = useState<EagerCaptureSelection>({
@@ -183,6 +185,10 @@ export function WebsiteCapturePreview({
     || preview.colors.length > 0
     || preview.fonts.length > 0
   )
+  const canCurateCandidates = status === 'ready'
+  const curationDescriptionId = canCurateCandidates
+    ? undefined
+    : candidateCurationDescriptionId
 
   function commitSelection(nextSelection: EagerCaptureSelection) {
     if (!preview || status !== 'ready') return
@@ -287,8 +293,10 @@ export function WebsiteCapturePreview({
           {hasSourceCandidates && (
             <div className="website-evidence-candidate-copy">
               <strong>{t('Captured image candidates')}</strong>
-              <p>
-                {t('Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Automatic may omit or reorder images within the included set.')}
+              <p id={curationDescriptionId}>
+                {canCurateCandidates
+                  ? t('Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Automatic may omit or reorder images within the included set.')
+                  : t('Partial website evidence cannot be curated and will not be reused. Capture again to edit candidates.')}
               </p>
             </div>
           )}
@@ -309,6 +317,8 @@ export function WebsiteCapturePreview({
                   priority={null}
                   canRaise={false}
                   canLower={false}
+                  curatable={canCurateCandidates}
+                  curationDescriptionId={curationDescriptionId}
                   onToggle={toggleLogoCandidate}
                 />
               )}
@@ -329,6 +339,8 @@ export function WebsiteCapturePreview({
                       selectedIndex >= 0
                       && selectedIndex < selection.imageUrls.length - 1
                     }
+                    curatable={canCurateCandidates}
+                    curationDescriptionId={curationDescriptionId}
                     onToggle={() => toggleImageCandidate(imageUrl)}
                     onRaise={() => moveImageCandidate(imageUrl, -1)}
                     onLower={() => moveImageCandidate(imageUrl, 1)}
@@ -411,6 +423,8 @@ function CandidateEvidenceImage({
   priority,
   canRaise,
   canLower,
+  curatable,
+  curationDescriptionId,
   onToggle,
   onRaise,
   onLower,
@@ -421,6 +435,8 @@ function CandidateEvidenceImage({
   priority: number | null
   canRaise: boolean
   canLower: boolean
+  curatable: boolean
+  curationDescriptionId?: string
   onToggle: () => void
   onRaise?: () => void
   onLower?: () => void
@@ -430,6 +446,7 @@ function CandidateEvidenceImage({
   const includeLabel = included
     ? t('Exclude {name} as a candidate', { name: label })
     : t('Include {name} as a candidate', { name: label })
+  const describedBy = curatable ? undefined : curationDescriptionId
 
   return (
     <figure
@@ -467,9 +484,10 @@ function CandidateEvidenceImage({
               type="button"
               className="icon-button"
               aria-label={t('Raise {name} candidate priority', { name: label })}
+              aria-describedby={describedBy}
               data-tooltip={t('Raise candidate priority')}
               title={t('Raise candidate priority')}
-              disabled={!canRaise}
+              disabled={!curatable || !canRaise}
               onClick={onRaise}
             >
               <ArrowUp size={13} aria-hidden="true" />
@@ -478,9 +496,10 @@ function CandidateEvidenceImage({
               type="button"
               className="icon-button"
               aria-label={t('Lower {name} candidate priority', { name: label })}
+              aria-describedby={describedBy}
               data-tooltip={t('Lower candidate priority')}
               title={t('Lower candidate priority')}
-              disabled={!canLower}
+              disabled={!curatable || !canLower}
               onClick={onLower}
             >
               <ArrowDown size={13} aria-hidden="true" />
@@ -491,7 +510,9 @@ function CandidateEvidenceImage({
           type="button"
           className={`website-evidence-candidate-toggle${included ? ' is-included' : ''}`}
           aria-label={includeLabel}
+          aria-describedby={describedBy}
           aria-pressed={included}
+          disabled={!curatable}
           onClick={onToggle}
         >
           {included

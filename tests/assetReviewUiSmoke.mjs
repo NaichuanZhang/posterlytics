@@ -1449,7 +1449,81 @@ async function testWebsiteCapturePreview(browserInstance) {
   await openWizardForm(mobilePage, 'Website product')
   await mobilePage.locator('#product-url').fill('https://mobile.example/product')
   await mobilePage.getByRole('button', { name: 'Capture website' }).click()
-  await mobilePage.locator('.website-evidence-panel').waitFor()
+  const mobileEvidence = mobilePage.locator('.website-evidence-panel')
+  await mobileEvidence.waitFor()
+  const mobileCandidate = mobileEvidence.locator('figure.is-candidate.is-included')
+    .filter({ hasText: 'Product image 1' })
+  const mobileControls = mobileCandidate.locator('.website-evidence-candidate-controls')
+  const mobileToggle = mobileControls.getByRole('button', {
+    name: 'Exclude Product image 1 as a candidate',
+  })
+  await mobileToggle.waitFor()
+  await mobilePage.evaluate(async () => {
+    await document.fonts.ready
+  })
+  const mobileControlLayout = await mobileControls.evaluate((controls) => {
+    if (!(controls instanceof HTMLElement)) {
+      throw new Error('Candidate controls are unavailable.')
+    }
+    const toggle = controls.querySelector('.website-evidence-candidate-toggle')
+    const arrows = [...controls.querySelectorAll('.icon-button')]
+    if (
+      !(toggle instanceof HTMLButtonElement)
+      || arrows.some((arrow) => !(arrow instanceof HTMLButtonElement))
+    ) {
+      throw new Error('Candidate controls are incomplete.')
+    }
+
+    const tolerance = 1
+    const toggleRect = toggle.getBoundingClientRect()
+    const arrowRects = arrows.map((arrow) => arrow.getBoundingClientRect())
+    const textRects = []
+    const walker = document.createTreeWalker(toggle, NodeFilter.SHOW_TEXT)
+    let node = walker.nextNode()
+    while (node) {
+      if (node.textContent?.trim()) {
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        textRects.push(
+          ...[...range.getClientRects()]
+            .filter((rect) => rect.width > 0 && rect.height > 0),
+        )
+      }
+      node = walker.nextNode()
+    }
+
+    return {
+      arrowCount: arrows.length,
+      controlsClientWidth: controls.clientWidth,
+      controlsScrollWidth: controls.scrollWidth,
+      textWithinToggle: textRects.length > 0 && textRects.every((rect) =>
+        rect.left >= toggleRect.left - tolerance
+        && rect.right <= toggleRect.right + tolerance
+        && rect.top >= toggleRect.top - tolerance
+        && rect.bottom <= toggleRect.bottom + tolerance),
+      toggleBelowArrows: (
+        arrowRects.length > 0
+        && toggleRect.top
+          >= Math.max(...arrowRects.map((rect) => rect.bottom)) - tolerance
+      ),
+      toggleClientWidth: toggle.clientWidth,
+      toggleScrollWidth: toggle.scrollWidth,
+    }
+  })
+  const mobileControlDetails = JSON.stringify(mobileControlLayout)
+  assert.equal(mobileControlLayout.arrowCount, 2, mobileControlDetails)
+  assert.equal(mobileControlLayout.toggleBelowArrows, true, mobileControlDetails)
+  assert.ok(
+    mobileControlLayout.controlsScrollWidth
+      <= mobileControlLayout.controlsClientWidth + 1,
+    mobileControlDetails,
+  )
+  assert.ok(
+    mobileControlLayout.toggleScrollWidth
+      <= mobileControlLayout.toggleClientWidth + 1,
+    mobileControlDetails,
+  )
+  assert.equal(mobileControlLayout.textWithinToggle, true, mobileControlDetails)
   await assertNoOverflow(mobilePage)
   await mobilePage.screenshot({
     path: `${OUTPUT_DIR}/capture-preview-mobile.png`,
@@ -1493,6 +1567,16 @@ async function testSinglePaidEagerCapture(browserInstance) {
   const evidence = successPage.locator('.website-evidence-panel')
   await evidence.waitFor()
   await evidence.getByText('Captured image candidates', { exact: true }).waitFor()
+  await evidence.getByText(
+    'Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Automatic may omit or reorder images within the included set.',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await evidence.locator(
+      '.website-evidence-candidate-controls button[aria-describedby]',
+    ).count(),
+    0,
+  )
   await evidence.locator('figure').filter({ hasText: 'Website logo' })
     .getByRole('button', { name: 'Exclude Website logo as a candidate' })
     .click()
@@ -1589,9 +1673,40 @@ async function testSinglePaidEagerCapture(browserInstance) {
   await degradedPage.getByRole('button', { name: 'Capture website' }).click()
   const degradedEvidence = degradedPage.locator('.website-evidence-panel')
   await degradedEvidence.waitFor()
-  await degradedEvidence.locator('figure').filter({ hasText: 'Product image 1' })
+  await degradedEvidence.getByText('Website style board', { exact: true }).waitFor()
+  await degradedEvidence.getByText('Website colors', { exact: true }).waitFor()
+  const degradedDescription = degradedEvidence.getByText(
+    'Partial website evidence cannot be curated and will not be reused. Capture again to edit candidates.',
+    { exact: true },
+  )
+  await degradedDescription.waitFor()
+  const degradedDescriptionId = await degradedDescription.getAttribute('id')
+  assert.ok(degradedDescriptionId)
+  const excludeBtn = degradedEvidence.locator('figure')
+    .filter({ hasText: 'Product image 1' })
     .getByRole('button', { name: 'Exclude Product image 1 as a candidate' })
-    .click()
+  assert.equal(await excludeBtn.isDisabled(), true)
+  assert.equal(await excludeBtn.getAttribute('aria-pressed'), 'true')
+  const degradedCandidateControls = degradedEvidence.locator(
+    '.website-evidence-candidate-controls button',
+  )
+  const degradedControlStates = await degradedCandidateControls.evaluateAll(
+    (controls) => controls.map((control) => ({
+      describedBy: control.getAttribute('aria-describedby'),
+      disabled: control instanceof HTMLButtonElement && control.disabled,
+    })),
+  )
+  assert.ok(degradedControlStates.length > 0)
+  assert.equal(
+    degradedControlStates.every((control) => control.disabled),
+    true,
+  )
+  assert.equal(
+    degradedControlStates.every(
+      (control) => control.describedBy === degradedDescriptionId,
+    ),
+    true,
+  )
   await submitWizardAndWaitForEnqueue(degradedPage, degradedState, 1)
 
   assert.deepEqual(degradedState.storageUploads, [])

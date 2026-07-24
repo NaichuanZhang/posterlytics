@@ -227,6 +227,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Website typefaces',
   'Captured image candidates',
   'Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Automatic may omit or reorder images within the included set.',
+  'Partial website evidence cannot be curated and will not be reused. Capture again to edit candidates.',
   'Candidate included',
   'Candidate excluded',
   'Include {name} as a candidate',
@@ -980,6 +981,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'Captured image candidates': '采集到的候选图片',
   'Choose which captured images enter the candidate set and set their priority if this evidence is reused. These are preferences, not a guarantee: Editor still includes a final review, and Automatic may omit or reorder images within the included set.':
     '选择复用这些证据时进入候选集的图片并设置优先顺序。这些只是偏好，并非保证：“编辑器”模式仍会提供最终审核；“自动”模式仍可能在已选候选集中省略图片或调整顺序。',
+  'Partial website evidence cannot be curated and will not be reused. Capture again to edit candidates.':
+    '部分网站证据无法筛选，也不会被复用。请重新采集后再编辑候选图片。',
   'Candidate included': '已列为候选',
   'Candidate excluded': '未列为候选',
   'Include {name} as a candidate': '将{name}列为候选',

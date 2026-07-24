@@ -1792,6 +1792,11 @@ img {
   color: var(--accent);
 }
 
+.website-evidence-candidate-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .website-evidence-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5392,6 +5397,18 @@ table.stats tr.winner td:first-child {
 
   .asset-mode-control:not(.is-compact) [data-tooltip]::after {
     max-width: 220px;
+  }
+
+  .website-evidence-candidate-controls {
+    flex-wrap: wrap;
+    column-gap: 0;
+    row-gap: 6px;
+  }
+
+  .website-evidence-candidate-toggle {
+    min-width: 0;
+    flex-basis: 100%;
+    margin-left: 0;
   }
 
   .asset-review-header {
