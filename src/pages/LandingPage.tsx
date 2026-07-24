@@ -400,6 +400,8 @@ function PublicFooter() {
       </a>
       <p>{t('Website to poster. Placement to signal.')}</p>
       <div>
+        <a className="public-footer-legal-link" href="/terms">{t('Terms of Service')}</a>
+        <a className="public-footer-legal-link" href="/privacy">{t('Privacy Policy')}</a>
         <span>{t('Photography:')}</span>
         <a href="https://unsplash.com/photos/znM0ujn2RUA">{t('Shane Colella')}</a>
         <a href="https://unsplash.com/photos/muC_6gTMLR4">{t('Barcelona')}</a>

@@ -12,6 +12,9 @@ import { signInPath } from './lib/authRouting'
 const SignInPage = lazy(() =>
   import('./pages/SignInPage').then((module) => ({ default: module.SignInPage }))
 )
+const LegalPage = lazy(() =>
+  import('./pages/LegalPage').then((module) => ({ default: module.LegalPage }))
+)
 const CampaignsListPage = lazy(() =>
   import('./pages/CampaignsListPage').then((module) => ({ default: module.CampaignsListPage }))
 )
@@ -87,6 +90,22 @@ export default function SessionApp() {
             <Route
               path="/signin"
               element={<Suspense fallback={<FirstPaintLoadingShell />}><SignInPage /></Suspense>}
+            />
+            <Route
+              path="/terms"
+              element={(
+                <Suspense fallback={<FirstPaintLoadingShell />}>
+                  <LegalPage kind="terms" />
+                </Suspense>
+              )}
+            />
+            <Route
+              path="/privacy"
+              element={(
+                <Suspense fallback={<FirstPaintLoadingShell />}>
+                  <LegalPage kind="privacy" />
+                </Suspense>
+              )}
             />
             <Route path="/campaigns/new" element={<ProtectedPage><CampaignWizardPage /></ProtectedPage>} />
             <Route path="/campaigns/:id" element={<ProtectedPage><PosterEditorPage /></ProtectedPage>} />

@@ -102,6 +102,7 @@ try {
 
   await testFirstPaintLifecycle(browser)
   await testGuestHome(browser)
+  await testPublicLegalPages(browser)
   await testAuthenticatedHome(browser)
   await testColdLoadSessionExpiry(browser)
   await testOnlineLazyChunkRetry(browser)
@@ -109,6 +110,7 @@ try {
   await testHeroMotionImportFailure(browser)
   await testAuthenticatedNotFound(browser)
   await testSignupMode(browser)
+  await testSignupErrorRecovery(browser)
   await testPasswordRecovery(browser)
   await testSignInErrorRecovery(browser)
   await testCampaignCreationFailure(browser)
@@ -133,7 +135,7 @@ try {
 }
 
 async function testStaticFirstPaintHtml() {
-  for (const pathname of ['/', '/signin']) {
+  for (const pathname of ['/', '/signin', '/terms', '/privacy']) {
     const response = await fetch(`${BASE_URL}${pathname}`, {
       headers: { Accept: 'text/html' },
     })
@@ -164,6 +166,8 @@ async function testFirstPaintLifecycle(browserInstance) {
   const routes = [
     { pathname: '/', appSelector: '.public-surface' },
     { pathname: '/signin', appSelector: '.public-auth' },
+    { pathname: '/terms', appSelector: '.public-surface' },
+    { pathname: '/privacy', appSelector: '.public-surface' },
   ]
 
   for (const { pathname, appSelector } of routes) {
@@ -215,6 +219,62 @@ async function testGuestHome(browserInstance) {
   assert.equal(new URL(page.url()).pathname, '/')
   assert.equal(new URL(page.url()).searchParams.get('reason'), null)
   assert.equal(await page.getByRole('heading', { name: 'Campaigns' }).count(), 0)
+
+  await context.close()
+}
+
+async function testPublicLegalPages(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+  })
+  await installBackendMock(context, { authenticated: false })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  await page.goto(`${BASE_URL}/`)
+  const footer = page.locator('.public-footer')
+  await footer.waitFor()
+  const termsFooterLink = footer.getByRole('link', { name: 'Terms of Service' })
+  const privacyFooterLink = footer.getByRole('link', { name: 'Privacy Policy' })
+  assert.equal(await termsFooterLink.getAttribute('href'), '/terms')
+  assert.equal(await privacyFooterLink.getAttribute('href'), '/privacy')
+
+  await termsFooterLink.click()
+  await page.getByRole('heading', { name: 'Terms of Service', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/terms')
+  assert.equal(await page.getByRole('heading', { name: 'Sign in', exact: true }).count(), 0)
+  await page.getByText('Last updated July 24, 2026.', { exact: true }).waitFor()
+  await page.getByText(
+    'Posterlytics is a personal demo project for creating posters and measuring placement visits. It is provided as-is and without warranties.',
+    { exact: true },
+  ).waitFor()
+  await assertNoHorizontalOverflow(page, 'terms 390px')
+
+  await page.getByRole('link', { name: 'Privacy Policy', exact: true }).click()
+  await page.getByRole('heading', { name: 'Privacy Policy', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/privacy')
+  await page.getByText(
+    'Posterlytics processes the product URLs, images, and copy you submit to generate posters.',
+    { exact: true },
+  ).waitFor()
+  await page.getByText(
+    'Posterlytics hashes a first-party cookie identifier with a secret salt to estimate unique visitors. It does not store raw IP addresses.',
+    { exact: true },
+  ).waitFor()
+  await assertNoHorizontalOverflow(page, 'privacy 390px')
+
+  await page.goto(`${BASE_URL}/`)
+  await page.locator('.public-footer').waitFor()
+  await page
+    .locator('.public-footer')
+    .getByRole('link', { name: 'Privacy Policy' })
+    .click()
+  await page.getByRole('heading', { name: 'Privacy Policy', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/privacy')
+  assert.deepEqual(pageErrors, [])
 
   await context.close()
 }
@@ -531,10 +591,102 @@ async function testSignupMode(browserInstance) {
   await page.getByRole('heading', { name: 'Create an account' }).waitFor()
   const signupMode = page.getByRole('button', { name: 'Create account', exact: true }).first()
   assert.equal(await signupMode.getAttribute('aria-pressed'), 'true')
+  const consent = page.locator('.public-auth-consent')
+  await consent.waitFor()
+  assert.match(await consent.innerText(), /^By creating an account, you agree to:/)
+  assert.equal(
+    await consent.getByRole('link', { name: 'Terms of Service' }).getAttribute('href'),
+    '/terms',
+  )
+  assert.equal(
+    await consent.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href'),
+    '/privacy',
+  )
+
+  await page.getByRole('button', { name: 'Sign in', exact: true }).first().click()
+  await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+  assert.equal(await page.locator('.public-auth-consent').count(), 0)
+
+  await page.getByRole('button', { name: 'Create account', exact: true }).first().click()
+  await page.getByRole('heading', { name: 'Create an account' }).waitFor()
   await page.evaluate(() => document.fonts.ready)
+  await assertNoHorizontalOverflow(page, 'signup 390px')
   await assertSamplePosterGeometry(page, 'signup mobile')
 
   await context.close()
+}
+
+async function testSignupErrorRecovery(browserInstance) {
+  for (const width of [280, 390]) {
+    const context = await browserInstance.newContext({
+      locale: 'en-US',
+      viewport: { width, height: 844 },
+      reducedMotion: 'reduce',
+    })
+    const authState = {
+      authenticated: false,
+      signUpFailure: 'email_exists',
+    }
+    await installBackendMock(context, authState)
+    const page = await context.newPage()
+    const pageErrors = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+
+    await page.goto(`${BASE_URL}/signin?mode=signup`)
+    await page.getByLabel('Email').fill('registered@posterlytics.test')
+    await page.getByLabel('Password').fill('strong-password')
+    await page.locator('.public-auth-submit').click()
+
+    let duplicateNotice = page.getByRole('alert')
+    await duplicateNotice.getByText(
+      'An account with this email is already registered. Sign in or reset your password.',
+      { exact: true },
+    ).waitFor()
+    assert.equal(
+      await duplicateNotice.getByRole('button', { name: 'Sign in', exact: true }).count(),
+      1,
+    )
+    assert.equal(
+      await duplicateNotice.getByRole('button', { name: 'Forgot password?' }).count(),
+      1,
+    )
+    assert.equal(
+      await page.getByText('Email already exists in backend.', { exact: true }).count(),
+      0,
+    )
+    await assertNoHorizontalOverflow(page, `duplicate signup ${width}px`)
+    await assertMinimumHitTargets(
+      page,
+      '.inline-notice .public-auth-inline-button',
+      `duplicate signup ${width}px actions`,
+    )
+
+    await duplicateNotice.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
+    assert.equal(
+      await page.getByLabel('Email').inputValue(),
+      'registered@posterlytics.test',
+    )
+    assert.equal(await page.locator('.public-auth-consent').count(), 0)
+
+    await page.getByRole('button', { name: 'Create account', exact: true }).first().click()
+    await page.getByRole('heading', { name: 'Create an account' }).waitFor()
+    await page.locator('.public-auth-submit').click()
+    duplicateNotice = page.getByRole('alert')
+    await duplicateNotice.getByText(
+      'An account with this email is already registered. Sign in or reset your password.',
+      { exact: true },
+    ).waitFor()
+    await duplicateNotice.getByRole('button', { name: 'Forgot password?' }).click()
+    await page.getByRole('heading', { name: 'Reset your password' }).waitFor()
+    assert.equal(
+      await page.getByLabel('Email').inputValue(),
+      'registered@posterlytics.test',
+    )
+    assert.deepEqual(pageErrors, [])
+
+    await context.close()
+  }
 }
 
 async function testPasswordRecovery(browserInstance) {
@@ -631,6 +783,13 @@ async function testSignInErrorRecovery(browserInstance) {
 
   const credentialNotice = page.getByRole('alert')
   await credentialNotice.getByText('Invalid email or password.', { exact: true }).waitFor()
+  assert.equal(
+    await credentialNotice.getByText(
+      'An account with this email is already registered. Sign in or reset your password.',
+      { exact: true },
+    ).count(),
+    0,
+  )
   await credentialNotice.getByRole('button', { name: 'Forgot password?' }).click()
   await page.getByRole('heading', { name: 'Reset your password' }).waitFor()
   assert.equal(
@@ -710,6 +869,7 @@ async function testPublicResponsiveAccessibility(browserInstance) {
     { width: 280, height: 653 },
     { width: 320, height: 653 },
     { width: 375, height: 812 },
+    { width: 390, height: 844 },
     { width: 768, height: 900 },
     { width: 1280, height: 900 },
     { width: 2560, height: 1440 },
@@ -743,7 +903,7 @@ async function testPublicResponsiveAccessibility(browserInstance) {
         page,
         '.public-nav-shell > .public-brand, .public-nav a, .public-nav select, '
           + '.public-surface .public-button, .public-text-link, '
-          + '.public-footer > .public-brand',
+          + '.public-footer > .public-brand, .public-footer-legal-link',
         'landing 280px standalone controls',
       )
       await assertNoTargetIntersections(
@@ -820,6 +980,30 @@ async function testPublicResponsiveAccessibility(browserInstance) {
         'sign in recovery 280px header and secondary controls',
       )
       await assertNoHorizontalOverflow(page, 'sign in recovery 280px')
+    }
+
+    if (viewport.width === 280 || viewport.width === 390) {
+      for (const legalPage of [
+        { path: '/terms', heading: 'Terms of Service' },
+        { path: '/privacy', heading: 'Privacy Policy' },
+      ]) {
+        await page.goto(`${BASE_URL}${legalPage.path}`, { waitUntil: 'networkidle' })
+        await page
+          .getByRole('heading', { name: legalPage.heading, exact: true })
+          .waitFor()
+        await assertNoHorizontalOverflow(
+          page,
+          `${legalPage.heading} ${viewport.width}px`,
+        )
+      }
+
+      if (viewport.width === 280) {
+        await assertMinimumHitTargets(
+          page,
+          '.public-legal-back, .public-legal-header select, .public-legal-links a',
+          'legal pages 280px standalone controls',
+        )
+      }
     }
 
     assert.deepEqual(
@@ -1236,6 +1420,39 @@ async function testChineseLocale(browserInstance) {
     path: `${OUTPUT_DIR}/zh-CN-sign-in.png`,
     fullPage: true,
   })
+
+  await page.getByRole('button', { name: '创建账户', exact: true }).click()
+  await page.getByRole('heading', { name: '创建新账户', exact: true }).waitFor()
+  const consent = page.locator('.public-auth-consent')
+  assert.match(await consent.innerText(), /^创建账户即表示你同意：/)
+  assert.equal(await consent.getByRole('link', { name: '服务条款' }).count(), 1)
+  assert.equal(await consent.getByRole('link', { name: '隐私政策' }).count(), 1)
+  assert.equal(
+    await page.getByText('By creating an account, you agree to:', {
+      exact: true,
+    }).count(),
+    0,
+  )
+
+  await consent.getByRole('link', { name: '隐私政策' }).click()
+  await page.getByRole('heading', { name: '隐私政策', exact: true }).waitFor()
+  await page.getByText(
+    'Posterlytics 会处理你提交的产品 URL、图片和文案，用于生成海报。',
+    { exact: true },
+  ).waitFor()
+  await page.getByText(
+    'Posterlytics 使用密钥盐值对第一方 Cookie 标识符进行哈希处理，以估算独立访客数。Posterlytics 不存储原始 IP 地址。',
+    { exact: true },
+  ).waitFor()
+  assert.equal(
+    await page.getByRole('heading', { name: 'Privacy Policy', exact: true }).count(),
+    0,
+  )
+
+  await page.getByRole('link', { name: '服务条款', exact: true }).click()
+  await page.getByRole('heading', { name: '服务条款', exact: true }).waitFor()
+  assert.equal(await page.getByLabel('语言').inputValue(), 'zh-CN')
+  assert.deepEqual(pageErrors, [])
   await context.close()
 }
 
@@ -1311,6 +1528,21 @@ async function installBackendMock(context, authState) {
       return json(route, authState.authenticated
         ? { accessToken: 'marketing-ui-access-token', user: fixtures.user }
         : { user: null })
+    }
+
+    if (path === '/api/auth/users' && request.method() === 'POST') {
+      if (authState.signUpFailure === 'email_exists') {
+        return json(route, {
+          error: 'AUTH_EMAIL_EXISTS',
+          message: 'Email already exists in backend.',
+          statusCode: 409,
+        }, 409)
+      }
+      authState.authenticated = true
+      return json(route, {
+        accessToken: 'marketing-ui-access-token',
+        user: fixtures.user,
+      })
     }
 
     if (path === '/api/auth/sessions' && request.method() === 'POST') {

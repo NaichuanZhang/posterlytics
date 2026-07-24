@@ -15,6 +15,7 @@ import {
 } from '../lib/authRouting'
 import {
   classifySignInError,
+  getSignInErrorPresentation,
   type SignInErrorKind,
 } from '../lib/signInErrors'
 import { SamplePoster } from '../marketing/SamplePoster'
@@ -115,13 +116,9 @@ export function SignInPage() {
     }
   }
 
-  const errorMessage = errorKind === 'credentials'
-    ? t('Invalid email or password.')
-    : errorKind === 'offline'
-      ? t('Posterlytics could not connect. Check your internet connection and try again.')
-      : errorKind === 'unknown'
-        ? t('Authentication failed.')
-        : null
+  const errorPresentation = errorKind
+    ? getSignInErrorPresentation(errorKind, mode)
+    : null
 
   return (
     <div className="public-auth">
@@ -251,18 +248,23 @@ export function SignInPage() {
                     />
                   </div>
 
-                  {errorMessage && (
+                  {errorPresentation && (
                     <InlineNotice tone="error">
-                      <span>{errorMessage}</span>
-                      {mode === 'signin' && errorKind === 'credentials' && (
+                      <span>{t(errorPresentation.messageKey)}</span>
+                      {errorPresentation.actions.map((action) => (
                         <button
+                          key={action}
                           type="button"
                           className="public-auth-inline-button"
-                          onClick={startPasswordRecovery}
+                          onClick={action === 'sign_in'
+                            ? () => changeMode('signin')
+                            : startPasswordRecovery}
                         >
-                          {t('Forgot password?')}
+                          {action === 'sign_in'
+                            ? t('Sign in')
+                            : t('Forgot password?')}
                         </button>
-                      )}
+                      ))}
                     </InlineNotice>
                   )}
 
@@ -282,6 +284,14 @@ export function SignInPage() {
                       </>
                     )}
                   </button>
+                  {mode === 'signup' && (
+                    <p className="public-auth-consent">
+                      {t('By creating an account, you agree to:')}{' '}
+                      <Link to="/terms">{t('Terms of Service')}</Link>
+                      <span aria-hidden="true"> / </span>
+                      <Link to="/privacy">{t('Privacy Policy')}</Link>
+                    </p>
+                  )}
                 </form>
               )}
             </>
