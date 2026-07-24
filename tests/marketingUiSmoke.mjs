@@ -690,18 +690,15 @@ async function testPublicResponsiveAccessibility(browserInstance) {
     if (viewport.width === 280) {
       await assertElementsWithinViewport(
         page,
-        '.public-hero h1, .public-hero-actions .public-button-primary',
+        '.public-hero h1, .public-hero-actions .public-button-primary, .public-text-link',
         'landing 280px critical content',
       )
       await assertMinimumHitTargets(
         page,
-        '.public-nav a',
-        'landing 280px visible navigation links',
-      )
-      await assertMinimumHitTargets(
-        page,
-        '.public-nav-shell > .public-brand, .public-nav select',
-        'landing 280px header controls',
+        '.public-nav-shell > .public-brand, .public-nav a, .public-nav select, '
+          + '.public-surface .public-button, .public-text-link, '
+          + '.public-footer > .public-brand',
+        'landing 280px standalone controls',
       )
       await assertNoTargetIntersections(
         page,
@@ -728,23 +725,55 @@ async function testPublicResponsiveAccessibility(browserInstance) {
           '.public-auth-language select',
           '.public-auth-field input',
           '.public-auth-submit',
+          '.public-auth-back',
+          '.public-auth-mode',
         ].join(', '),
         'sign in 280px critical content',
       )
+      const signInHitTargetSelector = [
+        '.public-auth-brand',
+        '.public-auth-language select',
+        '.public-auth-back',
+        '.public-auth-mode button',
+        '.public-auth-field input',
+        '.public-auth-inline-button',
+        '.public-auth .public-button',
+      ].join(', ')
+      const signInIntersectionSelector = [
+        '.public-auth-brand',
+        '.public-auth-language select',
+        '.public-auth-back',
+        '.public-auth-mode button',
+        '.public-auth-heading',
+      ].join(', ')
       await assertMinimumHitTargets(
         page,
-        '.public-auth-brand, .public-auth-language select, .public-auth-inline-button',
-        'sign in 280px header and recovery controls',
+        signInHitTargetSelector,
+        'sign in 280px standalone controls',
       )
       await assertNoTargetIntersections(
         page,
-        '.public-auth-brand, .public-auth-language select',
-        'sign in 280px header controls',
+        signInIntersectionSelector,
+        'sign in 280px header and secondary controls',
       )
       await page.screenshot({
         path: `${OUTPUT_DIR}/responsive-280x653-sign-in.png`,
         fullPage: true,
       })
+
+      await page.getByRole('button', { name: 'Forgot password?' }).click()
+      await page.getByRole('heading', { name: 'Reset your password', exact: true }).waitFor()
+      await assertMinimumHitTargets(
+        page,
+        signInHitTargetSelector,
+        'sign in recovery 280px standalone controls',
+      )
+      await assertNoTargetIntersections(
+        page,
+        signInIntersectionSelector,
+        'sign in recovery 280px header and secondary controls',
+      )
+      await assertNoHorizontalOverflow(page, 'sign in recovery 280px')
     }
 
     assert.deepEqual(

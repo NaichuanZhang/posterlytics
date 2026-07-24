@@ -108,7 +108,8 @@
 }
 
 .public-nav-shell > .public-brand,
-.public-auth-brand {
+.public-auth-brand,
+.public-footer > .public-brand {
   min-width: 44px;
   min-height: 44px;
 }
@@ -314,8 +315,11 @@
 
 .public-text-link {
   display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   gap: 8px;
+  padding: 13px 0;
   color: var(--public-ink);
   font-size: 13px;
   font-weight: 680;
@@ -1178,9 +1182,12 @@
 
 .public-auth-back {
   display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   gap: 7px;
-  margin-bottom: 38px;
+  margin: -13px 0 25px;
+  padding: 13px 0;
   color: var(--public-ink-soft) !important;
   font-size: 12px;
   font-weight: 650;
@@ -1191,7 +1198,6 @@
 }
 
 .public-auth-back-button {
-  padding: 0;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -1230,7 +1236,7 @@
 }
 
 .public-auth-mode button {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 10px;
   border: 0;
   background: transparent;
@@ -2114,7 +2120,7 @@
   }
 
   .public-auth-back {
-    margin-bottom: 30px;
+    margin-bottom: 17px;
   }
 
   .public-auth-heading h1 {
