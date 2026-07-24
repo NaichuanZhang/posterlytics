@@ -6,6 +6,7 @@ import {
   captureRedNoteAnalyzeFallbackDiagnostics,
   captureAnalyzeSourceMode,
   captureCurrentPipelinePromptGoldens,
+  captureHeroArtifactValidationDiagnostics,
   captureRedNotePipelineDiagnostics,
   type PipelinePromptGoldens,
 } from './helpers/pipelinePromptHarness.ts'
@@ -142,7 +143,7 @@ test('RedNote keeps the exact model-call budget and persists its page plan and m
     assetImageCalls: 0,
     designerChatCalls: 0,
     designerImageCalls: 0,
-    heroChatCalls: 0,
+    heroChatCalls: 1,
     heroImageCalls: 1,
     wroteRedNotePost: true,
     persistedPosterContent: {
@@ -226,6 +227,144 @@ test('hero stage strips source-approved emoji from the returned painter prompt',
   )
 })
 
+test('hero validation retries once on detected pixels and accepts only a clean uploaded replacement', async () => {
+  const result = await captureHeroArtifactValidationDiagnostics({
+    chatResponses: [
+      {
+        has_decorative_glyphs: true,
+        has_slot_label_words: false,
+        has_adjacent_duplicate_words: false,
+        notes: 'Brain icon beside the first bullet.',
+      },
+      {
+        has_decorative_glyphs: false,
+        has_slot_label_words: false,
+        has_adjacent_duplicate_words: false,
+        notes: '',
+      },
+    ],
+  })
+
+  assert.equal(result.responseStatus, 200)
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 2)
+  assert.equal(result.chatRequests, 2)
+  assert.equal(result.imagePrompts[0], expected.hero.website_product)
+  assert.ok(result.imagePrompts[1].startsWith(result.imagePrompts[0]))
+  assert.match(result.imagePrompts[1], /RETRY-ONLY RASTER CORRECTION/)
+  assert.match(result.imagePrompts[1], /decorative icon glyphs/)
+  assert.doesNotMatch(result.imagePrompts[1], /Brain icon beside/)
+  assert.equal(result.responsePrompt, result.imagePrompts[1])
+  assert.deepEqual(result.finalPosterBytes, [2])
+  assert.equal(new Set(result.storageUploads).size, 1)
+  assert.equal(result.storageUploads.length, 2)
+  assert.deepEqual(result.rpcCalls, ['complete_poster_generation_for_worker'])
+  assert.deepEqual(
+    (result.modelCalls as Array<{ operation: string }>).map((call) => call.operation),
+    ['image', 'chat', 'image', 'chat'],
+  )
+  assert.equal(result.traceMetadata.outcome, 'corrected')
+  assert.equal(result.traceMetadata.selected_attempt, 'retry')
+  assert.equal(result.traceMetadata.validation_calls, 2)
+  assert.equal(
+    JSON.stringify(result.modelCalls).includes('data:image'),
+    false,
+  )
+  for (const body of result.chatBodies) {
+    assert.match(chatImageUrl(body), /^https:\/\/assets\.example\//)
+    assert.doesNotMatch(chatImageUrl(body), /^data:/)
+  }
+})
+
+test('hero validation failure is fail-open in worker and standalone modes', async () => {
+  for (const mode of [
+    { serverOwned: true, finalizeFailure: false, rpc: 'complete_poster_generation_for_worker' },
+    { serverOwned: false, finalizeFailure: true, rpc: 'complete_poster_generation' },
+  ]) {
+    const result = await captureHeroArtifactValidationDiagnostics({
+      failChatAt: 0,
+      serverOwned: mode.serverOwned,
+      finalizeFailure: mode.finalizeFailure,
+    })
+
+    assert.equal(result.responseStatus, 200)
+    assert.equal(result.generationStatus, 'ready')
+    assert.equal(result.imageRequests, 1)
+    assert.equal(result.chatRequests, 1)
+    assert.equal(result.storageUploads.length, 1)
+    assert.deepEqual(result.finalPosterBytes, [1])
+    assert.deepEqual(result.rpcCalls, [mode.rpc])
+    assert.equal(result.traceMetadata.outcome, 'unavailable')
+    assert.equal(result.traceMetadata.selected_attempt, 'initial')
+    assert.match(result.warningLogs.join('\n'), /painter_artifact_validation_failed/)
+  }
+})
+
+test('residual retry restores and persists the initial uploaded poster', async () => {
+  const artifactVerdict = {
+    has_decorative_glyphs: false,
+    has_slot_label_words: false,
+    has_adjacent_duplicate_words: true,
+    notes: 'The lower line reads management management.',
+  }
+  const result = await captureHeroArtifactValidationDiagnostics({
+    chatResponses: [artifactVerdict, artifactVerdict],
+  })
+
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 2)
+  assert.equal(result.chatRequests, 2)
+  assert.equal(result.storageUploads.length, 3)
+  assert.equal(new Set(result.storageUploads).size, 1)
+  assert.deepEqual(result.finalPosterBytes, [1])
+  assert.equal(result.responsePrompt, result.imagePrompts[0])
+  assert.equal(result.traceMetadata.outcome, 'residual')
+  assert.equal(result.traceMetadata.selected_attempt, 'initial')
+  assert.match(result.warningLogs.join('\n'), /painter_artifact_residual/)
+  assert.deepEqual(
+    (result.modelCalls as Array<{ operation: string }>).map((call) => call.operation),
+    ['image', 'chat', 'image', 'chat'],
+  )
+})
+
+test('retry decode failure keeps the initial uploaded poster', async () => {
+  const result = await captureHeroArtifactValidationDiagnostics({
+    chatResponses: [{
+      has_decorative_glyphs: false,
+      has_slot_label_words: true,
+      has_adjacent_duplicate_words: false,
+      notes: 'CTA appears in the lower corner.',
+    }],
+    imageSources: [
+      'data:image/png;base64,AQ==',
+      'data:image/png;base64,%%%',
+    ],
+  })
+
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 2)
+  assert.equal(result.chatRequests, 1)
+  assert.equal(result.storageUploads.length, 1)
+  assert.deepEqual(result.finalPosterBytes, [1])
+  assert.equal(result.traceMetadata.outcome, 'retry_failed')
+  assert.equal(result.traceMetadata.selected_attempt, 'initial')
+  assert.match(result.warningLogs.join('\n'), /painter_artifact_retry_failed/)
+})
+
+test('painter validation kill switch preserves the pre-validation hero path', async () => {
+  const result = await captureHeroArtifactValidationDiagnostics({
+    painterValidationEnabled: 'off',
+  })
+
+  assert.equal(result.generationStatus, 'ready')
+  assert.equal(result.imageRequests, 1)
+  assert.equal(result.chatRequests, 0)
+  assert.equal(result.responsePrompt, expected.hero.website_product)
+  assert.equal(result.storageUploads.length, 1)
+  assert.deepEqual(result.finalPosterBytes, [1])
+  assert.deepEqual(result.traceMetadata, {})
+})
+
 test('social prompts contain reference and platform semantics without URL evidence language', async () => {
   const actual = await actualPromise
   const prompts = [
@@ -244,6 +383,18 @@ test('social prompts contain reference and platform semantics without URL eviden
     /\b(?:website|browser|DOM|URL)\b|source page|web page/i,
   )
 })
+
+function chatImageUrl(body: Record<string, unknown>): string {
+  const messages = body.messages as Array<{ content?: unknown }>
+  const content = messages?.find((message) => Array.isArray(message.content))
+    ?.content as Array<Record<string, unknown>> | undefined
+  const image = content?.find((part) => part.type === 'image_url') as {
+    image_url?: { url?: unknown }
+  } | undefined
+  return typeof image?.image_url?.url === 'string'
+    ? image.image_url.url
+    : ''
+}
 
 test('analyze trace metadata exposes every product source mode', async () => {
   const website = await captureAnalyzeSourceMode(

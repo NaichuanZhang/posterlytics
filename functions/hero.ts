@@ -1,5 +1,6 @@
 import {
   CORS,
+  aiChat,
   aiImage,
   buildTraceContentManifest,
   buildParentContextPrompt,
@@ -28,6 +29,19 @@ import {
   type TypedImageReference,
 } from './_shared.ts';
 import { stripPainterPromptEmoji } from './_copySanitizer.ts';
+import {
+  PAINTER_VALIDATION_MAX_TOKENS,
+  PAINTER_VALIDATION_TIMEOUT_MS,
+  appendArtifactRetrySuffix,
+  buildPainterArtifactValidationRequest,
+  classifyDetectedArtifacts,
+  isWithinPainterArtifactRetryBudget,
+  painterValidationEnabled,
+  parsePainterArtifactVerdict,
+  resolvedPainterValidationModelId,
+  type PainterArtifactClass,
+  type PainterArtifactVerdict,
+} from './_painterArtifactValidation.ts';
 import { resolveProductUseCaseRecipe } from './_useCasePolicy.ts';
 import {
   colorNameForHex,
@@ -97,6 +111,7 @@ export default async function (req: Request): Promise<Response> {
 export async function runHeroStage(
   context: GenerationStageRunContext,
 ): Promise<Response> {
+  const stageStartedAt = Date.now();
   const {
     client,
     userId,
@@ -372,56 +387,73 @@ export async function runHeroStage(
       detail: 'The style board could not be attached or fell beyond the six-image painter limit.',
     });
   }
-  const rawPrompt = redNoteBackgroundPrompt ?? buildPosterPrompt(
-    {
-      ...generationSnapshot,
-      reference_images: referenceImages.filter(
-        (reference) => reference.kind === 'user-reference',
-      ),
-    },
-    style,
-    hasLogo,
-    hasStyleBoard,
-    ((parent as Record<string, unknown> | null)?.poster_layout ?? null) as PosterLayout | null,
-    referenceImages.some((reference) => reference.kind === 'previous-poster'),
-    posterSize,
-    parentPosterSize,
-    recipe,
-  );
-  const prompt = stripPainterPromptEmoji(rawPrompt);
+  const promptGenerationSnapshot = {
+    ...generationSnapshot,
+    reference_images: referenceImages.filter(
+      (reference) => reference.kind === 'user-reference',
+    ),
+  };
+  const buildAttemptPrompt = (
+    artifactRetryClasses: readonly PainterArtifactClass[] = [],
+  ): string => {
+    const rawPrompt = redNoteBackgroundPrompt ?? buildPosterPrompt(
+      promptGenerationSnapshot,
+      style,
+      hasLogo,
+      hasStyleBoard,
+      ((parent as Record<string, unknown> | null)?.poster_layout ?? null) as PosterLayout | null,
+      referenceImages.some((reference) => reference.kind === 'previous-poster'),
+      posterSize,
+      parentPosterSize,
+      recipe,
+    );
+    return stripPainterPromptEmoji(
+      appendArtifactRetrySuffix(rawPrompt, artifactRetryClasses),
+    );
+  };
+  const initialPrompt = buildAttemptPrompt();
+  let selectedPrompt = initialPrompt;
 
   // Request the registered ratio explicitly, never provider pixel dimensions.
   // AiPoster shows the full generated frame without cropping.
-  let imageSource: string;
-  try {
+  const paintPoster = async (
+    attemptPrompt: string,
+    retry: boolean,
+  ): Promise<string> => {
     const messages = [{
       role: 'user',
       content: imageGenerationContent(
-        prompt,
+        attemptPrompt,
         referenceImages,
         6,
         usesFrozenAssets ? 'preserve' : 'painter',
       ),
     }];
-    imageSource = await trace.runModelCall(
+    return await trace.runModelCall(
       {
         operation: 'image',
         modelId: resolvedImageModelId(),
-        prompt: { image: prompt },
+        prompt: { image: attemptPrompt },
         providerSettings: {
           modalities: ['image', 'text'],
           image_config: { aspect_ratio: posterSize.providerAspectRatio },
           timeout_ms: 90_000,
+          ...(retry ? { attempt_kind: 'painter_artifact_retry' } : {}),
         },
         contentManifest: buildTraceContentManifest(messages, preparedImages.attachedImages),
       },
       () => aiImage(
-        prompt,
+        attemptPrompt,
         posterSize.providerAspectRatio,
         referenceImages,
         usesFrozenAssets ? 'preserve' : 'painter',
       ),
     );
+  };
+
+  let imageSource: string;
+  try {
+    imageSource = await paintPoster(initialPrompt, false);
   } catch (e) {
     if (finalizeFailure) {
       await trace.fail(e, 'image_generation_failed');
@@ -447,44 +479,36 @@ export async function runHeroStage(
     return jsonResponse({ error: details.message, code: details.code, retryable: details.retryable }, 502);
   }
 
-  let url: string;
-  let key: string;
-  let posterMimeType = 'image/png';
-  let posterSizeBytes = 0;
-  try {
-    const blob = await imageSourceToBlob(imageSource);
-    posterMimeType = blob.type || posterMimeType;
-    posterSizeBytes = blob.size;
-    const posterKey = `poster/${campaign.id}/${generation.id}/poster.png`;
+  const posterKey = `poster/${campaign.id}/${generation.id}/poster.png`;
+  const uploadPosterBlob = async (
+    blob: Blob,
+  ): Promise<{ url: string; key: string }> => {
     await client.storage.from('assets').remove(posterKey).catch(() => {});
     const { data, error } = await client.storage
       .from('assets')
       .upload(posterKey, blob);
     if (error || !data) {
-      if (finalizeFailure) {
-        await trace.fail(error?.message ?? 'upload failed', 'poster_upload_failed');
-        await markGenerationFailed(
-          client,
-          generation.id,
-          'hero',
-          error?.message ?? 'upload failed',
-          'poster_upload_failed',
-          userId,
-        );
-      }
-      logPipelineEvent({
-        source: 'hero',
-        campaignId: campaign.id,
-        generationId: generation.id,
-        status: 'failed',
-        code: 'poster_upload_failed',
-        detail: 'poster image upload failed',
-        error: error?.message ?? 'upload failed',
-      });
-      return jsonResponse({ error: error?.message ?? 'upload failed' }, 500);
+      const uploadError = new Error(error?.message ?? 'upload failed') as Error & {
+        code?: string;
+      };
+      uploadError.code = 'poster_upload_failed';
+      throw uploadError;
     }
-    url = data.url;
-    key = data.key;
+    return { url: data.url, key: data.key };
+  };
+
+  let initialBlob: Blob;
+  let url: string;
+  let key: string;
+  let posterMimeType = 'image/png';
+  let posterSizeBytes = 0;
+  try {
+    initialBlob = await imageSourceToBlob(imageSource);
+    posterMimeType = initialBlob.type || posterMimeType;
+    posterSizeBytes = initialBlob.size;
+    const uploaded = await uploadPosterBlob(initialBlob);
+    url = uploaded.url;
+    key = uploaded.key;
   } catch (e) {
     if (finalizeFailure) {
       await trace.fail(e, 'poster_upload_failed');
@@ -508,6 +532,219 @@ export async function runHeroStage(
     });
     return jsonResponse({ error: String(e) }, 500);
   }
+
+  let painterValidationMetadata: Record<string, unknown> | null = null;
+  if (painterValidationEnabled()) {
+    type ValidationOutcome =
+      | 'clean'
+      | 'unavailable'
+      | 'corrected'
+      | 'residual'
+      | 'retry_failed'
+      | 'retry_skipped_budget';
+
+    let outcome: ValidationOutcome = 'unavailable';
+    let validationCalls = 0;
+    let retryAttempted = false;
+    let selectedAttempt: 'initial' | 'retry' = 'initial';
+    let initialVerdict: PainterArtifactVerdict | undefined;
+    let retryVerdict: PainterArtifactVerdict | undefined;
+    let detectedClasses: PainterArtifactClass[] = [];
+
+    const validationUrl = (
+      uploadedUrl: string,
+      candidate: 'initial' | 'retry',
+    ): string => {
+      const parsed = new URL(uploadedUrl);
+      parsed.searchParams.set(
+        'poster_validation',
+        `${candidate}-${stageStartedAt}`,
+      );
+      return parsed.toString();
+    };
+    const validateUploadedPoster = async (
+      uploadedUrl: string,
+      candidatePrompt: string,
+      candidate: 'initial' | 'retry',
+    ): Promise<PainterArtifactVerdict> => {
+      const request = buildPainterArtifactValidationRequest(
+        candidatePrompt,
+        validationUrl(uploadedUrl, candidate),
+      );
+      return await trace.runModelCall(
+        {
+          operation: 'chat',
+          modelId: resolvedPainterValidationModelId(),
+          prompt: {
+            system: request.systemPrompt,
+            user: request.userPrompt,
+          },
+          providerSettings: {
+            max_completion_tokens: PAINTER_VALIDATION_MAX_TOKENS,
+            timeout_ms: PAINTER_VALIDATION_TIMEOUT_MS,
+            purpose: 'painter_artifact_validation',
+            candidate,
+          },
+          contentManifest: request.contentManifest,
+        },
+        async () => parsePainterArtifactVerdict(
+          await aiChat(request.messages, {
+            maxTokens: PAINTER_VALIDATION_MAX_TOKENS,
+            timeoutMs: PAINTER_VALIDATION_TIMEOUT_MS,
+          }),
+        ),
+      );
+    };
+
+    const initialValidationStartedAt = Date.now();
+    try {
+      validationCalls += 1;
+      initialVerdict = await validateUploadedPoster(
+        url,
+        initialPrompt,
+        'initial',
+      );
+      detectedClasses = classifyDetectedArtifacts(initialVerdict);
+      if (detectedClasses.length === 0) {
+        outcome = 'clean';
+      } else {
+        logPipelineEvent({
+          source: 'hero',
+          campaignId: campaign.id,
+          generationId: generation.id,
+          status: 'degraded',
+          code: 'painter_artifact_detected',
+          detail:
+            `The raster validator detected: ${detectedClasses.join(', ')}.`,
+          durationMs: Date.now() - initialValidationStartedAt,
+        });
+
+        if (
+          !isWithinPainterArtifactRetryBudget(Date.now() - stageStartedAt)
+        ) {
+          outcome = 'retry_skipped_budget';
+          logPipelineEvent({
+            source: 'hero',
+            campaignId: campaign.id,
+            generationId: generation.id,
+            status: 'degraded',
+            code: 'painter_artifact_retry_skipped_budget',
+            detail: 'The single painter artifact retry was skipped to preserve the worker lease.',
+          });
+        } else {
+          retryAttempted = true;
+          const retryPrompt = buildAttemptPrompt(detectedClasses);
+          let retryUpload: {
+            url: string;
+            key: string;
+            blob: Blob;
+          } | null = null;
+          let keepRetryUpload = false;
+
+          try {
+            const retrySource = await paintPoster(retryPrompt, true);
+            const retryBlob = await imageSourceToBlob(retrySource);
+            const uploadedRetry = await uploadPosterBlob(retryBlob);
+            retryUpload = { ...uploadedRetry, blob: retryBlob };
+
+            validationCalls += 1;
+            retryVerdict = await validateUploadedPoster(
+              uploadedRetry.url,
+              retryPrompt,
+              'retry',
+            );
+            const retryArtifacts = classifyDetectedArtifacts(retryVerdict);
+            if (retryArtifacts.length === 0) {
+              keepRetryUpload = true;
+              selectedAttempt = 'retry';
+              selectedPrompt = retryPrompt;
+              url = uploadedRetry.url;
+              key = uploadedRetry.key;
+              posterMimeType = retryBlob.type || 'image/png';
+              posterSizeBytes = retryBlob.size;
+              outcome = 'corrected';
+            } else {
+              outcome = 'residual';
+              logPipelineEvent({
+                source: 'hero',
+                campaignId: campaign.id,
+                generationId: generation.id,
+                status: 'degraded',
+                code: 'painter_artifact_residual',
+                detail:
+                  `The single retry still contained: ${retryArtifacts.join(', ')}; restoring the initial poster.`,
+              });
+            }
+          } catch (retryError) {
+            outcome = 'retry_failed';
+            logPipelineEvent({
+              source: 'hero',
+              campaignId: campaign.id,
+              generationId: generation.id,
+              status: 'degraded',
+              code: 'painter_artifact_retry_failed',
+              detail: 'The single painter artifact retry failed; restoring the initial poster.',
+              error: retryError,
+            });
+          } finally {
+            if (retryUpload && !keepRetryUpload) {
+              try {
+                const restored = await uploadPosterBlob(initialBlob);
+                url = restored.url;
+                key = restored.key;
+                selectedAttempt = 'initial';
+                selectedPrompt = initialPrompt;
+                posterMimeType = initialBlob.type || 'image/png';
+                posterSizeBytes = initialBlob.size;
+              } catch (restoreError) {
+                selectedAttempt = 'retry';
+                selectedPrompt = retryPrompt;
+                url = retryUpload.url;
+                key = retryUpload.key;
+                posterMimeType = retryUpload.blob.type || 'image/png';
+                posterSizeBytes = retryUpload.blob.size;
+                outcome = 'retry_failed';
+                logPipelineEvent({
+                  source: 'hero',
+                  campaignId: campaign.id,
+                  generationId: generation.id,
+                  status: 'degraded',
+                  code: 'painter_artifact_retry_failed',
+                  detail: 'The initial poster could not be restored after retry validation; persisting the available retry poster.',
+                  error: restoreError,
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (validationError) {
+      outcome = 'unavailable';
+      logPipelineEvent({
+        source: 'hero',
+        campaignId: campaign.id,
+        generationId: generation.id,
+        status: 'degraded',
+        code: 'painter_artifact_validation_failed',
+        detail: 'Raster validation was unavailable; persisting the generated poster.',
+        error: validationError,
+        durationMs: Date.now() - initialValidationStartedAt,
+      });
+    }
+
+    painterValidationMetadata = {
+      version: 1,
+      model_id: resolvedPainterValidationModelId(),
+      outcome,
+      validation_calls: validationCalls,
+      retry_attempted: retryAttempted,
+      selected_attempt: selectedAttempt,
+      detected_classes: detectedClasses,
+      ...(initialVerdict ? { initial_verdict: initialVerdict } : {}),
+      ...(retryVerdict ? { retry_verdict: retryVerdict } : {}),
+    };
+  }
+
   await trace.addArtifact({
     kind: 'poster',
     url,
@@ -553,13 +790,17 @@ export async function runHeroStage(
     });
     return jsonResponse({ error: completeError.message }, 500);
   }
-  await trace.succeed();
+  if (painterValidationMetadata) {
+    await trace.succeed({ painter_validation: painterValidationMetadata });
+  } else {
+    await trace.succeed();
+  }
 
   // Return the compiled text-to-image prompt for the generation loading UI.
   return jsonResponse({
     poster_image_url: url,
     generation: completedGeneration,
-    prompt: { image: prompt },
+    prompt: { image: selectedPrompt },
   });
 }
 

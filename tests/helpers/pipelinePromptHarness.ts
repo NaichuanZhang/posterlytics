@@ -17,6 +17,7 @@ interface HarnessTrace {
   started_at: string | null
   model_calls: unknown[]
   artifacts: unknown[]
+  failure_metadata?: Record<string, unknown>
 }
 
 interface HarnessState {
@@ -30,11 +31,19 @@ interface HarnessState {
   } | null
   captureRequests: Array<Record<string, unknown>>
   captureLogs: string[]
+  warningLogs: string[]
   storageUploads: string[]
+  storageUploadBodies: Array<{ key: string; bytes: number[] }>
   storageRemovals: string[]
+  storageObjects: Map<string, number[]>
   sourceHtmlOverride: string | null
   imageUrls: Set<string>
   sourceImageRequests: string[]
+  openRouterRequests: Array<Record<string, unknown>>
+  imagePrompts: string[]
+  imageResponses: string[]
+  painterValidationEnabled: string | undefined
+  rpcCalls: string[]
   chatRequests: number
   imageRequests: number
 }
@@ -83,6 +92,25 @@ export interface RedNotePipelineDiagnostics {
   campaignRenderMode: unknown
 }
 
+export interface HeroArtifactValidationDiagnostics {
+  responseStatus: number
+  responsePrompt: string | null
+  generationStatus: unknown
+  heroImageUrl: unknown
+  heroImageKey: unknown
+  chatRequests: number
+  imageRequests: number
+  imagePrompts: string[]
+  chatBodies: Array<Record<string, unknown>>
+  storageUploads: string[]
+  storageRemovals: string[]
+  finalPosterBytes: number[] | null
+  warningLogs: string[]
+  rpcCalls: string[]
+  modelCalls: unknown[]
+  traceMetadata: Record<string, unknown>
+}
+
 const USER_ID = 'user-fixture'
 const CAMPAIGN_ID = 'campaign-fixture'
 const GENERATION_ID = 'generation-fixture'
@@ -90,6 +118,14 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const CAPTURE_SERVICE_URL = 'https://capture.fixture'
 const SOCIAL_REFERENCE_URL = 'https://assets.example/social-reference.png'
 const CHAT_FAILURE = Symbol('chat-failure')
+type ChatFixture = Record<string, unknown> | string | null | typeof CHAT_FAILURE
+
+const CLEAN_PAINTER_VERDICT = {
+  has_decorative_glyphs: false,
+  has_slot_label_words: false,
+  has_adjacent_duplicate_words: false,
+  notes: '',
+}
 
 const PRODUCT_LAYOUT = {
   composition: 'asymmetric editorial stack',
@@ -301,7 +337,7 @@ export async function captureRedNotePipelineDiagnostics(): Promise<RedNotePipeli
   const heroState = createState('rednote_post', null, 'product')
   await withHarnessGlobals(
     heroState,
-    null,
+    CLEAN_PAINTER_VERDICT,
     () => runHeroStage({
       client: createHarnessClient(heroState) as never,
       userId: USER_ID,
@@ -623,7 +659,7 @@ async function captureRedNoteDesignerArtifact(): Promise<
   const state = createState('rednote_post', null, 'product')
   const response = await withHarnessGlobals(
     state,
-    null,
+    CLEAN_PAINTER_VERDICT,
     () => runDesignerStage({
       client: createHarnessClient(state) as never,
       userId: USER_ID,
@@ -690,6 +726,77 @@ export async function captureEmojiStrippedHeroPrompt(): Promise<string> {
   return captureHeroPromptForState(state, 'emoji-stripping')
 }
 
+export async function captureHeroArtifactValidationDiagnostics(
+  options: {
+    chatResponses?: readonly (Record<string, unknown> | string)[]
+    failChatAt?: number
+    imageSources?: readonly string[]
+    painterValidationEnabled?: string
+    serverOwned?: boolean
+    finalizeFailure?: boolean
+  } = {},
+): Promise<HeroArtifactValidationDiagnostics> {
+  const state = createState(
+    'website_product',
+    'https://example.com/products/northstar',
+    'product',
+  )
+  state.imageResponses = [...(options.imageSources ?? [
+    'data:image/png;base64,AQ==',
+    'data:image/png;base64,Ag==',
+  ])]
+  state.painterValidationEnabled = options.painterValidationEnabled
+  const chatFixtures: ChatFixture[] = [
+    ...(options.chatResponses ?? [CLEAN_PAINTER_VERDICT]),
+  ].map((fixture, index) =>
+    index === options.failChatAt ? CHAT_FAILURE : fixture
+  )
+  const response = await withHarnessGlobals(
+    state,
+    chatFixtures,
+    () => runHeroStage({
+      client: createHarnessClient(state) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      finalizeFailure: options.finalizeFailure ?? false,
+      serverOwned: options.serverOwned ?? true,
+    }),
+  )
+  const payload = await response.json() as {
+    prompt?: { image?: unknown }
+  }
+  const posterKey = `poster/${CAMPAIGN_ID}/${GENERATION_ID}/poster.png`
+  const traceMetadata = state.traces.hero.failure_metadata?.painter_validation
+
+  return {
+    responseStatus: response.status,
+    responsePrompt: typeof payload.prompt?.image === 'string'
+      ? payload.prompt.image
+      : null,
+    generationStatus: state.generation.status,
+    heroImageUrl: state.generation.hero_image_url,
+    heroImageKey: state.generation.hero_image_key,
+    chatRequests: state.chatRequests,
+    imageRequests: state.imageRequests,
+    imagePrompts: [...state.imagePrompts],
+    chatBodies: structuredClone(state.openRouterRequests.filter(
+      (request) =>
+        !Array.isArray(request.modalities)
+        || !request.modalities.includes('image'),
+    )),
+    storageUploads: [...state.storageUploads],
+    storageRemovals: [...state.storageRemovals],
+    finalPosterBytes: state.storageObjects.get(posterKey) ?? null,
+    warningLogs: [...state.warningLogs],
+    rpcCalls: [...state.rpcCalls],
+    modelCalls: structuredClone(state.traces.hero.model_calls),
+    traceMetadata: traceMetadata && typeof traceMetadata === 'object'
+      ? structuredClone(traceMetadata as Record<string, unknown>)
+      : {},
+  }
+}
+
 async function captureHeroPrompt(
   useCase: UseCaseId,
   scenario: 'product' | 'event',
@@ -711,7 +818,7 @@ async function captureHeroPromptForState(
 ): Promise<string> {
   const response = await withHarnessGlobals(
     state,
-    null,
+    CLEAN_PAINTER_VERDICT,
     () => runHeroStage({
       client: createHarnessClient(state) as never,
       userId: USER_ID,
@@ -921,11 +1028,19 @@ function createState(
     captureServiceResponse: null,
     captureRequests: [],
     captureLogs: [],
+    warningLogs: [],
     storageUploads: [],
+    storageUploadBodies: [],
     storageRemovals: [],
+    storageObjects: new Map(),
     sourceHtmlOverride: null,
     imageUrls: new Set(),
     sourceImageRequests: [],
+    openRouterRequests: [],
+    imagePrompts: [],
+    imageResponses: [],
+    painterValidationEnabled: undefined,
+    rpcCalls: [],
     chatRequests: 0,
     imageRequests: 0,
   }
@@ -937,12 +1052,16 @@ function createHarnessClient(state: HarnessState) {
       from(table: string) {
         return new HarnessQuery(state, table)
       },
-      async rpc(name: string) {
-        if (name === 'complete_poster_generation_for_worker') {
+      async rpc(name: string, args: Record<string, unknown> = {}) {
+        state.rpcCalls.push(name)
+        if (
+          name === 'complete_poster_generation_for_worker'
+          || name === 'complete_poster_generation'
+        ) {
           Object.assign(state.generation, {
             status: 'ready',
-            hero_image_url: 'https://assets.example/poster.png',
-            hero_image_key: 'poster/fixture/poster.png',
+            hero_image_url: args.p_hero_image_url,
+            hero_image_key: args.p_hero_image_key,
           })
           Object.assign(state.campaign, {
             poster_content: structuredClone(state.generation.poster_content),
@@ -963,10 +1082,14 @@ function createHarnessClient(state: HarnessState) {
         return {
           async remove(key: string) {
             state.storageRemovals.push(key)
+            state.storageObjects.delete(key)
             return { data: null, error: null }
           },
-          async upload(key: string) {
+          async upload(key: string, file: Blob) {
+            const bytes = Array.from(new Uint8Array(await file.arrayBuffer()))
             state.storageUploads.push(key)
+            state.storageUploadBodies.push({ key, bytes })
+            state.storageObjects.set(key, bytes)
             const url = `https://assets.example/${key}`
             state.imageUrls.add(url)
             return {
@@ -1071,9 +1194,12 @@ class HarnessQuery {
 
 async function withHarnessGlobals<T>(
   state: HarnessState,
-  chatResponse: Record<string, unknown> | null | typeof CHAT_FAILURE,
+  chatResponse: ChatFixture | readonly ChatFixture[],
   run: () => Promise<T>,
 ): Promise<T> {
+  const chatQueue = Array.isArray(chatResponse)
+    ? [...chatResponse] as ChatFixture[]
+    : null
   const originalFetch = globalThis.fetch
   const originalWarn = console.warn
   const originalInfo = console.info
@@ -1082,6 +1208,9 @@ async function withHarnessGlobals<T>(
     env: {
       get(key: string) {
         if (key === 'OPENROUTER_API_KEY') return 'fixture-openrouter-key'
+        if (key === 'PAINTER_VALIDATION_ENABLED') {
+          return state.painterValidationEnabled
+        }
         if (state.captureServiceResponse && key === 'CAPTURE_SERVICE_URL') {
           return CAPTURE_SERVICE_URL
         }
@@ -1092,7 +1221,9 @@ async function withHarnessGlobals<T>(
       },
     },
   }
-  console.warn = () => {}
+  console.warn = (...values: unknown[]) => {
+    state.warningLogs.push(values.map(String).join(' '))
+  }
   console.info = (...values: unknown[]) => {
     state.captureLogs.push(values.map(String).join(' '))
   }
@@ -1109,15 +1240,33 @@ async function withHarnessGlobals<T>(
     if (url === OPENROUTER_URL) {
       const request = JSON.parse(String(init?.body ?? '{}')) as {
         modalities?: unknown
+        messages?: Array<{ content?: unknown }>
       }
+      state.openRouterRequests.push(structuredClone(request))
       if (Array.isArray(request.modalities) && request.modalities.includes('image')) {
         state.imageRequests += 1
+        const content = request.messages?.[0]?.content
+        const prompt = typeof content === 'string'
+          ? content
+          : Array.isArray(content)
+            ? String(
+                (content.find(
+                  (part) =>
+                    !!part
+                    && typeof part === 'object'
+                    && (part as { type?: unknown }).type === 'text',
+                ) as { text?: unknown } | undefined)?.text ?? '',
+              )
+            : ''
+        state.imagePrompts.push(prompt)
+        const imageSource = state.imageResponses.shift()
+          ?? 'data:image/png;base64,iVBORw0KGgo='
         return Response.json({
           choices: [{
             message: {
               images: [{
                 image_url: {
-                  url: 'data:image/png;base64,iVBORw0KGgo=',
+                  url: imageSource,
                 },
               }],
             },
@@ -1125,13 +1274,21 @@ async function withHarnessGlobals<T>(
         })
       }
       state.chatRequests += 1
-      if (chatResponse === CHAT_FAILURE) {
+      const fixture = chatQueue
+        ? chatQueue.shift()
+        : chatResponse as ChatFixture
+      if (fixture === undefined) {
+        throw new Error('Fixture chat response queue was exhausted')
+      }
+      if (fixture === CHAT_FAILURE) {
         throw new Error('Fixture chat failure')
       }
       return Response.json({
         choices: [{
           message: {
-            content: JSON.stringify(chatResponse ?? {}),
+            content: typeof fixture === 'string'
+              ? fixture
+              : JSON.stringify(fixture ?? {}),
           },
         }],
       })

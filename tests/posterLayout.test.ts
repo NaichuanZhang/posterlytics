@@ -14,6 +14,7 @@ import {
   POSTER_SIZES,
 } from '../src/lib/posterSize.ts'
 import { stripPainterPromptEmoji } from '../functions/_copySanitizer.ts'
+import { appendArtifactRetrySuffix } from '../functions/_painterArtifactValidation.ts'
 import { resolveProductUseCaseRecipe } from '../functions/_useCasePolicy.ts'
 import { buildPosterPrompt } from '../functions/hero.ts'
 
@@ -361,6 +362,27 @@ test('buildPosterPrompt scrubs hex in fallback and parent iteration context', ()
   assert.match(prompt, /USER REQUEST: Keep the \w+(?: \w+)* field and refine the hierarchy\./)
   assert.match(prompt, /PARENT LAYOUT JSON/)
   assert.doesNotMatch(prompt, /#[0-9a-f]{3,8}/i)
+})
+
+test('painter retry suffix preserves the first pass and appends deterministic retry-only clauses', () => {
+  const prompt = buildPosterPrompt({
+    product_name: 'Acme',
+    poster_layout: LAYOUT,
+    reference_images: [],
+  }, 'designer', false)
+
+  assert.equal(appendArtifactRetrySuffix(prompt, []), prompt)
+  assert.equal(
+    appendArtifactRetrySuffix(prompt, [
+      'slot_label_words',
+      'decorative_glyphs',
+    ]),
+    `${prompt}
+
+RETRY-ONLY RASTER CORRECTION:
+- Remove unauthorized standalone decorative icon glyphs, icon bullets, checkboxes, badges, and pictographs. Use spacing, typography, plain dots, or simple non-symbol geometry instead.
+- Remove placeholder and structural slot-label words. Render only the exact authorized strings already specified in the painter contract.`,
+  )
 })
 
 test('compileLayoutPrompt includes a logo instruction only when hasLogo', () => {
