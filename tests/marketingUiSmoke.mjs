@@ -12,6 +12,50 @@ const SESSION_EXPIRY_NOTICE = 'Your session ended. Sign in to continue.'
 const SESSION_EXPIRY_RAW_ERROR = 'No refresh token provided'
 const SESSION_EXPIRY_RPC_ERROR = 'Raw InsForgeError text must remain hidden.'
 const SESSION_EXPIRY_DRAFT_KEY = 'posterlytics.campaignDraft.v1:sample-user'
+const FORMAT_STUDY_EXPECTATIONS = [
+  {
+    slug: 'a4_2x3',
+    label: 'A4 poster (2:3 artwork)',
+    sheetAspectRatio: 1240 / 1754,
+    orientation: 'portrait',
+    qrBand: 'scaled',
+  },
+  {
+    slug: 'yt_thumb_16x9',
+    label: 'Landscape 16:9',
+    sheetAspectRatio: 1280 / 720,
+    orientation: 'landscape',
+    qrBand: 'scaled',
+  },
+  {
+    slug: 'luma_1x1',
+    label: 'Square 1:1',
+    sheetAspectRatio: 1,
+    orientation: 'square',
+    qrBand: 'scaled',
+  },
+  {
+    slug: 'rednote_3x4',
+    label: 'Portrait 3:4 with QR footer',
+    sheetAspectRatio: 3 / 4,
+    orientation: 'portrait',
+    qrBand: 'scaled',
+  },
+  {
+    slug: 'rednote_cover_3x4',
+    label: 'Portrait 3:4 full bleed',
+    sheetAspectRatio: 3 / 4,
+    orientation: 'portrait',
+    qrBand: 'none',
+  },
+]
+const FORMAT_STUDY_ZH_LABELS = [
+  'A4 海报（2:3 画面）',
+  '横版 16:9',
+  '方形 1:1',
+  '竖版 3:4（带二维码页脚）',
+  '竖版 3:4（满版）',
+]
 const SESSION_EXPIRY_DRAFT_VALUE = JSON.stringify({
   version: 1,
   ownerId: 'sample-user',
@@ -72,6 +116,7 @@ try {
   await testHeroTextSpacing(browser)
   await testHeroTextResize(browser)
   await testPosterBreakpoints(browser)
+  await testFormatStudy(browser)
   await testProtectedReturnPath(browser)
   await testChineseLocale(browser)
   await captureVisualMatrix(browser)
@@ -917,6 +962,146 @@ async function testPosterBreakpoints(browserInstance) {
   }
 }
 
+async function testFormatStudy(browserInstance) {
+  for (const width of [280, 320, 375, 768, 1280]) {
+    const context = await browserInstance.newContext({
+      locale: 'en-US',
+      viewport: { width, height: width <= 375 ? 812 : 900 },
+      reducedMotion: 'reduce',
+      deviceScaleFactor: 1,
+    })
+    await installBackendMock(context, { authenticated: false })
+    const page = await context.newPage()
+    const pageErrors = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+
+    await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' })
+    const section = page.locator('#formats')
+    await section.waitFor()
+    await section.scrollIntoViewIfNeeded()
+    await page.evaluate(() => document.fonts.ready)
+    await waitForLayout(page)
+
+    const items = section.locator('[data-format-study-item]')
+    assert.equal(await items.count(), FORMAT_STUDY_EXPECTATIONS.length)
+    assert.deepEqual(
+      await items.evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute('data-format'))
+      ),
+      FORMAT_STUDY_EXPECTATIONS.map(({ slug }) => slug),
+    )
+    assert.equal(
+      await section.locator('[data-qr-band="scaled"] .format-sample-footer').count(),
+      4,
+    )
+    assert.equal(await section.locator('[data-qr-band="none"]').count(), 1)
+    assert.equal(
+      await section.locator('[data-qr-band="none"] .format-sample-footer').count(),
+      0,
+    )
+
+    for (const expected of FORMAT_STUDY_EXPECTATIONS) {
+      const figure = section.locator(
+        `[data-format-study-item][data-format="${expected.slug}"]`,
+      )
+      assert.equal(
+        await figure
+          .locator('.format-sample-caption')
+          .getByText(expected.label, { exact: true })
+          .count(),
+        1,
+      )
+    }
+
+    const report = await readFormatStudyGeometry(page)
+    for (const expected of FORMAT_STUDY_EXPECTATIONS) {
+      const sample = report.find(({ slug }) => slug === expected.slug)
+      assert.ok(sample, `${width}px missing ${expected.slug}`)
+      const details = `${width}px ${expected.slug}: ${JSON.stringify(sample)}`
+      const actualRatio = sample.sheet.width / sample.sheet.height
+
+      assert.ok(
+        Math.abs(actualRatio - expected.sheetAspectRatio) <= 0.015,
+        `sheet aspect mismatch: ${details}`,
+      )
+      assert.equal(sample.orientation, expected.orientation, details)
+      assert.equal(sample.qrBand, expected.qrBand, details)
+      assert.equal(rectWithin(sample.sheet, sample.figure), true, details)
+      assert.equal(rectWithin(sample.artwork, sample.sheet), true, details)
+      assert.equal(rectWithin(sample.caption, sample.figure), true, details)
+      assert.ok(
+        sample.sheetScrollWidth <= sample.sheetClientWidth + 1
+          && sample.sheetScrollHeight <= sample.sheetClientHeight + 1,
+        `sheet content overflow: ${details}`,
+      )
+      assert.ok(
+        sample.captionScrollWidth <= sample.captionClientWidth + 1
+          && sample.captionScrollHeight <= sample.captionClientHeight + 1,
+        `caption clipped: ${details}`,
+      )
+
+      const artworkMatteLeft = sample.artwork.left - sample.sheet.left
+      const artworkMatteRight = sample.sheet.right - sample.artwork.right
+      assert.ok(
+        Math.abs(artworkMatteLeft - artworkMatteRight) <= 1.5,
+        `artwork matte is asymmetric: ${details}`,
+      )
+
+      if (expected.qrBand === 'scaled') {
+        assert.ok(sample.footer, `missing footer: ${details}`)
+        assert.ok(sample.qr, `missing QR: ${details}`)
+        assert.equal(rectWithin(sample.footer, sample.sheet), true, details)
+        assert.equal(rectWithin(sample.qr, sample.footer), true, details)
+        assert.ok(artworkMatteLeft > 1, `missing side matte: ${details}`)
+        assert.ok(
+          Math.abs(sample.artwork.width - sample.footer.width) <= 1,
+          `artwork/footer width mismatch: ${details}`,
+        )
+        const footerMatteLeft = sample.footer.left - sample.sheet.left
+        const footerMatteRight = sample.sheet.right - sample.footer.right
+        assert.ok(
+          Math.abs(footerMatteLeft - footerMatteRight) <= 1.5,
+          `footer matte is asymmetric: ${details}`,
+        )
+        assert.ok(
+          sample.artwork.bottom <= sample.footer.top + 1,
+          `artwork overlaps footer: ${details}`,
+        )
+        assert.ok(
+          sample.footerScrollWidth <= sample.footerClientWidth + 1
+            && sample.footerScrollHeight <= sample.footerClientHeight + 1,
+          `footer content overflow: ${details}`,
+        )
+        assert.equal(sample.footerCopyClips, false, `footer copy clipped: ${details}`)
+        assert.ok(sample.qrNaturalWidth > 0, `QR did not load: ${details}`)
+
+        const usesQrOnlyFooter =
+          width <= 375
+          && (expected.orientation === 'landscape' || expected.orientation === 'square')
+        assert.equal(
+          sample.footerCopyDisplay === 'none',
+          usesQrOnlyFooter,
+          `unexpected footer-copy visibility: ${details}`,
+        )
+      } else {
+        assert.equal(sample.footer, null, details)
+        assert.equal(sample.qr, null, details)
+        assert.ok(
+          artworkMatteLeft <= 2
+            && artworkMatteRight <= 2
+            && sample.artwork.top - sample.sheet.top <= 2
+            && sample.sheet.bottom - sample.artwork.bottom <= 2,
+          `full-bleed artwork does not fill sheet: ${details}`,
+        )
+      }
+    }
+
+    await assertNoHorizontalOverflow(page, `format study ${width}px`)
+    assert.deepEqual(pageErrors, [])
+    await context.close()
+  }
+}
+
 async function testProtectedReturnPath(browserInstance) {
   const context = await browserInstance.newContext({
     locale: 'en-US',
@@ -988,6 +1173,17 @@ async function testChineseLocale(browserInstance) {
     ),
     'zh-CN',
   )
+  await page
+    .getByRole('heading', { name: '一个品牌，适配每种格式。', exact: true })
+    .waitFor()
+  const formatStudy = page.locator('#formats')
+  for (const label of FORMAT_STUDY_ZH_LABELS) {
+    assert.equal(
+      await formatStudy.getByText(label, { exact: true }).count(),
+      1,
+      `missing Chinese format label: ${label}`,
+    )
+  }
 
   await page.getByRole('link', { name: '登录', exact: true }).click()
   await page.getByRole('heading', { name: '登录', exact: true }).waitFor()
@@ -1305,6 +1501,7 @@ function createFixtures() {
 async function revealLazyContent(page) {
   const selectors = [
     '#workflow',
+    '#formats',
     '#versions',
     '#attribution',
     '.analytics-section',
@@ -1335,6 +1532,88 @@ async function assertNoHorizontalOverflow(page, label) {
     dimensions.scrollWidth <= dimensions.clientWidth,
     `${label} horizontal overflow: ${JSON.stringify(dimensions)}`,
   )
+}
+
+async function readFormatStudyGeometry(page) {
+  return page.locator('[data-format-study-item]').evaluateAll((figures) => {
+    const toRect = (element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        bottom: rect.bottom,
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        width: rect.width,
+      }
+    }
+
+    return figures.map((figure) => {
+      const sheet = figure.querySelector('[data-format-sample-sheet]')
+      const artwork = figure.querySelector('.format-sample-artwork')
+      const footer = figure.querySelector('.format-sample-footer')
+      const qr = figure.querySelector('.format-sample-qr')
+      const footerCopy = figure.querySelector('.format-sample-footer-copy')
+      const caption = figure.querySelector('.format-sample-caption')
+      if (
+        !(figure instanceof HTMLElement)
+        || !(sheet instanceof HTMLElement)
+        || !(artwork instanceof HTMLElement)
+        || !(caption instanceof HTMLElement)
+      ) {
+        throw new Error('Format-study geometry elements are missing.')
+      }
+
+      const footerElement = footer instanceof HTMLElement ? footer : null
+      const qrElement = qr instanceof HTMLImageElement ? qr : null
+      const footerCopyElement = footerCopy instanceof HTMLElement ? footerCopy : null
+      const footerCopyClips = footerCopyElement
+        ? [...footerCopyElement.children].some((child) =>
+            child instanceof HTMLElement
+            && (
+              child.scrollWidth > child.clientWidth + 1
+              || child.scrollHeight > child.clientHeight + 1
+            )
+          )
+        : false
+
+      return {
+        slug: figure.getAttribute('data-format'),
+        orientation: sheet.getAttribute('data-orientation'),
+        qrBand: sheet.getAttribute('data-qr-band'),
+        figure: toRect(figure),
+        sheet: toRect(sheet),
+        artwork: toRect(artwork),
+        footer: footerElement ? toRect(footerElement) : null,
+        qr: qrElement ? toRect(qrElement) : null,
+        caption: toRect(caption),
+        sheetClientWidth: sheet.clientWidth,
+        sheetClientHeight: sheet.clientHeight,
+        sheetScrollWidth: sheet.scrollWidth,
+        sheetScrollHeight: sheet.scrollHeight,
+        footerClientWidth: footerElement?.clientWidth ?? 0,
+        footerClientHeight: footerElement?.clientHeight ?? 0,
+        footerScrollWidth: footerElement?.scrollWidth ?? 0,
+        footerScrollHeight: footerElement?.scrollHeight ?? 0,
+        footerCopyDisplay: footerCopyElement
+          ? getComputedStyle(footerCopyElement).display
+          : null,
+        footerCopyClips,
+        qrNaturalWidth: qrElement?.naturalWidth ?? 0,
+        captionClientWidth: caption.clientWidth,
+        captionClientHeight: caption.clientHeight,
+        captionScrollWidth: caption.scrollWidth,
+        captionScrollHeight: caption.scrollHeight,
+      }
+    })
+  })
+}
+
+function rectWithin(inner, outer, tolerance = 1.5) {
+  return inner.left >= outer.left - tolerance
+    && inner.right <= outer.right + tolerance
+    && inner.top >= outer.top - tolerance
+    && inner.bottom <= outer.bottom + tolerance
 }
 
 async function doubleComputedTextMetrics(page, selector) {

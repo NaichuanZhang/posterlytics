@@ -18,6 +18,7 @@ import { useRef, type ReactNode } from 'react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { useI18n } from '../i18n/I18nProvider'
 import { signInPath } from '../lib/authRouting'
+import { FormatStudy } from '../marketing/FormatStudy'
 import {
   SamplePoster,
   type SamplePosterVariant,
@@ -29,6 +30,7 @@ export default function LandingPage() {
   return (
     <>
       <WorkflowStory />
+      <FormatStudy />
       <VersionsSection />
       <PlacementsSection />
       <AnalyticsSection />
