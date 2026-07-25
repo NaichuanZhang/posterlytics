@@ -91,7 +91,7 @@ export const USE_CASES = [
       destinationUrl: 'required',
       referenceContext: 'optional',
       platformHint: 'hidden',
-      referenceImages: { requirement: 'optional', minimumCount: 0 },
+      referenceImages: { requirement: 'required', minimumCount: 1 },
     },
     allowedPosterFormats: ALL_POSTER_FORMATS,
     defaultPosterFormat: 'a4_2x3',
@@ -179,6 +179,10 @@ export function isReferenceOnlyUseCaseId(
   value: unknown,
 ): value is ReferenceOnlyUseCaseId {
   return value === 'social_cover' || value === 'rednote_post'
+}
+
+export function allowsPersistedReferenceReuse(value: unknown): boolean {
+  return value === 'amazon_listing' || isReferenceOnlyUseCaseId(value)
 }
 
 export function getUseCase(id: unknown): UseCaseDescriptor {

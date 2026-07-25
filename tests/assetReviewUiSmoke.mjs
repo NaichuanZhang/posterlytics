@@ -62,6 +62,7 @@ try {
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
   await testReferenceOnlyEditorReusesPersistedImages(browser)
+  await testAmazonEditorReusesPersistedImages(browser)
   await testPosterTranscriptVersionSwitch(browser)
   await testSocialCoverFrozenHint(browser)
   await testSocialCoverLateQrSampling(browser)
@@ -581,6 +582,7 @@ async function testCampaignWizardUseCases(browserInstance) {
   await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
   await page.getByLabel('Amazon listing URL Required', { exact: true }).waitFor()
   assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
+  await page.locator('#product-name').fill('Seller-provided product')
   assert.deepEqual(
     await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
     ['Product source', 'Listing copy and product images', 'Campaign action'],
@@ -592,8 +594,20 @@ async function testCampaignWizardUseCases(browserInstance) {
   )
   assert.equal(
     await listingReferences.locator('.generation-references .field-label').innerText(),
-    'Product and brand images (optional)',
+    'Product and brand images Required',
   )
+  const listingFileInput = listingReferences.getByTestId('reference-file-input')
+  assert.equal(await listingFileInput.getAttribute('aria-required'), 'true')
+  const generatePoster = page.getByRole('button', {
+    name: 'Generate poster',
+    exact: true,
+  })
+  assert.equal(await generatePoster.isDisabled(), true)
+  await listingFileInput.setInputFiles(
+    referenceImageFile('amazon-seller-reference.png'),
+  )
+  await listingReferences.locator('.reference-tile').waitFor()
+  assert.equal(await generatePoster.isEnabled(), true)
   await listingReferences.getByRole('group', { name: 'Asset selection mode' }).waitFor()
   assert.equal(
     await page.getByText('Generation references', { exact: true }).count(),
@@ -615,7 +629,7 @@ async function testCampaignWizardUseCases(browserInstance) {
   await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
   await page.locator('#product-url').fill('https://amazon.co.uk/dp/B0UNSUPPORTED')
   await page.locator('#product-name').fill('Unsupported marketplace')
-  await page.getByRole('button', { name: 'Generate poster', exact: true }).click()
+  await generatePoster.click()
   await page.locator('.source-mismatch .inline-notice-error').waitFor()
   await waitForFocused(page, '#product-url')
   assert.deepEqual(state.campaignWrites, [])
@@ -1902,6 +1916,11 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
   await page.locator('#product-url').fill(amazonUrl)
   await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
   assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
+  const listingFileInput = page.getByTestId('reference-file-input')
+  await listingFileInput.setInputFiles(
+    referenceImageFile('amazon-draft-switch.png'),
+  )
+  await page.locator('.reference-tile').waitFor()
   await submitWizardAndWaitForEnqueue(page, state, 2)
 
   assert.deepEqual(
@@ -1989,8 +2008,13 @@ async function testEditorUseCaseInputs(browserInstance) {
   )
   assert.equal(
     await page.locator('.editor-inspector .generation-references .field-label').innerText(),
-    'Product and brand images (optional)',
+    'Product and brand images Required',
   )
+  const amazonFileInput = page.getByTestId('reference-file-input')
+  assert.equal(await amazonFileInput.getAttribute('aria-required'), 'true')
+  const generate = page.getByRole('button', { name: 'Generate version' })
+  assert.equal(await generate.isDisabled(), true)
+  await page.getByText('Add at least 1 images.', { exact: true }).waitFor()
   await page.getByText('Amazon seller reference mode', { exact: true }).waitFor()
   assert.equal(await page.locator('#next-poster-format option').count(), 5)
   await assertNoOverflow(page)
@@ -2057,6 +2081,67 @@ async function testReferenceOnlyEditorReusesPersistedImages(browserInstance) {
     state.enqueueRequests[0].p_instruction,
     'Keep the composition and make the headline more direct.',
   )
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+async function testAmazonEditorReusesPersistedImages(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 900 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ editorReady: true })
+  const amazonUrl = 'https://www.amazon.com/dp/B0EXAMPLE'
+  const persistedReference = {
+    key: 'references/user-asset/amazon-current.png',
+    url: `${BASE_URL}/fixture/poster.svg`,
+    name: 'amazon-current.png',
+    mime_type: 'image/png',
+    size_bytes: 120,
+  }
+  Object.assign(state.campaign, {
+    product_url: amazonUrl,
+    destination_url: amazonUrl,
+    use_case: 'amazon_listing',
+    reference_images: [persistedReference],
+  })
+  Object.assign(state.currentGeneration, {
+    use_case: 'amazon_listing',
+    reference_images: [persistedReference],
+  })
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await page.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await page.getByRole('heading', { name: 'Create next version' }).waitFor()
+  assert.equal(
+    await page.locator(
+      '.editor-inspector .generation-references .field-label',
+    ).innerText(),
+    'Product and brand images Required',
+  )
+  assert.equal(
+    await page.getByTestId('reference-file-input').getAttribute('aria-required'),
+    'true',
+  )
+  const refreshWebsite = page.getByRole('checkbox', {
+    name: 'Re-read website before generating',
+  })
+  assert.equal(await refreshWebsite.isChecked(), false)
+
+  const generate = page.getByRole('button', { name: 'Generate version' })
+  assert.equal(await generate.isEnabled(), true)
+  await generate.click()
+  await waitFor(() => state.enqueueRequests.length === 1)
+  assert.deepEqual(
+    state.enqueueRequests[0].p_reference_images,
+    [persistedReference],
+  )
+  assert.equal(state.enqueueRequests[0].p_refresh_website, false)
+  assert.deepEqual(state.storageUploads, [])
   assert.deepEqual(pageErrors, [])
   await context.close()
 }

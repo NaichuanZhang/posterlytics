@@ -1,6 +1,71 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { resolveGenerationReferenceInput } from '../src/lib/generationReferenceInput.ts'
+import {
+  allowsPersistedReferenceReuse,
+  getUseCase,
+} from '../src/lib/useCases.ts'
+
+const amazonReferenceImages = getUseCase(
+  'amazon_listing',
+).inputFields.referenceImages
+
+function resolveAmazonReferenceInput({
+  firstVersion,
+  persistedCount,
+  pendingCount,
+}: {
+  firstVersion: boolean
+  persistedCount: number
+  pendingCount: number
+}) {
+  return resolveGenerationReferenceInput({
+    ...amazonReferenceImages,
+    firstVersion,
+    allowPersistedReuse: allowsPersistedReferenceReuse('amazon_listing'),
+    persistedCount,
+    pendingCount,
+  })
+}
+
+test('first Amazon version without a seller image is blocked', () => {
+  assert.deepEqual(resolveAmazonReferenceInput({
+    firstVersion: true,
+    persistedCount: 0,
+    pendingCount: 0,
+  }), {
+    requiredCount: 1,
+    effectiveCount: 0,
+    reusePersisted: false,
+    minimumMet: false,
+  })
+})
+
+test('later Amazon version reuses a persisted seller image', () => {
+  assert.deepEqual(resolveAmazonReferenceInput({
+    firstVersion: false,
+    persistedCount: 1,
+    pendingCount: 0,
+  }), {
+    requiredCount: 1,
+    effectiveCount: 1,
+    reusePersisted: true,
+    minimumMet: true,
+  })
+})
+
+test('later Amazon version without persisted or pending images is blocked', () => {
+  assert.deepEqual(resolveAmazonReferenceInput({
+    firstVersion: false,
+    persistedCount: 0,
+    pendingCount: 0,
+  }), {
+    requiredCount: 1,
+    effectiveCount: 0,
+    reusePersisted: false,
+    minimumMet: false,
+  })
+})
 
 test('first required version without pending references does not meet the minimum', () => {
   assert.deepEqual(resolveGenerationReferenceInput({

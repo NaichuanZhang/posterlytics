@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { zhCN } from '../src/i18n/messages.ts'
 import { POSTER_SIZES } from '../src/lib/posterSize.ts'
 import {
+  allowsPersistedReferenceReuse,
   CREATABLE_USE_CASES,
   getUseCase,
   isReferenceOnlyUseCaseId,
@@ -93,7 +94,7 @@ test('registry contains the four creatable use cases plus historical event', () 
   assert.equal(getUseCase('unknown').id, 'website_product')
 })
 
-test('website and Amazon preserve current input requirements', () => {
+test('website and Amazon preserve shared input requirements', () => {
   const website = getUseCase('website_product')
   const amazon = getUseCase('amazon_listing')
 
@@ -106,12 +107,16 @@ test('website and Amazon preserve current input requirements', () => {
     assert.equal(useCase.inputFields.destinationUrl, 'required')
     assert.equal(useCase.inputFields.referenceContext, 'optional')
     assert.equal(useCase.inputFields.platformHint, 'hidden')
-    assert.deepEqual(useCase.inputFields.referenceImages, {
-      requirement: 'optional',
-      minimumCount: 0,
-    })
   }
 
+  assert.deepEqual(website.inputFields.referenceImages, {
+    requirement: 'optional',
+    minimumCount: 0,
+  })
+  assert.deepEqual(amazon.inputFields.referenceImages, {
+    requirement: 'required',
+    minimumCount: 1,
+  })
   assert.equal(website.inputFields.productUrl.sourceKind, 'website')
   assert.equal(amazon.inputFields.productUrl.sourceKind, 'amazon')
 })
@@ -166,6 +171,14 @@ test('RedNote independently stays full-bleed, reference-only, and untracked', ()
   assert.equal(isReferenceOnlyUseCaseId('social_cover'), true)
   assert.equal(isReferenceOnlyUseCaseId('rednote_post'), true)
   assert.equal(isReferenceOnlyUseCaseId('website_product'), false)
+})
+
+test('persisted reference reuse includes Amazon and reference-only use cases', () => {
+  assert.equal(allowsPersistedReferenceReuse('amazon_listing'), true)
+  assert.equal(allowsPersistedReferenceReuse('social_cover'), true)
+  assert.equal(allowsPersistedReferenceReuse('rednote_post'), true)
+  assert.equal(allowsPersistedReferenceReuse('website_product'), false)
+  assert.equal(allowsPersistedReferenceReuse('event'), false)
 })
 
 test('all four creation cards have localized descriptions', () => {
@@ -390,7 +403,7 @@ test('editor and preflight consume persisted intent while reference-only modes a
   )
   assert.match(
     editorSource,
-    /resolveGenerationReferenceInput\(\{[\s\S]*allowPersistedReuse: referenceOnlyMode,[\s\S]*persistedCount: usablePersistedReferences\.length,[\s\S]*pendingCount: pendingReferences\.length/,
+    /resolveGenerationReferenceInput\(\{[\s\S]*allowPersistedReuse: allowsPersistedReferenceReuse\(campaignUseCase\.id\),[\s\S]*persistedCount: usablePersistedReferences\.length,[\s\S]*pendingCount: pendingReferences\.length/,
   )
   assert.match(editorSource, /allowedFormats=\{campaignUseCase\.allowedPosterFormats\}/)
   assert.match(

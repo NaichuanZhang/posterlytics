@@ -83,7 +83,11 @@ import {
   type PendingReference,
 } from '../lib/references'
 import type { PosterGeneration } from '../lib/types'
-import { getUseCase, isReferenceOnlyUseCaseId } from '../lib/useCases'
+import {
+  allowsPersistedReferenceReuse,
+  getUseCase,
+  isReferenceOnlyUseCaseId,
+} from '../lib/useCases'
 import { buildViewUrl } from '../lib/viewUrl'
 import {
   buildPosterEditorDraftData,
@@ -480,7 +484,7 @@ export function PosterEditorPage() {
     requirement: campaignUseCase.inputFields.referenceImages.requirement,
     minimumCount: campaignUseCase.inputFields.referenceImages.minimumCount,
     firstVersion,
-    allowPersistedReuse: referenceOnlyMode,
+    allowPersistedReuse: allowsPersistedReferenceReuse(campaignUseCase.id),
     persistedCount: usablePersistedReferences.length,
     pendingCount: pendingReferences.length,
   })
