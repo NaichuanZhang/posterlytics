@@ -472,7 +472,14 @@ export type PosterSpec = ProductPosterSpec | EventPosterSpec
 export interface Campaign {
   id: string
   user_id: string
+  /**
+   * The captured source. Always `source_urls[0]`, kept in sync on every write so
+   * `poster_spec.urls`, capture-preview matching, and the Amazon hostname
+   * classifier keep reading a single scalar.
+   */
   product_url: string | null
+  /** Up to three declared source URLs. Only the first is ever fetched or captured. */
+  source_urls: string[]
   product_name: string
   tagline: string | null
   cta_text: string

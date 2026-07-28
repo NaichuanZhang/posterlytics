@@ -63,6 +63,7 @@ import {
   type RedNotePostPlan,
   type RedNoteSourceCopyInput,
 } from '../src/lib/redNotePost.ts';
+import { additionalSourceUrls } from '../src/lib/sourceUrls.ts';
 
 // `analyze` is the Poster Agent core. Authenticated. For a campaign it:
 //   1. scrapes the product site (HTML)
@@ -137,7 +138,7 @@ export async function runAnalyzeStage(
   // defense in depth in addition to owner RLS.
   const { data: campaign, error: cErr } = await client.database
     .from('campaigns')
-    .select('id, product_url, product_name, tagline, cta_text, destination_url, scenario, use_case, design_tokens, brand_assets, screenshot_url, screenshot_key, eager_capture_url, eager_capture_color_scheme, eager_captured_at')
+    .select('id, product_url, source_urls, product_name, tagline, cta_text, destination_url, scenario, use_case, design_tokens, brand_assets, screenshot_url, screenshot_key, eager_capture_url, eager_capture_color_scheme, eager_captured_at')
     .eq('id', campaignId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -169,6 +170,12 @@ export async function runAnalyzeStage(
   const productUrl = String(
     (campaign as Record<string, unknown>).product_url ?? '',
   );
+  // Declared-but-uncaptured sources. Exactly one URL is fetched and captured
+  // (productUrl === source_urls[0]); the tail is rendered as prompt context only,
+  // and is empty for a single-URL campaign so its prompts stay byte-identical.
+  const additionalUrls = additionalSourceUrls(
+    (campaign as Record<string, unknown>).source_urls,
+  ).filter((url) => url !== productUrl);
   const sourceMismatch = useCaseSourceMismatch(
     (generation as Record<string, unknown>).use_case,
     productUrl,
@@ -639,6 +646,9 @@ export async function runAnalyzeStage(
       `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
       `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
       `PRODUCT URL: ${productUrl}\n` +
+      additionalUrls
+        .map((url) => `ADDITIONAL SOURCE URL: ${url}\n`)
+        .join('') +
       `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
       `CAPTURED PAGE THEME: ${design_tokens?.colors.theme ?? '(unclassified)'}\n` +
       `WEIGHTED COLOR USAGE (preserve these proportions): ${paletteEvidence || '(none found — infer restrained defaults)'}\n` +

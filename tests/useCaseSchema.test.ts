@@ -223,7 +223,12 @@ test('generation guard is swapped around backfill and the baseline adds platform
 })
 
 test('campaign source intent is correctable only before the first generation', () => {
-  for (const sql of [migration, baseline]) {
+  // The historical migration is an immutable record of the two-column intent it
+  // shipped; the baseline has since gained source_urls (see sourceUrls.test.ts).
+  for (const [sql, watchedColumns] of [
+    [migration, 'product_url, use_case'],
+    [baseline, 'product_url, use_case, source_urls'],
+  ] as const) {
     const guard = lastFunction(sql, 'guard_campaign_source_intent_update')
     const noOp = guard.indexOf('NEW.product_url')
     const generationLookup = guard.indexOf(
@@ -236,7 +241,9 @@ test('campaign source intent is correctable only before the first generation', (
     assert.doesNotMatch(guard, /status IN/)
     assert.match(
       sql,
-      /BEFORE UPDATE OF product_url, use_case ON public\.campaigns/,
+      new RegExp(
+        `BEFORE UPDATE OF ${watchedColumns} ON public\\.campaigns`,
+      ),
     )
     assert.match(
       sql,

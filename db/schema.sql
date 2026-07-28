@@ -36,6 +36,7 @@ CREATE TABLE public.campaigns (
   reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
   current_generation_id UUID,
   poster_format TEXT NOT NULL DEFAULT 'a4_2x3',
+  source_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
   CONSTRAINT campaigns_poster_format_valid
     CHECK (
       poster_format IN (
@@ -91,6 +92,17 @@ CREATE TABLE public.campaigns (
     CHECK (
       jsonb_typeof(reference_images) = 'array'
       AND jsonb_array_length(reference_images) <= 5
+    ),
+  CONSTRAINT campaigns_source_urls_shape
+    CHECK (
+      jsonb_typeof(source_urls) = 'array'
+      AND jsonb_array_length(source_urls) <= 3
+      AND NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(source_urls) AS entry
+        WHERE jsonb_typeof(entry.value) <> 'string'
+          OR NULLIF(BTRIM(entry.value #>> '{}'), '') IS NULL
+      )
     )
 );
 
@@ -259,10 +271,12 @@ AS $$
 BEGIN
   IF (
     NEW.product_url,
-    NEW.use_case
+    NEW.use_case,
+    NEW.source_urls
   ) IS NOT DISTINCT FROM (
     OLD.product_url,
-    OLD.use_case
+    OLD.use_case,
+    OLD.source_urls
   ) THEN
     RETURN NEW;
   END IF;
@@ -281,7 +295,7 @@ END;
 $$;
 
 CREATE TRIGGER campaigns_guard_source_intent_update
-  BEFORE UPDATE OF product_url, use_case ON public.campaigns
+  BEFORE UPDATE OF product_url, use_case, source_urls ON public.campaigns
   FOR EACH ROW
   EXECUTE FUNCTION public.guard_campaign_source_intent_update();
 
@@ -744,7 +758,8 @@ GRANT INSERT (
   platform_hint,
   reference_context,
   reference_images,
-  poster_format
+  poster_format,
+  source_urls
 ) ON public.campaigns TO authenticated;
 GRANT UPDATE (
   product_url,
@@ -758,7 +773,8 @@ GRANT UPDATE (
   platform_hint,
   reference_context,
   reference_images,
-  poster_format
+  poster_format,
+  source_urls
 ) ON public.campaigns TO authenticated;
 GRANT UPDATE (
   design_tokens,

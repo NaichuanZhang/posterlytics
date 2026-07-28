@@ -40,6 +40,7 @@ interface HarnessState {
   failStorageRemoveKeys: Set<string>
   operationLog: string[]
   sourceHtmlOverride: string | null
+  htmlRequests: string[]
   imageUrls: Set<string>
   sourceImageRequests: string[]
   openRouterRequests: Array<Record<string, unknown>>
@@ -485,6 +486,60 @@ export async function captureAnalyzeSourceMode(
     metadata?: Record<string, unknown>
   }>).find((candidate) => candidate.kind === 'analysis')
   return artifact?.metadata?.source_mode
+}
+
+/**
+ * Runs analyze for a campaign declaring several source URLs, and reports what was
+ * actually acquired. The fixture fetch handler throws on any URL other than
+ * `product_url`, so a stray acquisition of URL 2 or 3 fails loudly rather than
+ * being counted.
+ */
+export async function runAnalyzeSourceUrlsHarness(
+  sourceUrls: readonly string[],
+): Promise<{
+  prompt: string
+  htmlRequests: string[]
+  captureRequests: Array<Record<string, unknown>>
+}> {
+  const state = createState('website_product', sourceUrls[0] ?? null, 'product')
+  state.campaign.source_urls = [...sourceUrls]
+  state.captureServiceResponse = {
+    status: 200,
+    body: {
+      screenshot_b64: 'AAECAwQ=',
+      raw_tokens: {
+        colors: {
+          bg: '#ffffff',
+          text: '#101010',
+          primary: '#235789',
+          accent: '#f45b69',
+          palette: [{ color: '#ffffff', proportion: 0.8 }],
+        },
+        fonts: { heading: 'Inter', body: 'Inter' },
+      },
+    },
+  }
+  await withHarnessGlobals(
+    state,
+    productAnalyzeResponse('website_product'),
+    () => runAnalyzeStage({
+      client: createHarnessClient(state) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      colorScheme: 'light',
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+  const call = (state.traces.analyze.model_calls as Array<{
+    prompt?: { user?: unknown }
+  }>)[0]
+  return {
+    prompt: String(call?.prompt?.user ?? ''),
+    htmlRequests: [...state.htmlRequests],
+    captureRequests: [...state.captureRequests],
+  }
 }
 
 export async function runAnalyzeEagerCaptureHarness(
@@ -1087,6 +1142,7 @@ function createState(
     operationLog: [],
     sourceHtmlOverride: null,
     imageUrls: new Set(),
+    htmlRequests: [],
     sourceImageRequests: [],
     openRouterRequests: [],
     imagePrompts: [],
@@ -1394,6 +1450,7 @@ async function withHarnessGlobals<T>(
       )
     }
     if (url === state.campaign.product_url) {
+      state.htmlRequests.push(url)
       return new Response(
         state.sourceHtmlOverride
           ?? sourceHtml(String(state.campaign.scenario)),
@@ -1403,6 +1460,8 @@ async function withHarnessGlobals<T>(
         },
       )
     }
+    // Reached if any source URL other than source_urls[0] is fetched: extra
+    // declared URLs must never be acquired.
     throw new Error(`Unexpected fixture fetch: ${url}`)
   }
 
