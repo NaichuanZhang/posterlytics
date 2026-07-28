@@ -3641,6 +3641,8 @@ async function assertModeTooltipBehavior(page, mode, container, action) {
   const editorDescriptionId = await assertModeDescription(editor, EDITOR_MODE_DESCRIPTION)
   const yoloDescriptionId = await assertModeDescription(yolo, YOLO_MODE_DESCRIPTION)
   assert.notEqual(editorDescriptionId, yoloDescriptionId)
+  await assertTooltipAbsentFromAccessibleName(page, editor, EDITOR_MODE_DESCRIPTION)
+  await assertTooltipAbsentFromAccessibleName(page, yolo, YOLO_MODE_DESCRIPTION)
 
   await editor.hover()
   await assertTooltipVisible(editor, EDITOR_MODE_DESCRIPTION)
@@ -3652,6 +3654,22 @@ async function assertModeTooltipBehavior(page, mode, container, action) {
   assert.equal(await yolo.evaluate((element) => element === document.activeElement), true)
   await assertTooltipVisible(yolo, YOLO_MODE_DESCRIPTION)
   await assertTooltipContained(yolo, container, action)
+}
+
+// The tooltip bubble must not leak into the button's accessible NAME: Chromium
+// folds generated content into name-from-content, so an always-present
+// `content: attr(data-tooltip)` made "Editor" announce as "Editor Review,
+// include, exclude, ..." and stop matching voice control / by-name queries.
+async function assertTooltipAbsentFromAccessibleName(page, button, description) {
+  const restingContent = await button.evaluate(
+    (element) => getComputedStyle(element, '::after').content,
+  )
+  assert.equal(restingContent, 'none')
+  const snapshot = await button.ariaSnapshot()
+  assert.equal(snapshot.includes(description), false)
+  // The visible label alone must still resolve the control by name.
+  const visibleLabel = (await button.textContent()).trim()
+  assert.equal(await page.getByRole('button', { name: visibleLabel, exact: true }).count() >= 1, true)
 }
 
 async function assertModeDescription(button, expectedDescription) {

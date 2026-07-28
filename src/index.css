@@ -277,6 +277,13 @@ img {
   position: relative;
 }
 
+/* Tooltip bubble.
+   `content` is deliberately `none` at rest and only generated on
+   hover/focus-visible: Chromium includes generated content in accessible-name
+   computation, and an always-present `attr(data-tooltip)` was being appended to
+   every tooltipped control's name (so "Editor" announced as "Editor Review,
+   include, exclude, ..." and stopped matching voice control or by-name
+   queries). Opacity alone does not remove content from the accessibility tree. */
 [data-tooltip]::after {
   position: absolute;
   z-index: 90;
@@ -287,7 +294,7 @@ img {
   border-radius: var(--radius-small);
   background: #2d2e33;
   color: #ffffff;
-  content: attr(data-tooltip);
+  content: none;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.2;
@@ -300,6 +307,7 @@ img {
 
 [data-tooltip]:hover::after,
 [data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
   opacity: 1;
   transform: translate(-50%, 0);
 }
@@ -4598,12 +4606,17 @@ table.stats tr.winner td:first-child {
   background: var(--accent);
 }
 
+/* Recovery control for a parked generation — sized to the 44px touch floor with
+   vertical-only padding so it keeps reading as an inline text link. The negative
+   block margins absorb the added height, leaving the surrounding row rhythm
+   unchanged. */
 .activity-retry {
   display: inline-flex;
+  min-height: 44px;
   align-items: center;
   gap: 5px;
-  margin: -4px 16px 10px 46px;
-  padding: 4px 0;
+  margin: -14px 16px 0 46px;
+  padding: 14px 0;
   border: 0;
   background: transparent;
   color: var(--accent);
@@ -5212,6 +5225,13 @@ table.stats tr.winner td:first-child {
 }
 
 @media (max-width: 700px) {
+  /* Touch widths get the 44px floor the public surfaces already meet. Kept in a
+     media query rather than on `.button-small` itself so the dense desktop
+     editor chrome is unchanged. */
+  .button-small {
+    min-height: 44px;
+  }
+
   .asset-review-page {
     padding: 20px 14px 40px;
   }

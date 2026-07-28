@@ -91,7 +91,14 @@ export function CampaignsListPage() {
           <p>{t('Poster files and placement performance in one workspace.')}</p>
         </div>
         {!loading && !failed && (
-          <span className="page-count">{t('{count} total', { count: campaigns.length })}</span>
+          <span className="page-count">
+            {filteredCampaigns.length === campaigns.length
+              ? t('{count} total', { count: campaigns.length })
+              : t('Showing {shown} of {count}', {
+                shown: filteredCampaigns.length,
+                count: campaigns.length,
+              })}
+          </span>
         )}
       </header>
 

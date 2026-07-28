@@ -233,6 +233,10 @@ function CanvasZoomControls({
   onZoomChange: (zoom: CanvasZoom) => void
 }) {
   const { t } = useI18n()
+  // Disable each direction only when the step would not change the effective
+  // scale, so `fit` (a computed percentage) is not assumed to be the extreme.
+  const zoomOutDisabled = stepCanvasZoom(zoom, -1, fitZoom) === zoom
+  const zoomInDisabled = stepCanvasZoom(zoom, 1, fitZoom) === zoom
   return (
     <div className="zoom-controls" aria-label={t('Canvas zoom controls')}>
       <button
@@ -240,8 +244,8 @@ function CanvasZoomControls({
         className="zoom-icon"
         aria-label={t('Zoom out')}
         data-tooltip={t('Zoom out')}
-        disabled={zoom === 'fit'}
-        onClick={() => onZoomChange(stepCanvasZoom(zoom, -1))}
+        disabled={zoomOutDisabled}
+        onClick={() => onZoomChange(stepCanvasZoom(zoom, -1, fitZoom))}
       >
         <Minus size={14} aria-hidden="true" />
       </button>
@@ -268,8 +272,8 @@ function CanvasZoomControls({
         className="zoom-icon"
         aria-label={t('Zoom in')}
         data-tooltip={t('Zoom in')}
-        disabled={zoom === 100}
-        onClick={() => onZoomChange(stepCanvasZoom(zoom, 1))}
+        disabled={zoomInDisabled}
+        onClick={() => onZoomChange(stepCanvasZoom(zoom, 1, fitZoom))}
       >
         <Plus size={14} aria-hidden="true" />
       </button>

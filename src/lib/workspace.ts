@@ -62,14 +62,45 @@ export function parseWorkspacePreferences(
   }
 }
 
-export function stepCanvasZoom(zoom: CanvasZoom, direction: -1 | 1): CanvasZoom {
-  const ordered: CanvasZoom[] = ['fit', ...CANVAS_ZOOM_LEVELS]
-  const currentIndex = ordered.indexOf(zoom)
-  const nextIndex = Math.min(
-    ordered.length - 1,
-    Math.max(0, currentIndex + direction),
-  )
-  return ordered[nextIndex]
+/**
+ * Steps the canvas zoom by effective scale, not by list position.
+ *
+ * `fit` is a computed percentage (see `calculateFitZoom`), so it cannot be
+ * treated as the smallest step: on a desktop viewport Fit is commonly ~54%,
+ * which sits between the 50 and 67 levels. Pass `fitZoom` so stepping out of
+ * `fit` moves to the neighbouring level by magnitude — otherwise "zoom in"
+ * from Fit lands on 25% and shrinks the poster.
+ *
+ * When `fitZoom` is unknown (0), `fit` is treated as the smallest step so the
+ * control still walks the fixed levels rather than getting stuck.
+ */
+export function stepCanvasZoom(
+  zoom: CanvasZoom,
+  direction: -1 | 1,
+  fitZoom = 0,
+): CanvasZoom {
+  const levels = [...CANVAS_ZOOM_LEVELS]
+
+  if (zoom === 'fit') {
+    if (fitZoom <= 0) return direction === 1 ? levels[0] : 'fit'
+    const next = direction === 1
+      ? levels.find((level) => level > fitZoom)
+      : [...levels].reverse().find((level) => level < fitZoom)
+    return next ?? 'fit'
+  }
+
+  const currentIndex = levels.indexOf(zoom)
+  if (direction === 1) {
+    return levels[Math.min(levels.length - 1, currentIndex + 1)]
+  }
+
+  // Stepping down: land on `fit` when it sits below the current level, so the
+  // default view stays reachable from the discrete ladder.
+  const previous = levels[currentIndex - 1]
+  if (fitZoom > 0 && fitZoom < zoom && (previous === undefined || fitZoom > previous)) {
+    return 'fit'
+  }
+  return previous ?? 'fit'
 }
 
 export function calculateFitScale(
