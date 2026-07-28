@@ -14,6 +14,7 @@ import {
   eagerStyleBoardKey,
   matchEagerCaptureForAdoption,
 } from '../src/lib/eagerCapture.ts'
+import { resolveCreationUseCase } from '../src/lib/useCases.ts'
 import {
   runAnalyzeEagerCaptureHarness,
 } from './helpers/pipelinePromptHarness.ts'
@@ -745,3 +746,47 @@ function designTokens(): BackendDesignTokens {
     fontLinks: [],
   }
 }
+
+// Item 4 confirmation: the capture gates key on the 'website_product' literal, and
+// the creation mapping still resolves a non-Amazon source URL to exactly that
+// literal — so eager capture keeps firing without re-keying any gate.
+test('the creation mapping still satisfies the website_product capture gate', () => {
+  const useCase = resolveCreationUseCase({
+    hasSourceUrl: true,
+    allSourceUrlsAmazon: false,
+    outputKind: 'poster',
+  })
+  assert.equal(useCase, 'website_product')
+
+  const sourceUrl = 'https://example.com/product'
+  const preview = {
+    sourceUrl,
+    colorScheme: 'light',
+    captureId: 'capture-1',
+    capturedAtMs: 1_000,
+    screenshotB64: 'AAA',
+    rawTokens: null,
+  }
+  const match = matchEagerCaptureForAdoption({
+    preview: preview as never,
+    productUrl: sourceUrl,
+    useCase,
+    colorScheme: 'light',
+    nowMs: 2_000,
+  })
+  assert.notEqual(match.reason, 'unsupported_use_case')
+
+  // The gate must still reject every other literal the mapping can produce.
+  for (const other of ['amazon_listing', 'social_cover', 'rednote_post'] as const) {
+    assert.deepEqual(
+      matchEagerCaptureForAdoption({
+        preview: preview as never,
+        productUrl: sourceUrl,
+        useCase: other,
+        colorScheme: 'light',
+        nowMs: 2_000,
+      }),
+      { matched: false, reason: 'unsupported_use_case' },
+    )
+  }
+})

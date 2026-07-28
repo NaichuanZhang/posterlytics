@@ -7,9 +7,11 @@ import {
   allowsPersistedReferenceReuse,
   CREATABLE_USE_CASES,
   getUseCase,
+  isCreatableUseCaseId,
   isReferenceOnlyUseCaseId,
   readsSourceWebsite,
   isUseCaseId,
+  resolveCreationUseCase,
   resolvePosterFormatOnUseCaseSwitch,
   USE_CASE_IDS,
   USE_CASES,
@@ -528,4 +530,55 @@ test('analyze caps the frozen platform hint before trimming boundary whitespace'
     analyzeSource,
     /\.platform_hint\)\.trim\(\)\.slice\(0, 80\)/,
   )
+})
+
+test('creation mapping enumerates every intent combination and never yields event', () => {
+  const cases: Array<[boolean, boolean, 'poster' | 'post', string]> = [
+    // outputKind 'post' always wins, regardless of any source evidence.
+    [false, false, 'post', 'rednote_post'],
+    [false, true, 'post', 'rednote_post'],
+    [true, false, 'post', 'rednote_post'],
+    [true, true, 'post', 'rednote_post'],
+    // No source URL means there is nothing to read: reference-led cover artwork.
+    [false, false, 'poster', 'social_cover'],
+    // allSourceUrlsAmazon is vacuously true with no URLs and must not promote.
+    [false, true, 'poster', 'social_cover'],
+    [true, false, 'poster', 'website_product'],
+    [true, true, 'poster', 'amazon_listing'],
+  ]
+
+  for (const [hasSourceUrl, allSourceUrlsAmazon, outputKind, expected] of cases) {
+    const resolved = resolveCreationUseCase({
+      hasSourceUrl,
+      allSourceUrlsAmazon,
+      outputKind,
+    })
+    assert.equal(
+      resolved,
+      expected,
+      `${JSON.stringify({ hasSourceUrl, allSourceUrlsAmazon, outputKind })}`,
+    )
+    assert.notEqual(resolved, 'event')
+    assert.equal(isCreatableUseCaseId(resolved), true)
+  }
+
+  // The table above is exhaustive over the input space (2 x 2 x 2).
+  assert.equal(cases.length, 8)
+})
+
+test('creation mapping only ever returns creatable use cases the catalog knows', () => {
+  const creatableIds = CREATABLE_USE_CASES.map((useCase) => useCase.id)
+  for (const outputKind of ['poster', 'post'] as const) {
+    for (const hasSourceUrl of [false, true]) {
+      for (const allSourceUrlsAmazon of [false, true]) {
+        const resolved = resolveCreationUseCase({
+          hasSourceUrl,
+          allSourceUrlsAmazon,
+          outputKind,
+        })
+        assert.ok(creatableIds.includes(resolved))
+        assert.equal(getUseCase(resolved).creationEnabled, true)
+      }
+    }
+  }
 })

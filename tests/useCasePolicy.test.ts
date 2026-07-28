@@ -6,6 +6,7 @@ import {
   resolveUseCaseRecipe,
   useCaseSourceMismatch,
 } from '../functions/_useCasePolicy.ts'
+import { resolveCreationUseCase } from '../src/lib/useCases.ts'
 
 test('resolver exposes product recipes and an isolated event-bespoke sentinel', () => {
   const website = resolveUseCaseRecipe('website_product')
@@ -293,3 +294,100 @@ function materializeReferencePurposes(
     heroStyleBoard: recipe.references.heroStyleBoard,
   }
 }
+
+// Item 4's central invariant: the explicit creation mapping is the ONLY way a new
+// campaign's use_case is chosen, and every literal it can produce must land on the
+// same recipe the removed picker would have selected — a byte difference here means
+// the mapping is wrong, not that a golden needs regenerating.
+test('creation mapping reaches the same recipe identity the picker selected', () => {
+  const expectations: Array<[
+    { hasSourceUrl: boolean; allSourceUrlsAmazon: boolean; outputKind: 'poster' | 'post' },
+    'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post',
+  ]> = [
+    [{ hasSourceUrl: true, allSourceUrlsAmazon: false, outputKind: 'poster' }, 'website_product'],
+    [{ hasSourceUrl: true, allSourceUrlsAmazon: true, outputKind: 'poster' }, 'amazon_listing'],
+    [{ hasSourceUrl: false, allSourceUrlsAmazon: false, outputKind: 'poster' }, 'social_cover'],
+    [{ hasSourceUrl: true, allSourceUrlsAmazon: true, outputKind: 'post' }, 'rednote_post'],
+  ]
+
+  for (const [input, pickedId] of expectations) {
+    const mapped = resolveCreationUseCase(input)
+    assert.equal(mapped, pickedId)
+    // Object identity, not deep equality: RedNote and social cover differ only by
+    // a literal and an outputMode, so a structural compare would not catch a swap.
+    assert.equal(resolveUseCaseRecipe(mapped), resolveUseCaseRecipe(pickedId))
+    assert.equal(
+      resolveProductUseCaseRecipe(mapped),
+      resolveProductUseCaseRecipe(pickedId),
+    )
+    assert.equal(resolveProductUseCaseRecipe(mapped).id, pickedId)
+  }
+
+  // RedNote must keep its own recipe rather than collapsing into social cover.
+  assert.notEqual(
+    resolveUseCaseRecipe(resolveCreationUseCase({
+      hasSourceUrl: false,
+      allSourceUrlsAmazon: false,
+      outputKind: 'post',
+    })),
+    resolveUseCaseRecipe(resolveCreationUseCase({
+      hasSourceUrl: false,
+      allSourceUrlsAmazon: false,
+      outputKind: 'poster',
+    })),
+  )
+})
+
+test('the creation mapping can never produce a source-mismatching pair', () => {
+  const websiteUrls = [
+    'https://yourproduct.com',
+    'https://example.com/product/1',
+    'https://amazon.com.evil.example/dp/B0EXAMPLE1',
+  ]
+  const amazonUrls = [
+    'https://www.amazon.com/dp/B0EXAMPLE1',
+    'https://a.co/d/abc123',
+    'https://amzn.to/xyz',
+  ]
+
+  for (const url of websiteUrls) {
+    const useCase = resolveCreationUseCase({
+      hasSourceUrl: true,
+      allSourceUrlsAmazon: false,
+      outputKind: 'poster',
+    })
+    assert.equal(useCase, 'website_product')
+    assert.equal(useCaseSourceMismatch(useCase, url), null)
+  }
+
+  for (const url of amazonUrls) {
+    const useCase = resolveCreationUseCase({
+      hasSourceUrl: true,
+      allSourceUrlsAmazon: true,
+      outputKind: 'poster',
+    })
+    assert.equal(useCase, 'amazon_listing')
+    assert.equal(useCaseSourceMismatch(useCase, url), null)
+  }
+
+  // Reference-only outputs carry no source URL, so the guard stays inert for them
+  // while remaining the boundary for legacy or malformed snapshots.
+  for (const outputKind of ['poster', 'post'] as const) {
+    const useCase = resolveCreationUseCase({
+      hasSourceUrl: false,
+      allSourceUrlsAmazon: false,
+      outputKind,
+    })
+    assert.equal(useCaseSourceMismatch(useCase, null), null)
+    assert.equal(useCaseSourceMismatch(useCase, ''), null)
+    for (const url of [...websiteUrls, ...amazonUrls]) {
+      assert.equal(useCaseSourceMismatch(useCase, url), null)
+    }
+  }
+
+  // The guard must still reject the pairs the mapping cannot create.
+  assert.ok(useCaseSourceMismatch('amazon_listing', 'https://yourproduct.com'))
+  assert.ok(
+    useCaseSourceMismatch('website_product', 'https://www.amazon.com/dp/B0EXAMPLE1'),
+  )
+})

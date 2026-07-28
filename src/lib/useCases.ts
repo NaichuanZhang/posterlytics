@@ -213,6 +213,43 @@ export function getUseCase(id: unknown): UseCaseDescriptor {
   return isUseCaseId(id) ? USE_CASE_BY_ID.get(id)! : DEFAULT_USE_CASE
 }
 
+/**
+ * What the creator is producing, as an explicit choice rather than an inference.
+ *
+ * `'poster'` covers every tracked print/still output; `'post'` selects the
+ * RedNote post pipeline. This is the ONLY discriminator between `social_cover`
+ * and `rednote_post`: their persisted evidence columns are byte-identical, so no
+ * amount of submitted evidence can tell them apart.
+ */
+export type CreationOutputKind = 'poster' | 'post'
+
+export interface CreationUseCaseInput {
+  /** Whether the creator supplied at least one source URL. */
+  readonly hasSourceUrl: boolean
+  /** Whether EVERY supplied source URL is a recognized Amazon host. */
+  readonly allSourceUrlsAmazon: boolean
+  readonly outputKind: CreationOutputKind
+}
+
+/**
+ * Maps an explicit creation intent onto the persisted `use_case` literal.
+ *
+ * `use_case` is chosen at creation, written once at INSERT, frozen by
+ * `campaigns_guard_source_intent_update`, copied forward by
+ * `enqueue_poster_generation`, and thereafter read only from the
+ * `poster_generations` snapshot — never re-derived at read time. Callers must
+ * persist this result, not recompute it later from evidence.
+ *
+ * Never returns `'event'`: event campaigns are historical and cannot be created.
+ */
+export function resolveCreationUseCase(
+  input: CreationUseCaseInput,
+): CreatableUseCaseId {
+  if (input.outputKind === 'post') return 'rednote_post'
+  if (!input.hasSourceUrl) return 'social_cover'
+  return input.allSourceUrlsAmazon ? 'amazon_listing' : 'website_product'
+}
+
 export function resolvePosterFormatOnUseCaseSwitch(
   currentFormat: PosterSizeSlug,
   fromUseCaseId: CreatableUseCaseId | null,
