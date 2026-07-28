@@ -205,7 +205,10 @@ test('same-input retry copies the frozen platform hint instead of the mutable ta
 test('historical tracking guards stay social-only while the baseline extends them', () => {
   for (const [sql, useCaseCheck, message] of [
     [migration, /v_use_case = 'social_cover'/, /Social cover campaigns cannot have placements\./],
-    [baseline, /v_use_case = 'social_cover'/, /Social cover campaigns require a destination before placements can be added\./],
+    // The baseline message generalized with the policy: the destination
+    // requirement is now keyed on a banded format, with social_cover retained so
+    // the guard stays no weaker than before.
+    [baseline, /v_use_case = 'social_cover'/, /Tracked poster campaigns require a destination before placements can be added\./],
   ] as const) {
     const placementGuard = lastFunction(sql, 'guard_placement_tracking_policy')
     assert.match(placementGuard, /FROM public\.campaigns/)

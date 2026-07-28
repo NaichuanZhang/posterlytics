@@ -1,6 +1,28 @@
-import type { PosterSizeSlug } from './posterSize'
+import {
+  getPosterSize,
+  hasPosterQrBand,
+  isPosterSizeSlug,
+  type PosterSizeSlug,
+} from './posterSize'
 
 export const REDNOTE_POST_FORMAT: PosterSizeSlug = 'rednote_cover_3x4'
+const REDNOTE_POST_ASPECT_RATIO = '3:4'
+
+/**
+ * Whether a format can carry a RedNote post.
+ *
+ * Compares the descriptor's aspect and band mode rather than the slug, so the
+ * gate stays correct as bandless twins are added: a RedNote post is full-bleed
+ * 3:4 artwork, and a banded 3:4 poster is a different product.
+ */
+export function isRedNotePostFormat(format: unknown): boolean {
+  if (!isPosterSizeSlug(format)) return false
+  const size = getPosterSize(format)
+  return (
+    size.providerAspectRatio === REDNOTE_POST_ASPECT_RATIO
+    && !hasPosterQrBand(size)
+  )
+}
 export const REDNOTE_POST_MIN_PAGES = 2
 export const REDNOTE_POST_MAX_PAGES = 9
 

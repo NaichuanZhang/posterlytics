@@ -11,8 +11,12 @@ const migration = readFileSync(
 )
 const baseline = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8')
 
-test('banded social covers require a nonblank destination', () => {
-  for (const sql of [migration, baseline]) {
+test('the social-cover QR migration remains a record of its shipped rule', () => {
+  // Historical only. The baseline has since replaced this constraint with the
+  // format-keyed campaigns_banded_format_destination_required — see
+  // tests/bandedFormatQrPolicySchema.test.ts.
+  assert.doesNotMatch(baseline, /campaigns_social_cover_qr_destination_required/)
+  for (const sql of [migration]) {
     const constraint = namedConstraint(
       sql,
       'campaigns_social_cover_qr_destination_required',
@@ -29,8 +33,8 @@ test('banded social covers require a nonblank destination', () => {
   }
 })
 
-test('current placement policy permits destination-backed social and rejects OFF social and RedNote', () => {
-  for (const sql of [migration, baseline]) {
+test('the migration records the social-only placement policy it shipped', () => {
+  for (const sql of [migration]) {
     const guard = lastFunction(sql, 'guard_placement_tracking_policy')
     assert.match(
       guard,
@@ -84,9 +88,10 @@ test('visit attribution permits published destination-backed social and still re
   }
 })
 
-test('migration owns the exact baseline bodies and is append-only', () => {
+test('migration owns the exact baseline bodies it still governs, and is append-only', () => {
+  // guard_placement_tracking_policy has since been generalized to any banded
+  // format; the newer migration owns the baseline copy of it.
   for (const name of [
-    'guard_placement_tracking_policy',
     'guard_campaign_tracking_policy',
     'log_visit_attributed',
   ]) {

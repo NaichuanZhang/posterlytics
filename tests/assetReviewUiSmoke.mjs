@@ -539,7 +539,9 @@ async function testCampaignWizardUseCases(browserInstance) {
     1,
   )
   assert.equal(await page.getByText('Amazon seller reference mode', { exact: true }).count(), 0)
-  assert.equal(await page.locator('#poster-format option').count(), 5)
+  // The full registry: QR/destination/placement policy is band-aware, so every
+  // bandless twin is selectable on a tracking-enabled use case.
+  assert.equal(await page.locator('#poster-format option').count(), 8)
   assert.equal(await page.locator('#poster-format').inputValue(), 'a4_2x3')
 
   await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
@@ -1997,7 +1999,7 @@ async function testEditorUseCaseInputs(browserInstance) {
     await page.getByText('Amazon seller reference mode', { exact: true }).count(),
     0,
   )
-  assert.equal(await page.locator('#next-poster-format option').count(), 5)
+  assert.equal(await page.locator('#next-poster-format option').count(), 8)
 
   state.campaign.use_case = 'amazon_listing'
   state.currentGeneration.use_case = 'amazon_listing'
@@ -2017,7 +2019,7 @@ async function testEditorUseCaseInputs(browserInstance) {
   assert.equal(await generate.isDisabled(), true)
   await page.getByText('Add at least 1 images.', { exact: true }).waitFor()
   await page.getByText('Amazon seller reference mode', { exact: true }).waitFor()
-  assert.equal(await page.locator('#next-poster-format option').count(), 5)
+  assert.equal(await page.locator('#next-poster-format option').count(), 8)
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/amazon-editor-inputs-desktop.png`,

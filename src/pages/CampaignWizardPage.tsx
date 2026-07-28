@@ -30,14 +30,15 @@ import { GenerationReferences } from '../components/GenerationReferences'
 import { PlatformHintField } from '../components/PlatformHintField'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
 import {
-  isValidSocialCoverDestination,
-  SocialCoverQrSettings,
-} from '../components/SocialCoverQrSettings'
+  isValidPosterQrDestination,
+  PosterQrSettings,
+} from '../components/PosterQrSettings'
 import { WebsiteCapturePreview } from '../components/WebsiteCapturePreview'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
 import { displayNameOrUntitled } from '../lib/campaignDisplayName'
+import { posterFormatHasQr, posterFormatWithQr } from '../lib/qrPolicy'
 import { insforge } from '../lib/insforge'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import { useCampaign } from '../hooks/useCampaign'
@@ -218,7 +219,7 @@ export function CampaignWizardPage() {
   )
   const amazonListing = selectedUseCaseId === 'amazon_listing'
   const socialCover = selectedUseCaseId === 'social_cover'
-  const socialCoverQrEnabled = socialCover && posterFormat === 'rednote_3x4'
+  const socialCoverQrEnabled = socialCover && posterFormatHasQr(posterFormat)
   const referenceOnlyMode = isReferenceOnlyUseCaseId(selectedUseCaseId)
   const redNotePost = selectedUseCaseId === 'rednote_post'
   const minimumReferenceImages = inputFields
@@ -510,9 +511,9 @@ export function CampaignWizardPage() {
     const fields = getUseCase(selectedUseCaseId).inputFields
     const qrEnabled = (
       selectedUseCaseId === 'social_cover'
-      && posterFormat === 'rednote_3x4'
+      && posterFormatHasQr(posterFormat)
     )
-    if (qrEnabled && !isValidSocialCoverDestination(destinationUrl)) {
+    if (qrEnabled && !isValidPosterQrDestination(destinationUrl)) {
       throw new Error(t('Use a complete HTTP or HTTPS destination URL.'))
     }
     const resolvedProductUrl = fields.productUrl.requirement === 'hidden'
@@ -545,9 +546,7 @@ export function CampaignWizardPage() {
         ? null
         : normalizePlatformHint(platformHint),
       poster_format: selectedUseCaseId === 'social_cover'
-        ? qrEnabled
-          ? 'rednote_3x4'
-          : 'rednote_cover_3x4'
+        ? posterFormatWithQr(posterFormat, qrEnabled)
         : posterFormat,
       status: 'draft',
     }
@@ -830,12 +829,12 @@ export function CampaignWizardPage() {
           </div>
         )}
         {socialCover ? (
-          <SocialCoverQrSettings
+          <PosterQrSettings
             idPrefix="social-cover-qr"
             enabled={socialCoverQrEnabled}
             destinationUrl={destinationUrl}
             onEnabledChange={(enabled) => {
-              setPosterFormat(enabled ? 'rednote_3x4' : 'rednote_cover_3x4')
+              setPosterFormat(posterFormatWithQr(posterFormat, enabled))
               if (!enabled) setDestinationUrl('')
             }}
             onDestinationUrlChange={setDestinationUrl}

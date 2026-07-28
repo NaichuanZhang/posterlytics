@@ -1,6 +1,6 @@
 import {
-  REDNOTE_POST_FORMAT,
   getRedNotePageComposition,
+  isRedNotePostFormat,
   parseRedNotePostPlan,
   type RedNotePostPlan,
 } from '../src/lib/redNotePost.ts';
@@ -43,7 +43,7 @@ export function deriveRedNoteBackgroundLayout(
   input: RedNoteBackgroundInput,
 ): PosterLayout {
   const plan = requireRedNotePlan(input.posterContent);
-  if (input.posterFormat !== REDNOTE_POST_FORMAT) {
+  if (!isRedNotePostFormat(input.posterFormat)) {
     throw new RedNoteBackgroundValidationError(
       'RedNote background generation requires the full-bleed 3:4 format.',
     );
@@ -116,7 +116,7 @@ export function buildRedNoteBackgroundPrompt(
       'RedNote hero generation requires the deterministic background layout marker.',
     );
   }
-  if (posterFormat !== REDNOTE_POST_FORMAT) {
+  if (!isRedNotePostFormat(posterFormat)) {
     throw new RedNoteBackgroundValidationError(
       'RedNote hero generation requires the full-bleed 3:4 format.',
     );

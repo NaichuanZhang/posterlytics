@@ -216,23 +216,17 @@ test('event remains a non-creatable historical registry entry', () => {
   )
 })
 
-test('website, Amazon, and event share the banded allowlist, A4 defaults, and tracking', () => {
+test('website, Amazon, and event allow the full registry, A4 defaults, and tracking', () => {
   // The product allowlist is deliberately narrower than the POSTER_SIZES registry:
   // every entry here keeps a QR band (or is the legacy RedNote cover pair), because
   // QR/destination/placement policy is not yet band-aware. Registry completeness is
   // asserted in posterGeometry.test.ts, not here.
-  const allowedSlugs = [
-    'a4_2x3',
-    'rednote_3x4',
-    'rednote_cover_3x4',
-    'yt_thumb_16x9',
-    'luma_1x1',
-  ]
-  const registrySlugs = POSTER_SIZES.map((size) => size.slug)
-  for (const slug of allowedSlugs) assert.ok(registrySlugs.includes(slug))
+  // Now the full registry: QR/destination/placement policy keys off the
+  // descriptor's band mode, so every bandless twin is safe to offer.
+  const allowedSlugs = POSTER_SIZES.map((size) => size.slug)
+  assert.equal(allowedSlugs.length, 8)
   for (const slug of ['a4_2x3_cover', 'yt_thumb_16x9_cover', 'luma_1x1_cover']) {
-    assert.ok(registrySlugs.includes(slug))
-    assert.equal(allowedSlugs.includes(slug), false)
+    assert.ok(allowedSlugs.includes(slug))
   }
 
   for (const id of [
@@ -359,7 +353,7 @@ test('wizard persists spec-driven nullable sources and the platform target atomi
   )
   assert.match(
     wizard,
-    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: selectedUseCaseId,[\s\S]*product_url: resolvedProductUrl,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: fields\.platformHint === 'hidden'[\s\S]*normalizePlatformHint\(platformHint\)[\s\S]*poster_format: selectedUseCaseId === 'social_cover'[\s\S]*'rednote_3x4'[\s\S]*'rednote_cover_3x4'/,
+    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: selectedUseCaseId,[\s\S]*product_url: resolvedProductUrl,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: fields\.platformHint === 'hidden'[\s\S]*normalizePlatformHint\(platformHint\)[\s\S]*poster_format: selectedUseCaseId === 'social_cover'[\s\S]*posterFormatWithQr\(posterFormat, qrEnabled\)/,
   )
   assert.match(
     wizard,

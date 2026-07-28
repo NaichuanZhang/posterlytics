@@ -19,8 +19,9 @@ const socialQrMigration = readFileSync(
 const baseline = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8')
 
 const REFERENCE_ONLY_IDS = /'social_cover', 'rednote_post'/
+// guard_placement_tracking_policy is deliberately absent: the banded-format QR
+// policy migration now owns the baseline copy of it.
 const TRACKING_FUNCTIONS = [
-  'guard_placement_tracking_policy',
   'guard_campaign_tracking_policy',
   'log_visit_attributed',
 ] as const
@@ -108,9 +109,11 @@ test('current tracking policy keeps every RedNote placement and visit rejected',
       sql,
       'guard_placement_tracking_policy',
     )
+    // The rejection is preserved verbatim, though the banded-format policy moved
+    // it ahead of the destination branch, so it is no longer an ELSIF.
     assert.match(
       placementGuard,
-      /ELSIF v_use_case = 'rednote_post' THEN[\s\S]*RAISE EXCEPTION 'RedNote post campaigns cannot have placements\.'/,
+      /v_use_case = 'rednote_post' THEN[\s\S]*RAISE EXCEPTION 'RedNote post campaigns cannot have placements\.'/,
     )
     assert.match(
       lastFunction(sql, 'guard_campaign_tracking_policy'),

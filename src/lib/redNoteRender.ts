@@ -1,7 +1,7 @@
 import { parseColor, toHex, type RGB } from './colorUtils'
 import {
-  REDNOTE_POST_FORMAT,
   getRedNotePageComposition,
+  isRedNotePostFormat,
   parseRedNotePostPlan,
   type RedNoteContentPage,
   type RedNoteCoverPage,
@@ -71,7 +71,7 @@ export function resolveRedNoteRenderState(
   if (layout.render_mode !== REDNOTE_BACKGROUND_RENDER_MODE) return 'legacy'
   if (
     input.use_case !== 'rednote_post'
-    || input.poster_format !== REDNOTE_POST_FORMAT
+    || !isRedNotePostFormat(input.poster_format)
   ) {
     return 'invalid'
   }

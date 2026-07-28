@@ -1,6 +1,6 @@
 import { useI18n } from '../i18n/I18nProvider'
 
-interface SocialCoverQrSettingsProps {
+interface PosterQrSettingsProps {
   idPrefix: string
   enabled: boolean
   destinationUrl: string
@@ -9,14 +9,14 @@ interface SocialCoverQrSettingsProps {
   onDestinationUrlChange: (destinationUrl: string) => void
 }
 
-export function SocialCoverQrSettings({
+export function PosterQrSettings({
   idPrefix,
   enabled,
   destinationUrl,
   disabled = false,
   onEnabledChange,
   onDestinationUrlChange,
-}: SocialCoverQrSettingsProps) {
+}: PosterQrSettingsProps) {
   const { t } = useI18n()
   const switchId = `${idPrefix}-enabled`
   const destinationId = `${idPrefix}-destination`
@@ -72,7 +72,7 @@ export function SocialCoverQrSettings({
   )
 }
 
-export function isValidSocialCoverDestination(value: string): boolean {
+export function isValidPosterQrDestination(value: string): boolean {
   try {
     const url = new URL(value.trim())
     return (

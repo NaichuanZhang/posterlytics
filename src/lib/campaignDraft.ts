@@ -3,6 +3,7 @@ import {
   type SelectedEagerCapture,
 } from './eagerCapture'
 import { normalizeCaptureUrl } from './captureUrl'
+import { posterFormatHasQr } from './qrPolicy'
 import type { DeviceColorScheme } from './colorScheme'
 import {
   createLocalDraftEnvelope,
@@ -225,7 +226,7 @@ function parseCampaignDraftData(value: unknown): CampaignDraftDataV1 | null {
   }
   const destinationUrl = (
     selectedUseCaseId === 'social_cover'
-    && posterFormat !== 'rednote_3x4'
+    && !posterFormatHasQr(posterFormat)
   )
     ? ''
     : value.destinationUrl as string

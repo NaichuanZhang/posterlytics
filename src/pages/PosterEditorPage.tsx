@@ -35,9 +35,9 @@ import { PosterCanvas } from '../components/PosterCanvas'
 import { PosterExportButton } from '../components/PosterExportButton'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
 import {
-  isValidSocialCoverDestination,
-  SocialCoverQrSettings,
-} from '../components/SocialCoverQrSettings'
+  isValidPosterQrDestination,
+  PosterQrSettings,
+} from '../components/PosterQrSettings'
 import { PosterTranscript } from '../components/PosterTranscript'
 import { PosterVersionHistory } from '../components/PosterVersionHistory'
 import { InlineNotice } from '../components/ui/Feedback'
@@ -60,6 +60,7 @@ import {
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
 import { campaignDisplayName } from '../lib/campaignDisplayName'
+import { posterFormatHasQr, posterFormatWithQr } from '../lib/qrPolicy'
 import { resolveGenerationReferenceInput } from '../lib/generationReferenceInput'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
@@ -206,7 +207,7 @@ export function PosterEditorPage() {
       setPlacementProvisioningError(null)
       return
     }
-    const enabled = campaign.poster_format === 'rednote_3x4'
+    const enabled = posterFormatHasQr(campaign.poster_format)
     setSocialCoverQrEnabled(enabled)
     setSocialCoverDestination(enabled ? campaign.destination_url ?? '' : '')
   }, [
@@ -472,7 +473,7 @@ export function PosterEditorPage() {
   const socialCover = campaignUseCase.id === 'social_cover'
   const persistedSocialCoverQrEnabled = (
     socialCover
-    && campaign.poster_format === 'rednote_3x4'
+    && posterFormatHasQr(campaign.poster_format)
   )
   const socialCoverQrSettingsDirty = socialCover && (
     socialCoverQrEnabled !== persistedSocialCoverQrEnabled
@@ -483,7 +484,7 @@ export function PosterEditorPage() {
   )
   const socialCoverQrDestinationValid = (
     !socialCoverQrEnabled
-    || isValidSocialCoverDestination(socialCoverDestination)
+    || isValidPosterQrDestination(socialCoverDestination)
   )
   const amazonReferenceMode = campaignUseCase.id === 'amazon_listing'
   const referenceOnlyMode = isReferenceOnlyUseCaseId(campaignUseCase.id)
@@ -743,8 +744,8 @@ export function PosterEditorPage() {
     }
   }
 
-  async function saveSocialCoverQrSettings() {
-    if (!socialCover || !socialCoverQrSettingsDirty) return
+  async function savePosterQrSettings() {
+    if (!campaign || !socialCover || !socialCoverQrSettingsDirty) return
     if (!socialCoverQrDestinationValid) {
       setGenerationError(t('Use a complete HTTP or HTTPS destination URL.'))
       return
@@ -760,9 +761,10 @@ export function PosterEditorPage() {
       const { error } = await insforge.database
         .from('campaigns')
         .update({
-          poster_format: socialCoverQrEnabled
-            ? 'rednote_3x4'
-            : 'rednote_cover_3x4',
+          poster_format: posterFormatWithQr(
+            campaign.poster_format,
+            socialCoverQrEnabled,
+          ),
           destination_url: destination,
         })
         .eq('id', campaignId)
@@ -951,7 +953,7 @@ export function PosterEditorPage() {
       )}
       {socialCover ? (
         <div className="editor-social-cover-qr">
-          <SocialCoverQrSettings
+          <PosterQrSettings
             idPrefix="editor-social-cover-qr"
             enabled={socialCoverQrEnabled}
             destinationUrl={socialCoverDestination}
@@ -975,7 +977,7 @@ export function PosterEditorPage() {
               || !socialCoverQrSettingsDirty
               || !socialCoverQrDestinationValid
             }
-            onClick={() => void saveSocialCoverQrSettings()}
+            onClick={() => void savePosterQrSettings()}
           >
             {busy === 'qr-settings' ? t('Saving…') : t('Save QR settings')}
           </button>
