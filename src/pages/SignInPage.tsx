@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { PasswordRecoveryFlow } from '../auth/PasswordRecoveryFlow'
 import { LanguageSelect } from '../components/LanguageSelect'
 import { InlineNotice } from '../components/ui/Feedback'
+import { useDocumentMetadata } from '../hooks/useDocumentMetadata'
 import { useI18n } from '../i18n/I18nProvider'
 import { useFocusOnChange } from '../hooks/useViewFocus'
 import { insforge } from '../lib/insforge'
@@ -23,6 +24,11 @@ import '../marketing/public.css'
 
 export function SignInPage() {
   const { t } = useI18n()
+  useDocumentMetadata({
+    title: t('{page} | Posterlytics', { page: t('Sign in') }),
+    description: t('Sign in to your Posterlytics campaigns, posters, and placement data.'),
+    canonical: 'https://posterlytics.insforge.site/signin',
+  })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errorKind, setErrorKind] = useState<SignInErrorKind | null>(null)

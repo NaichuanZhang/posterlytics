@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { LanguageSelect } from '../components/LanguageSelect'
+import { useDocumentMetadata } from '../hooks/useDocumentMetadata'
 import { useI18n } from '../i18n/I18nProvider'
 import '../marketing/public.css'
 
@@ -9,6 +10,14 @@ export type LegalPageKind = 'terms' | 'privacy'
 export function LegalPage({ kind }: { kind: LegalPageKind }) {
   const { t } = useI18n()
   const isTerms = kind === 'terms'
+  const documentTitle = isTerms ? t('Terms of Service') : t('Privacy Policy')
+  useDocumentMetadata({
+    title: t('{page} | Posterlytics', { page: documentTitle }),
+    description: isTerms
+      ? t('The terms that apply to using Posterlytics.')
+      : t('How Posterlytics handles your account, campaign, and visit data.'),
+    canonical: `https://posterlytics.insforge.site/${kind === 'terms' ? 'terms' : 'privacy'}`,
+  })
 
   return (
     <div className="public-surface">

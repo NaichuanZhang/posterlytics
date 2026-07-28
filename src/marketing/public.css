@@ -41,6 +41,13 @@
   --public-line-strong: #151719;
   --public-accent: #e94f37;
   --public-accent-hover: #ce3f2a;
+  /* Text-only accent. The brand red is 3.34:1 on --public-paper and 3.62:1 on
+     --public-paper-raised, so it fails WCAG 1.4.3 on the small overlines and
+     labels that use it (11px/9px/10px/12px — none large enough to qualify for
+     the large-text exemption). This darker tone is 5.02:1 / 5.44:1 on those two
+     backgrounds. --public-accent stays as-is for fills, where white text on the
+     brand red already passes. */
+  --public-accent-text: #c0341f;
   --public-moss: #425b4d;
   --public-yellow: #f4c95d;
   --public-shadow: 0 24px 70px rgba(21, 23, 25, 0.17);
@@ -245,7 +252,7 @@
 .public-overline {
   display: block;
   margin-bottom: 24px;
-  color: var(--public-accent);
+  color: var(--public-accent-text);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   font-weight: 600;
@@ -326,7 +333,7 @@
 }
 
 .public-text-link:hover {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
 }
 
 .hero-poster-stage {
@@ -704,7 +711,7 @@
 
 .story-source figcaption span,
 .story-structure-head span {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
@@ -1091,7 +1098,7 @@
 }
 
 .public-footer > div a:hover {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
 }
 
 .public-footer > div .public-footer-legal-link {
@@ -1117,7 +1124,7 @@
 }
 
 .public-legal-back:hover {
-  color: var(--public-accent) !important;
+  color: var(--public-accent-text) !important;
 }
 
 .public-legal-main {
@@ -1200,7 +1207,7 @@
 
 .public-legal-links a:hover,
 .public-legal-links a[aria-current='page'] {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
 }
 
 /* Authentication */
@@ -1303,7 +1310,7 @@
 }
 
 .public-auth-back:hover {
-  color: var(--public-accent) !important;
+  color: var(--public-accent-text) !important;
 }
 
 .public-auth-back-button {
@@ -1314,7 +1321,7 @@
 }
 
 .public-auth-heading span {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   font-weight: 600;
@@ -1436,7 +1443,7 @@
 }
 
 .public-auth-inline-button:hover {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
 }
 
 .public-auth-recovery-form,
@@ -1477,7 +1484,7 @@
 }
 
 .public-auth-consent a:hover {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
 }
 
 .public-auth svg.is-spinning {
@@ -1558,6 +1565,10 @@
     --public-line-strong: #f1f2ed;
     --public-accent: #ff6249;
     --public-accent-hover: #e94f37;
+    /* The lightened dark-mode accent already clears 4.5:1 on every dark surface
+       (4.58-5.91:1), so text reuses it rather than the light-mode dark tone,
+       which would be unreadable here. */
+    --public-accent-text: #ff6249;
     --public-moss: #91aa9b;
     --public-yellow: #f4c95d;
     --public-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
@@ -2385,7 +2396,7 @@
 }
 
 .format-study-intro > span {
-  color: var(--public-accent);
+  color: var(--public-accent-text);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   font-weight: 600;
