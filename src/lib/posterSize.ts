@@ -63,6 +63,23 @@ export const POSTER_SIZES = [
     },
   },
   {
+    // Bandless twin of a4_2x3. A bandless print cannot reuse the 1240x1754 A4
+    // sheet (that sheet is A4 paper, 0.707, not 2:3), so artwork===sheet at a
+    // true 2:3 and it is labelled a 2:3 full-bleed print, not A4.
+    slug: 'a4_2x3_cover',
+    label: catalogLabel('Portrait 2:3 full bleed'),
+    artwork: { width: 980, height: 1470 },
+    sheet: { width: 980, height: 1470 },
+    providerAspectRatio: '2:3',
+    export: {
+      pixelRatio: 2,
+      filenameSuffix: 'FullBleed-2x3',
+    },
+    qrBand: {
+      mode: 'none',
+    },
+  },
+  {
     slug: 'rednote_3x4',
     label: catalogLabel('Portrait 3:4 with QR footer'),
     artwork: { width: 960, height: 1280 },
@@ -107,6 +124,21 @@ export const POSTER_SIZES = [
     },
   },
   {
+    // Bandless twin of yt_thumb_16x9.
+    slug: 'yt_thumb_16x9_cover',
+    label: catalogLabel('Landscape 16:9 full bleed'),
+    artwork: { width: 800, height: 450 },
+    sheet: { width: 800, height: 450 },
+    providerAspectRatio: '16:9',
+    export: {
+      pixelRatio: 1,
+      filenameSuffix: 'FullBleed-16x9',
+    },
+    qrBand: {
+      mode: 'none',
+    },
+  },
+  {
     slug: 'luma_1x1',
     label: catalogLabel('Square 1:1'),
     artwork: { width: 800, height: 800 },
@@ -119,6 +151,21 @@ export const POSTER_SIZES = [
     qrBand: {
       mode: 'scaled',
       scale: (1080 - 800) / BASE_QR_BAND_TOTAL_HEIGHT,
+    },
+  },
+  {
+    // Bandless twin of luma_1x1.
+    slug: 'luma_1x1_cover',
+    label: catalogLabel('Square 1:1 full bleed'),
+    artwork: { width: 800, height: 800 },
+    sheet: { width: 800, height: 800 },
+    providerAspectRatio: '1:1',
+    export: {
+      pixelRatio: 1,
+      filenameSuffix: 'FullBleed-1x1',
+    },
+    qrBand: {
+      mode: 'none',
     },
   },
 ] as const satisfies readonly PosterSizeDescriptor[]
@@ -145,6 +192,59 @@ export function getPosterSize(value: unknown): PosterSize {
     throw new RangeError(`Unknown poster size: ${String(value)}`)
   }
   return POSTER_SIZE_BY_SLUG.get(value)!
+}
+
+// Banded slug <-> bandless twin. Every slug appears exactly once as a key so
+// splitPosterFormat/getPosterSizeTwin are total over the registry; a missing
+// entry is a compile error via the satisfies check below.
+const POSTER_FORMAT_TWINS = {
+  a4_2x3: 'a4_2x3_cover',
+  rednote_3x4: 'rednote_cover_3x4',
+  yt_thumb_16x9: 'yt_thumb_16x9_cover',
+  luma_1x1: 'luma_1x1_cover',
+} as const satisfies Partial<Record<PosterSizeSlug, PosterSizeSlug>>
+
+const POSTER_FORMAT_BANDLESS_TO_BANDED = Object.fromEntries(
+  Object.entries(POSTER_FORMAT_TWINS).map(([banded, bandless]) => [bandless, banded]),
+) as Record<string, PosterSizeSlug>
+
+/**
+ * The QR band is not an independent axis — it is encoded in the slug, and only
+ * some aspects have a bandless twin. `resolvePosterFormat` maps a provider
+ * aspect ratio plus a QR-enabled flag to the slug the campaign should carry;
+ * `splitPosterFormat` is its inverse; `getPosterSizeTwin` flips the band on a
+ * slug that has a twin. All three are total over the 8-slug registry.
+ */
+export function resolvePosterFormat(
+  providerAspectRatio: string,
+  qrEnabled: boolean,
+): PosterSizeSlug {
+  const match = POSTER_SIZES.find((size) =>
+    size.providerAspectRatio === providerAspectRatio
+    && hasPosterQrBand(size) === qrEnabled,
+  )
+  if (!match) {
+    throw new RangeError(
+      `No poster format for aspect ${providerAspectRatio} with qrEnabled=${qrEnabled}`,
+    )
+  }
+  return match.slug
+}
+
+export function splitPosterFormat(
+  slug: PosterSizeSlug,
+): { aspect: string; qrEnabled: boolean } {
+  const size = getPosterSize(slug)
+  return { aspect: size.providerAspectRatio, qrEnabled: hasPosterQrBand(size) }
+}
+
+// Returns the slug with the QR band flipped, or null when the aspect has no
+// bandless twin (only 3:4 / 2:3 / 16:9 / 1:1 do today).
+export function getPosterSizeTwin(slug: PosterSizeSlug): PosterSizeSlug | null {
+  if (slug in POSTER_FORMAT_TWINS) {
+    return POSTER_FORMAT_TWINS[slug as keyof typeof POSTER_FORMAT_TWINS]
+  }
+  return POSTER_FORMAT_BANDLESS_TO_BANDED[slug] ?? null
 }
 
 export function getSelectablePosterSizes(

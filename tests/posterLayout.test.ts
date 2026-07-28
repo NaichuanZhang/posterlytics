@@ -444,6 +444,42 @@ test('buildParentContextPrompt gives one factual reflow instruction for a format
   ])
 })
 
+test('buildParentContextPrompt emits a band-removal clause for a twin swap, not a recompose', () => {
+  const prompt = buildParentContextPrompt({
+    instruction: 'Keep the message.',
+    parentLayout: LAYOUT,
+    hasPreviousPoster: true,
+    parentPosterSize: getPosterSize('a4_2x3'),
+    posterSize: getPosterSize('a4_2x3_cover'),
+  })
+  const formatLines = prompt
+    .split('\n')
+    .filter((line) => line.startsWith('FORMAT CHANGE:'))
+
+  // Same aspect, band flipped off: describe the band change, do NOT tell the
+  // model to recompose for the frame it already had.
+  assert.equal(formatLines.length, 1)
+  assert.match(formatLines[0], /remove the QR footer band/)
+  assert.doesNotMatch(formatLines[0], /Recompose the poster for this frame/)
+})
+
+test('buildParentContextPrompt emits a band-reserve clause when adding a QR footer', () => {
+  const prompt = buildParentContextPrompt({
+    instruction: 'Keep the message.',
+    parentLayout: LAYOUT,
+    hasPreviousPoster: true,
+    parentPosterSize: getPosterSize('rednote_cover_3x4'),
+    posterSize: getPosterSize('rednote_3x4'),
+  })
+  const formatLines = prompt
+    .split('\n')
+    .filter((line) => line.startsWith('FORMAT CHANGE:'))
+
+  assert.equal(formatLines.length, 1)
+  assert.match(formatLines[0], /reserve room for a QR footer band/)
+  assert.doesNotMatch(formatLines[0], /Recompose the poster for this frame/)
+})
+
 test('buildParentContextPrompt omits reflow instructions when the format is unchanged', () => {
   const size = getPosterSize('yt_thumb_16x9')
   const prompt = buildParentContextPrompt({

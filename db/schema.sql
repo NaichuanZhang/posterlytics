@@ -40,10 +40,13 @@ CREATE TABLE public.campaigns (
     CHECK (
       poster_format IN (
         'a4_2x3',
+        'a4_2x3_cover',
         'rednote_3x4',
         'rednote_cover_3x4',
         'yt_thumb_16x9',
-        'luma_1x1'
+        'yt_thumb_16x9_cover',
+        'luma_1x1',
+        'luma_1x1_cover'
       )
     ),
   CONSTRAINT campaigns_scenario_valid
@@ -141,10 +144,13 @@ CREATE TABLE public.poster_generations (
     CHECK (
       poster_format IN (
         'a4_2x3',
+        'a4_2x3_cover',
         'rednote_3x4',
         'rednote_cover_3x4',
         'yt_thumb_16x9',
-        'luma_1x1'
+        'yt_thumb_16x9_cover',
+        'luma_1x1',
+        'luma_1x1_cover'
       )
     ),
   CONSTRAINT poster_generations_scenario_valid

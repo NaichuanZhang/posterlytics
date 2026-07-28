@@ -2098,10 +2098,21 @@ export function buildParentContextPrompt(args: {
     'Create a refined next version without introducing gratuitous changes.';
   const posterSize = args.posterSize ?? DEFAULT_POSTER_SIZE;
   const stages = (args.recipe ?? resolveProductUseCaseRecipe(undefined)).stages;
-  const formatChange = args.parentPosterSize &&
-      args.parentPosterSize.slug !== posterSize.slug
-    ? `FORMAT CHANGE: The target frame is ${getPosterFrameLabel(posterSize)}. Recompose the poster for this frame.`
-    : '';
+  // A twin swap keeps the aspect and only flips the QR band, so a plain slug
+  // comparison would tell the model to "recompose for PORTRAIT 3:4" — the frame
+  // it already had, since getPosterFrameLabel ignores the band. Distinguish an
+  // aspect change (recompose) from a band-only change (add/remove the footer),
+  // and stay silent when both match.
+  const formatChange = (() => {
+    const parent = args.parentPosterSize;
+    if (!parent || parent.slug === posterSize.slug) return '';
+    if (parent.providerAspectRatio !== posterSize.providerAspectRatio) {
+      return `FORMAT CHANGE: The target frame is ${getPosterFrameLabel(posterSize)}. Recompose the poster for this frame.`;
+    }
+    return hasPosterQrBand(posterSize)
+      ? 'FORMAT CHANGE: Keep the same composition but reserve room for a QR footer band at the bottom.'
+      : 'FORMAT CHANGE: Keep the same composition but remove the QR footer band; the artwork now bleeds to the full frame.';
+  })();
 
   if (!args.parentLayout && !args.hasPreviousPoster) {
     return [

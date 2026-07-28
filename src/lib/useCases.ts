@@ -46,6 +46,17 @@ export interface UseCaseDescriptor<Id extends UseCaseId = UseCaseId> {
   readonly trackingEnabled: boolean
 }
 
+/**
+ * Formats a tracking-enabled use case may currently be created or regenerated in.
+ *
+ * Deliberately NOT `POSTER_SIZES.map(slug)`: the registry is the capability list,
+ * this is the product allowlist. The bandless twins (`*_cover`) exist in the
+ * registry and the DB CHECK, but QR/destination/placement policy still keys off
+ * the RedNote pair rather than the descriptor's band mode, so offering a bandless
+ * twin here would hand the user a QR-less poster while the editor still
+ * auto-provisions a placement and demands a destination URL. They become
+ * selectable once that policy is band-aware.
+ */
 const ALL_POSTER_FORMATS = [
   'a4_2x3',
   'rednote_3x4',

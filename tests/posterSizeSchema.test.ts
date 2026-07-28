@@ -7,8 +7,12 @@ const migration = readFileSync(
   new URL('../migrations/20260718201210_poster-size-registry.sql', import.meta.url),
   'utf8',
 )
-const coverMigration = readFileSync(
+const rednoteCoverMigration = readFileSync(
   new URL('../migrations/20260719000233_add-rednote-cover-format.sql', import.meta.url),
+  'utf8',
+)
+const twinsMigration = readFileSync(
+  new URL('../migrations/20260728000000_bandless-format-twins.sql', import.meta.url),
   'utf8',
 )
 const baseline = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8')
@@ -35,24 +39,30 @@ test('original registry migration remains an immutable record of its shipped slu
   assert.doesNotMatch(migration, /rednote_cover_3x4/)
 })
 
-test('cover migration replaces both checks with the current registry slugs', () => {
+test('rednote-cover migration remains an immutable record of its shipped slugs', () => {
+  // Historical record: it added rednote_cover_3x4 but predates the bandless twins.
+  assert.match(rednoteCoverMigration, /rednote_cover_3x4/)
+  assert.doesNotMatch(rednoteCoverMigration, /a4_2x3_cover|yt_thumb_16x9_cover|luma_1x1_cover/)
+})
+
+test('latest format migration widens both checks to the current registry slugs', () => {
   assert.match(
-    coverMigration,
+    twinsMigration,
     /ALTER TABLE public\.campaigns[\s\S]*DROP CONSTRAINT campaigns_poster_format_valid[\s\S]*ADD CONSTRAINT campaigns_poster_format_valid/,
   )
   assert.match(
-    coverMigration,
+    twinsMigration,
     /ALTER TABLE public\.poster_generations[\s\S]*DROP CONSTRAINT poster_generations_poster_format_valid[\s\S]*ADD CONSTRAINT poster_generations_poster_format_valid/,
   )
   assert.deepEqual(
-    constraintSlugs(coverMigration, 'campaigns_poster_format_valid'),
+    constraintSlugs(twinsMigration, 'campaigns_poster_format_valid'),
     FORMAT_SLUGS,
   )
   assert.deepEqual(
-    constraintSlugs(coverMigration, 'poster_generations_poster_format_valid'),
+    constraintSlugs(twinsMigration, 'poster_generations_poster_format_valid'),
     FORMAT_SLUGS,
   )
-  assert.doesNotMatch(coverMigration, /ADD COLUMN|story_9x16|share_1200x630/)
+  assert.doesNotMatch(twinsMigration, /ADD COLUMN|story_9x16|share_1200x630/)
 })
 
 test('fresh-project baseline contains the current constrained format registry', () => {

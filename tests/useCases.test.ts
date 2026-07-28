@@ -214,8 +214,24 @@ test('event remains a non-creatable historical registry entry', () => {
   )
 })
 
-test('website, Amazon, and event retain all formats, A4 defaults, and tracking', () => {
-  const formatSlugs = POSTER_SIZES.map((size) => size.slug)
+test('website, Amazon, and event share the banded allowlist, A4 defaults, and tracking', () => {
+  // The product allowlist is deliberately narrower than the POSTER_SIZES registry:
+  // every entry here keeps a QR band (or is the legacy RedNote cover pair), because
+  // QR/destination/placement policy is not yet band-aware. Registry completeness is
+  // asserted in posterGeometry.test.ts, not here.
+  const allowedSlugs = [
+    'a4_2x3',
+    'rednote_3x4',
+    'rednote_cover_3x4',
+    'yt_thumb_16x9',
+    'luma_1x1',
+  ]
+  const registrySlugs = POSTER_SIZES.map((size) => size.slug)
+  for (const slug of allowedSlugs) assert.ok(registrySlugs.includes(slug))
+  for (const slug of ['a4_2x3_cover', 'yt_thumb_16x9_cover', 'luma_1x1_cover']) {
+    assert.ok(registrySlugs.includes(slug))
+    assert.equal(allowedSlugs.includes(slug), false)
+  }
 
   for (const id of [
     'website_product',
@@ -223,7 +239,7 @@ test('website, Amazon, and event retain all formats, A4 defaults, and tracking',
     'event',
   ] as const) {
     const useCase = getUseCase(id)
-    assert.deepEqual(useCase.allowedPosterFormats, formatSlugs)
+    assert.deepEqual(useCase.allowedPosterFormats, allowedSlugs)
     assert.equal(useCase.defaultPosterFormat, 'a4_2x3')
     assert.equal(
       useCase.allowedPosterFormats.includes(useCase.defaultPosterFormat),

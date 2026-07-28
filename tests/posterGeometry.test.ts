@@ -10,7 +10,10 @@ import {
   getPosterQrBandGeometry,
   getSelectablePosterSizes,
   getPosterSize,
+  getPosterSizeTwin,
   hasPosterQrBand,
+  resolvePosterFormat,
+  splitPosterFormat,
   MATTE_GAP,
   MATTE_X,
   POSTER_HEIGHT,
@@ -30,6 +33,16 @@ const PRESET_EXPECTATIONS = [
     exportSize: { width: 2480, height: 3508 },
     filenameSuffix: 'A4',
     qrBand: { mode: 'scaled', scale: 1 },
+  },
+  {
+    slug: 'a4_2x3_cover',
+    artwork: { width: 980, height: 1470 },
+    sheet: { width: 980, height: 1470 },
+    providerAspectRatio: '2:3',
+    pixelRatio: 2,
+    exportSize: { width: 1960, height: 2940 },
+    filenameSuffix: 'FullBleed-2x3',
+    qrBand: { mode: 'none' },
   },
   {
     slug: 'rednote_3x4',
@@ -76,6 +89,16 @@ const PRESET_EXPECTATIONS = [
     },
   },
   {
+    slug: 'yt_thumb_16x9_cover',
+    artwork: { width: 800, height: 450 },
+    sheet: { width: 800, height: 450 },
+    providerAspectRatio: '16:9',
+    pixelRatio: 1,
+    exportSize: { width: 800, height: 450 },
+    filenameSuffix: 'FullBleed-16x9',
+    qrBand: { mode: 'none' },
+  },
+  {
     slug: 'luma_1x1',
     artwork: { width: 800, height: 800 },
     sheet: { width: 1080, height: 1080 },
@@ -91,6 +114,16 @@ const PRESET_EXPECTATIONS = [
         + BASE_QR_BAND_GEOMETRY.footerHeight
       ),
     },
+  },
+  {
+    slug: 'luma_1x1_cover',
+    artwork: { width: 800, height: 800 },
+    sheet: { width: 800, height: 800 },
+    providerAspectRatio: '1:1',
+    pixelRatio: 1,
+    exportSize: { width: 800, height: 800 },
+    filenameSuffix: 'FullBleed-1x1',
+    qrBand: { mode: 'none' },
   },
 ] as const
 
@@ -231,4 +264,46 @@ test('default sheet ratio still matches portrait A4 (210:297) within 0.1%', () =
   const sheet = POSTER_WIDTH / POSTER_HEIGHT
   const a4 = 210 / 297
   assert.ok(Math.abs(sheet - a4) / a4 < 0.001, `sheet ${sheet} vs A4 ${a4}`)
+})
+
+test('resolvePosterFormat and splitPosterFormat round-trip every registry slug', () => {
+  for (const size of POSTER_SIZES) {
+    const { aspect, qrEnabled } = splitPosterFormat(size.slug)
+    assert.equal(aspect, size.providerAspectRatio, size.slug)
+    assert.equal(qrEnabled, hasPosterQrBand(size), size.slug)
+    // resolve(split(slug)) must return the same slug.
+    assert.equal(resolvePosterFormat(aspect, qrEnabled), size.slug, size.slug)
+  }
+})
+
+test('getPosterSizeTwin flips the band for aspects that have a twin, null otherwise', () => {
+  const pairs = [
+    ['a4_2x3', 'a4_2x3_cover'],
+    ['rednote_3x4', 'rednote_cover_3x4'],
+    ['yt_thumb_16x9', 'yt_thumb_16x9_cover'],
+    ['luma_1x1', 'luma_1x1_cover'],
+  ]
+  for (const [banded, bandless] of pairs) {
+    assert.equal(getPosterSizeTwin(banded), bandless, banded)
+    assert.equal(getPosterSizeTwin(bandless), banded, bandless)
+    // A twin always shares the aspect and flips the band.
+    assert.equal(
+      getPosterSize(banded).providerAspectRatio,
+      getPosterSize(bandless).providerAspectRatio,
+    )
+    assert.notEqual(
+      hasPosterQrBand(getPosterSize(banded)),
+      hasPosterQrBand(getPosterSize(bandless)),
+    )
+  }
+})
+
+test('every bandless twin satisfies the aspect invariant (artwork === sheet at the true ratio)', () => {
+  for (const size of POSTER_SIZES) {
+    if (size.qrBand.mode !== 'none') continue
+    // artwork === sheet (no matte) and width*ratioHeight === height*ratioWidth.
+    assert.deepEqual(size.artwork, size.sheet, size.slug)
+    const [rw, rh] = size.providerAspectRatio.split(':').map(Number)
+    assert.equal(size.artwork.width * rh, size.artwork.height * rw, size.slug)
+  }
 })
