@@ -216,6 +216,63 @@ test('view status pages expose accessible recovery and byline styles', () => {
   }
 })
 
+test('view answers HEAD from link_status without recording a visit', async () => {
+  for (const [status, expected] of [
+    ['published', 200],
+    ['unpublished', 200],
+    ['missing', 404],
+  ] as const) {
+    const calls: string[] = []
+    const response = await handleViewRequest(
+      new Request('https://example.test/functions/view?code=probe', { method: 'HEAD' }),
+      testRuntime(async (name) => {
+        calls.push(name)
+        return { data: status, error: null }
+      }),
+    )
+
+    // link_status only: none of the log_visit* RPCs may run for a HEAD probe.
+    assert.deepEqual(calls, ['link_status'], status)
+    assert.equal(response.status, expected, status)
+    assert.equal(response.headers.get('Location'), null, status)
+    assert.equal(await response.text(), '', status)
+    assert.equal(response.headers.get('Cache-Control'), 'no-store', status)
+    assert.equal(response.headers.get('Allow'), 'GET, HEAD, OPTIONS', status)
+    // A HEAD probe must not mint a visitor identity either.
+    assert.equal(response.headers.get('Set-Cookie'), null, status)
+  }
+})
+
+test('view refuses non-read methods with an accurate Allow header', async () => {
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    const calls: string[] = []
+    const response = await handleViewRequest(
+      new Request('https://example.test/functions/view?code=published', { method }),
+      testRuntime(async (name) => {
+        calls.push(name)
+        return { data: 'https://destination.example/product', error: null }
+      }),
+    )
+
+    assert.equal(response.status, 405, method)
+    assert.equal(response.headers.get('Allow'), 'GET, HEAD, OPTIONS', method)
+    assert.equal(response.headers.get('Location'), null, method)
+    assert.deepEqual(calls, [], method)
+  }
+})
+
+test('view advertises only the read methods it accepts on preflight', async () => {
+  const response = await handleViewRequest(
+    new Request('https://example.test/functions/view?code=published', { method: 'OPTIONS' }),
+    testRuntime(async () => ({ data: null, error: null })),
+  )
+  assert.equal(response.status, 204)
+  assert.equal(
+    response.headers.get('Access-Control-Allow-Methods'),
+    'GET, HEAD, OPTIONS',
+  )
+})
+
 function testRuntime(
   rpc: (
     name: string,

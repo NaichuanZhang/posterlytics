@@ -23,6 +23,7 @@ import {
   resolveRedNoteRenderState,
 } from '../lib/redNoteRender'
 import type { Campaign } from '../lib/types'
+import type { PosterPlaceholderStatus } from './posters/AiPoster'
 import { LayoutPreview } from './LayoutPreview'
 import { Poster } from './Poster'
 import { useI18n } from '../i18n/I18nProvider'
@@ -38,6 +39,7 @@ interface PosterCanvasProps {
   pageIndex?: number
   pageCount?: number
   onPageIndexChange?: (pageIndex: number) => void
+  placeholderStatus?: PosterPlaceholderStatus
 }
 
 interface ElementSize {
@@ -56,6 +58,7 @@ export function PosterCanvas({
   pageIndex = 0,
   pageCount,
   onPageIndexChange,
+  placeholderStatus,
 }: PosterCanvasProps) {
   const { t } = useI18n()
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -138,6 +141,7 @@ export function PosterCanvas({
                   width={previewWidth}
                   posterSize={posterSize}
                   pageIndex={renderedPageIndex}
+                  placeholderStatus={placeholderStatus}
                 />
               ) : (
                 <div className="canvas-message">{t('Preparing the tracked placement')}</div>

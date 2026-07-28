@@ -145,6 +145,12 @@ function parseLanguageQuality(value: string): number | null {
 //   4. adds non-destructive UTM attribution and 302s to the real destination
 // A null result means the code is unknown OR the campaign isn't published;
 // distinguish the two via link_status so we can explain rather than 404 blindly.
+const ALLOWED_VIEW_METHODS = 'GET, HEAD, OPTIONS';
+
+// The shared CORS block advertises POST for the JSON functions; this endpoint
+// only reads, so narrow the advertised methods to match what it now accepts.
+const VIEW_CORS = { ...CORS, 'Access-Control-Allow-Methods': ALLOWED_VIEW_METHODS };
+
 interface ViewRuntime {
   createClient: typeof createAnonClient;
   getVisitorSalt: () => string;
@@ -169,14 +175,28 @@ export async function handleViewRequest(
   req: Request,
   runtime: ViewRuntime,
 ): Promise<Response> {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: VIEW_CORS });
 
   const url = new URL(req.url);
   const locale = resolveViewLocale(req.headers.get('accept-language'));
+
+  // Only GET represents a person following a tracked link. HEAD is what link
+  // checkers, chat-app unfurlers and security scanners issue against a pasted
+  // URL — resolving it through log_visit counted those probes as real visits
+  // (and, uncookied, inflated unique visitors). HEAD is answered from the
+  // non-mutating link_status RPC; anything else is refused outright.
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return methodNotAllowedResponse();
+  }
+
   const code = url.searchParams.get('code');
   if (!code) return statusPageResponse('invalid', locale, 400);
 
   const client = runtime.createClient();
+
+  if (req.method === 'HEAD') {
+    return await headResponse(client, code, locale);
+  }
 
   // First-party visitor identity (cookie). New cookie => set it on the response.
   let visitorId = readCookie(req, 'plv');
@@ -262,6 +282,46 @@ function visitDetails(data: unknown): {
       ? { campaign: record.campaign_name, placementCode: record.placement_code }
       : null;
   return { destination: record.destination_url, attribution };
+}
+
+function methodNotAllowedResponse(): Response {
+  return new Response(null, {
+    status: 405,
+    headers: new Headers({ ...VIEW_CORS, Allow: ALLOWED_VIEW_METHODS, 'Cache-Control': 'no-store' }),
+  });
+}
+
+/**
+ * Answers HEAD without recording a visit.
+ *
+ * `link_status` is STABLE and anon-executable, so it reports whether a code is
+ * live without touching `scans`. HEAD carries no body by definition, so the
+ * status code alone conveys the outcome — and deliberately no `Location`, since
+ * emitting one would let an unfurler follow through to the destination and make
+ * the probe indistinguishable from a real visit downstream.
+ */
+async function headResponse(
+  client: ReturnType<typeof createAnonClient>,
+  code: string,
+  locale: ViewLocale,
+): Promise<Response> {
+  let kind: LinkKind = 'missing';
+  try {
+    const { data } = await client.database.rpc('link_status', { p_code: code });
+    if (data === 'published') kind = 'published';
+    else if (data === 'unpublished') kind = 'unpublished';
+  } catch {
+    kind = 'missing';
+  }
+  const headers = new Headers({
+    ...VIEW_CORS,
+    Allow: ALLOWED_VIEW_METHODS,
+    'Cache-Control': 'no-store',
+    'Content-Language': locale,
+  });
+  // 200 for a resolvable link (live or not-yet-live), 404 for an unknown code —
+  // matching what the equivalent GET would report, minus the visit.
+  return new Response(null, { status: kind === 'missing' ? 404 : 200, headers });
 }
 
 function redirect(location: string, setCookie?: string | null): Response {

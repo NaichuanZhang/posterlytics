@@ -11,6 +11,7 @@ import {
 import type { Campaign } from '../../lib/types'
 import {
   AiPoster,
+  type PosterPlaceholderStatus,
   type PosterRenderReady,
 } from './AiPoster'
 import { RedNotePostPage } from './RedNotePostPage'
@@ -24,6 +25,7 @@ interface Props {
   onRenderReady?: (result: PosterRenderReady) => void
   posterSize?: PosterSize
   pageIndex?: number
+  placeholderStatus?: PosterPlaceholderStatus
 }
 
 export const PosterSurface = forwardRef<HTMLDivElement, Props>(
@@ -37,6 +39,7 @@ export const PosterSurface = forwardRef<HTMLDivElement, Props>(
       onRenderReady,
       posterSize = DEFAULT_POSTER_SIZE,
       pageIndex = 0,
+      placeholderStatus,
     },
     ref,
   ) {
@@ -53,6 +56,7 @@ export const PosterSurface = forwardRef<HTMLDivElement, Props>(
           imageSrcOverride={imageSrcOverride}
           compositedFooterAriaHidden={compositedFooterAriaHidden}
           onRenderReady={onRenderReady}
+          placeholderStatus={placeholderStatus}
           posterSize={posterSize}
         />
       )

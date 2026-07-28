@@ -440,6 +440,19 @@ export function PosterEditorPage() {
         ? undefined
         : campaign.poster_format,
   )
+  // Word the empty-canvas placeholder from the latest attempt's terminal state,
+  // so a canceled or failed generation stops claiming it is still running. Only
+  // meaningful when there is nothing to render and nothing in flight.
+  const latestTerminalGeneration = failedGenerations[0] ?? null
+  const posterPlaceholderStatus = (
+    previewCampaign.hero_image_url
+    || activeGenerations.length > 0
+    || !latestTerminalGeneration
+  )
+    ? 'generating'
+    : latestTerminalGeneration.status === 'canceled'
+      ? 'canceled'
+      : 'failed'
   const targetPosterSize = getPosterSize(campaign.poster_format)
   const previewIncludesQrBand = hasPosterQrBand(previewPosterSize)
   const posterTranscript = derivePosterTranscript(previewCampaign, {
@@ -816,10 +829,19 @@ export function PosterEditorPage() {
     }
   }
 
-  function copyLink() {
+  // Confirm only after the write resolves — see PlacementsPage.copyLink.
+  async function copyLink() {
     if (!selectedPlacement) return
-    void navigator.clipboard?.writeText(buildViewUrl(selectedPlacement.code))
-    notify(t('Tracked link copied.'), 'success')
+    if (!navigator.clipboard?.writeText) {
+      notify(t('Tracked link could not be copied.'), 'error')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(buildViewUrl(selectedPlacement.code))
+      notify(t('Tracked link copied.'), 'success')
+    } catch {
+      notify(t('Tracked link could not be copied.'), 'error')
+    }
   }
 
   async function deleteCampaign() {
@@ -1148,7 +1170,7 @@ export function PosterEditorPage() {
               />
             )}
             {campaignTrackingActive && previewIncludesQrBand && selectedPlacement && (
-              <button type="button" className="button button-secondary button-small" onClick={copyLink}>
+              <button type="button" className="button button-secondary button-small" onClick={() => void copyLink()}>
                 <Copy size={15} aria-hidden="true" />
                 {t('Copy tracked link')}
               </button>
@@ -1371,6 +1393,7 @@ export function PosterEditorPage() {
                   : t('Current poster')}
                 onZoomChange={(zoom) => updatePreferences({ zoom })}
                 onPageIndexChange={changeRedNotePageIndex}
+                placeholderStatus={posterPlaceholderStatus}
               />
             )}
             <PosterTranscript transcript={posterTranscript} />

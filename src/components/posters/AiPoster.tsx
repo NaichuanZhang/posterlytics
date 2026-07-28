@@ -29,7 +29,14 @@ interface Props {
   compositedFooterAriaHidden?: boolean
   onRenderReady?: (result: PosterRenderReady) => void
   posterSize?: PosterSize
+  // Terminal state of the latest generation, used only to word the empty-canvas
+  // placeholder. Optional and defaulting to the in-progress copy so the export
+  // and preview call sites are unaffected — an export must never paint
+  // "canceled" into a poster.
+  placeholderStatus?: PosterPlaceholderStatus
 }
+
+export type PosterPlaceholderStatus = 'generating' | 'canceled' | 'failed'
 
 export type PosterFooterColorSource = 'sampled' | 'fallback' | 'not-applicable'
 
@@ -65,6 +72,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
     compositedFooterAriaHidden = false,
     onRenderReady,
     posterSize = DEFAULT_POSTER_SIZE,
+    placeholderStatus = 'generating',
   },
   ref,
 ) {
@@ -234,6 +242,13 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
           />
         ) : (
           <div
+            // Announce the placeholder so a screen-reader user hears when the
+            // state changes (e.g. running -> canceled) instead of being left
+            // with a stale sentence. Export/preview clones pass the default
+            // 'generating' status and are aria-hidden by their own wrappers.
+            role="status"
+            aria-live="polite"
+            data-poster-placeholder={placeholderStatus}
             style={{
               width: '100%',
               height: '100%',
@@ -246,7 +261,11 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
               boxSizing: 'border-box',
             }}
           >
-            {t('{name} poster is still generating', { name: campaign.product_name })}
+            {placeholderStatus === 'canceled'
+              ? t('{name} generation was canceled', { name: campaign.product_name })
+              : placeholderStatus === 'failed'
+                ? t("{name} generation didn't complete", { name: campaign.product_name })
+                : t('{name} poster is still generating', { name: campaign.product_name })}
           </div>
         )}
       </div>

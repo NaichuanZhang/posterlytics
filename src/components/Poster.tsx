@@ -2,6 +2,7 @@ import { forwardRef } from 'react'
 import type { Campaign } from '../lib/types'
 import { DEFAULT_POSTER_SIZE, type PosterSize } from '../lib/posterSize'
 import { PosterSurface } from './posters/PosterSurface'
+import type { PosterPlaceholderStatus } from './posters/AiPoster'
 
 interface Props {
   campaign: Campaign
@@ -10,6 +11,7 @@ interface Props {
   width?: number // rendered preview width in px (defaults to fit the editor column)
   posterSize?: PosterSize
   pageIndex?: number
+  placeholderStatus?: PosterPlaceholderStatus
 }
 
 // The poster is the AI-painted hero artwork on its descriptor-native output
@@ -27,6 +29,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
     width = DEFAULT_PREVIEW_W,
     posterSize = DEFAULT_POSTER_SIZE,
     pageIndex = 0,
+    placeholderStatus,
   },
   ref,
 ) {
@@ -60,6 +63,7 @@ export const Poster = forwardRef<HTMLDivElement, Props>(function Poster(
           compositedFooterAriaHidden
           posterSize={posterSize}
           pageIndex={pageIndex}
+          placeholderStatus={placeholderStatus}
         />
       </div>
     </div>

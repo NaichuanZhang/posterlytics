@@ -58,9 +58,20 @@ export function PlacementsPage() {
     setBusy(false)
   }
 
-  function copyLink(code: string) {
-    void navigator.clipboard?.writeText(buildViewUrl(code))
-    notify(t('Tracked link copied.'), 'success')
+  // Confirm only after the write resolves: reporting success first left the user
+  // pasting stale clipboard content — plausibly another placement's tracked URL
+  // copied moments earlier — while the app claimed the new link was copied.
+  async function copyLink(code: string) {
+    if (!navigator.clipboard?.writeText) {
+      notify(t('Tracked link could not be copied.'), 'error')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(buildViewUrl(code))
+      notify(t('Tracked link copied.'), 'success')
+    } catch {
+      notify(t('Tracked link could not be copied.'), 'error')
+    }
   }
 
   async function deletePlacement(placementId: string) {
@@ -243,7 +254,7 @@ export function PlacementsPage() {
                       className="icon-button"
                       aria-label={t('Copy {name} tracked link', { name: placement.label })}
                       data-tooltip={t('Copy link')}
-                      onClick={() => copyLink(placement.code)}
+                      onClick={() => void copyLink(placement.code)}
                     >
                       <Copy size={15} aria-hidden="true" />
                     </button>
