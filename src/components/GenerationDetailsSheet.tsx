@@ -15,7 +15,7 @@ import {
   type GenerationDetailImage,
 } from '../lib/generationTraces'
 import type { PosterGeneration, TraceImageAsset } from '../lib/types'
-import { isReferenceOnlyUseCaseId } from '../lib/useCases'
+import { readsSourceWebsite } from '../lib/useCases'
 
 interface Props {
   generation: PosterGeneration
@@ -192,9 +192,9 @@ export function GenerationDetailsSheet({
             <h3 id="generation-user-prompt">{t('User prompt')}</h3>
             <p>
               {generation.instruction || t(
-                isReferenceOnlyUseCaseId(generation.use_case)
-                  ? 'Initial reference-based artwork'
-                  : 'Initial website-based poster',
+                readsSourceWebsite(generation.use_case)
+                  ? 'Initial website-based poster'
+                  : 'Initial reference-based artwork',
               )}
             </p>
             {generation.platform_hint && (

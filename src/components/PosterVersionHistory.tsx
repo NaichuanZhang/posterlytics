@@ -4,7 +4,7 @@ import { useI18n } from '../i18n/I18nProvider'
 import type { Translate } from '../lib/i18n'
 import { overlayGeneration } from '../lib/generations'
 import { derivePosterTranscript } from '../lib/posterTranscript'
-import { isReferenceOnlyUseCaseId } from '../lib/useCases'
+import { readsSourceWebsite } from '../lib/useCases'
 import { DurableGenerationStatus } from './DurableGenerationStatus'
 import { Skeleton } from './ui/Feedback'
 import { PosterThumbnail } from './posters/PosterThumbnail'
@@ -131,9 +131,9 @@ export function PosterVersionHistory({
                   </time>
                   <span>
                     {generation.generation_mode === 'website_refresh'
-                      ? t(isReferenceOnlyUseCaseId(generation.use_case)
-                        ? 'References refreshed'
-                        : 'Site refreshed')
+                      ? t(readsSourceWebsite(generation.use_case)
+                        ? 'Site refreshed'
+                        : 'References refreshed')
                       : t('Iteration')}
                   </span>
                 </span>
@@ -157,9 +157,9 @@ export function PosterVersionHistory({
           <div className="selected-version-summary">
             <p>
               {selectedGeneration.instruction || t(
-                isReferenceOnlyUseCaseId(selectedGeneration.use_case)
-                  ? 'Initial reference-based artwork'
-                  : 'Initial website-based poster',
+                readsSourceWebsite(selectedGeneration.use_case)
+                  ? 'Initial website-based poster'
+                  : 'Initial reference-based artwork',
               )}
             </p>
             {selectedGeneration.platform_hint && (

@@ -87,6 +87,7 @@ import {
   allowsPersistedReferenceReuse,
   getUseCase,
   isReferenceOnlyUseCaseId,
+  readsSourceWebsite,
 } from '../lib/useCases'
 import { buildViewUrl } from '../lib/viewUrl'
 import {
@@ -486,7 +487,13 @@ export function PosterEditorPage() {
   const amazonReferenceMode = campaignUseCase.id === 'amazon_listing'
   const referenceOnlyMode = isReferenceOnlyUseCaseId(campaignUseCase.id)
   const redNotePost = campaignUseCase.id === 'rednote_post'
-  const effectiveRefreshWebsite = referenceOnlyMode || firstVersion || refreshWebsite
+  // Use cases that never read a website have no meaningful "re-read" choice, so
+  // their control is hidden; keep the flag at the value those flows already used
+  // (reference-only has always passed true) rather than leaving it stuck false
+  // because the hidden checkbox never toggled.
+  const effectiveRefreshWebsite = !readsSourceWebsite(campaignUseCase.id)
+    || firstVersion
+    || refreshWebsite
   const uploadingInputs = busy === 'generate'
   const generating = !!campaignActivity
   const generationInputsDisabled = uploadingInputs || generating
@@ -547,7 +554,7 @@ export function PosterEditorPage() {
         contextPlaceholder: t('Paste updated listing copy, approved claims, or describe what should change.'),
         contextHint: t('Seller-provided copy is the primary copy source.'),
         referenceImagesLabel: t('Product and brand images'),
-        referenceImagesHint: t('Seller-provided images are the primary visual source.'),
+        referenceImagesHint: t('Existing reference images are reused when no new images are added.'),
       }
     : redNotePost
       ? {
@@ -1055,7 +1062,7 @@ export function PosterEditorPage() {
         compact
         onChange={(assetSelectionMode) => updatePreferences({ assetSelectionMode })}
       />
-      {!referenceOnlyMode && (
+      {readsSourceWebsite(campaignUseCase.id) && (
         <label className="check-control">
           <input
             type="checkbox"

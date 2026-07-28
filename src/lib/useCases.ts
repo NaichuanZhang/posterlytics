@@ -185,6 +185,19 @@ export function allowsPersistedReferenceReuse(value: unknown): boolean {
   return value === 'amazon_listing' || isReferenceOnlyUseCaseId(value)
 }
 
+/**
+ * True for use cases whose source is never fetched or captured.
+ *
+ * Amazon listings are deliberately never scraped (CAPTCHA / anti-automation),
+ * and reference-only use cases have no source URL at all. Deliberately separate
+ * from `isReferenceOnlyUseCaseId`, which also governs generation behaviour —
+ * widening that would change what the pipeline does, whereas this only governs
+ * how provenance is described in the UI.
+ */
+export function readsSourceWebsite(value: unknown): boolean {
+  return !(value === 'amazon_listing' || isReferenceOnlyUseCaseId(value))
+}
+
 export function getUseCase(id: unknown): UseCaseDescriptor {
   return isUseCaseId(id) ? USE_CASE_BY_ID.get(id)! : DEFAULT_USE_CASE
 }

@@ -8,6 +8,7 @@ import {
   CREATABLE_USE_CASES,
   getUseCase,
   isReferenceOnlyUseCaseId,
+  readsSourceWebsite,
   isUseCaseId,
   resolvePosterFormatOnUseCaseSwitch,
   USE_CASE_IDS,
@@ -383,6 +384,21 @@ test('wizard persists spec-driven nullable sources and the platform target atomi
   assert.doesNotMatch(wizard, /use_case:[\s\S]{0,120}(?:prompt|recipe)/i)
 })
 
+test('readsSourceWebsite excludes every use case whose source is never fetched', () => {
+  // Amazon listings are deliberately never scraped (CAPTCHA / anti-automation)
+  // and reference-only use cases have no source URL at all, so none of them may
+  // claim website provenance in the UI.
+  assert.equal(readsSourceWebsite('website_product'), true)
+  assert.equal(readsSourceWebsite('amazon_listing'), false)
+  assert.equal(readsSourceWebsite('social_cover'), false)
+  assert.equal(readsSourceWebsite('rednote_post'), false)
+  // Unknown/absent values must not be described as website-backed either.
+  assert.equal(readsSourceWebsite(undefined), true)
+  // Deliberately distinct from the generation-behaviour predicate: widening
+  // isReferenceOnlyUseCaseId would change what the pipeline does.
+  assert.equal(isReferenceOnlyUseCaseId('amazon_listing'), false)
+})
+
 test('editor and preflight consume persisted intent while reference-only modes always re-analyze', () => {
   assert.match(
     editorSource,
@@ -393,9 +409,11 @@ test('editor and preflight consume persisted intent while reference-only modes a
     editorSource,
     /isReferenceOnlyUseCaseId\(campaignUseCase\.id\)/,
   )
+  // Use cases that never read a website (Amazon + reference-only) always pass
+  // the re-analyze flag, since their "re-read website" control is hidden.
   assert.match(
     editorSource,
-    /const effectiveRefreshWebsite = referenceOnlyMode \|\| firstVersion \|\| refreshWebsite/,
+    /const effectiveRefreshWebsite = !readsSourceWebsite\(campaignUseCase\.id\)[\s\S]*\|\| firstVersion[\s\S]*\|\| refreshWebsite/,
   )
   assert.match(
     editorSource,
@@ -417,7 +435,7 @@ test('editor and preflight consume persisted intent while reference-only modes a
   for (const source of [versionHistorySource, generationDetailsSource]) {
     assert.match(
       source,
-      /isReferenceOnlyUseCaseId\((?:selectedGeneration|generation)\.use_case\)/,
+      /readsSourceWebsite\((?:selectedGeneration|generation)\.use_case\)/,
     )
   }
   assert.doesNotMatch(editorSource, /isAmazonSourceUrl/)
