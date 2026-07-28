@@ -289,6 +289,24 @@ export function CampaignWizardPage() {
     validationAttempt,
     resetKey: selectedUseCaseId,
   })
+  const productUrlValidity = useRequiredFieldValidity({
+    required: inputFields?.productUrl.requirement === 'required',
+    valid: productUrl.trim().length > 0,
+    validationAttempt,
+    resetKey: selectedUseCaseId,
+  })
+  const ctaTextValidity = useRequiredFieldValidity({
+    required: inputFields?.ctaText === 'required',
+    valid: ctaText.trim().length > 0,
+    validationAttempt,
+    resetKey: selectedUseCaseId,
+  })
+  const destinationUrlValidity = useRequiredFieldValidity({
+    required: inputFields?.destinationUrl === 'required',
+    valid: destinationUrl.trim().length > 0,
+    validationAttempt,
+    resetKey: selectedUseCaseId,
+  })
   const generationViewActive = phase === 'uploading' || phase === 'started'
 
   useFocusOnChange(pageHeadingRef, generationViewActive, {
@@ -738,11 +756,20 @@ export function CampaignWizardPage() {
               <input
                 id="cta-text"
                 className="input"
-                {...requiredInputProps(fields.ctaText === 'required')}
+                {...requiredInputProps(fields.ctaText === 'required', {
+                  invalid: ctaTextValidity.invalid,
+                  errorId: 'cta-text-error',
+                  onBlur: ctaTextValidity.onBlur,
+                })}
                 placeholder={t('Start free trial')}
                 value={ctaText}
                 onChange={(event) => setCtaText(event.target.value)}
               />
+              {ctaTextValidity.invalid && (
+                <p className="field-error" id="cta-text-error">
+                  {t('{name} is required.', { name: t('Call to action') })}
+                </p>
+              )}
             </div>
           )}
           {fields.destinationUrl !== 'hidden' && (
@@ -755,11 +782,20 @@ export function CampaignWizardPage() {
                 id="destination-url"
                 className="input"
                 type="url"
-                {...requiredInputProps(fields.destinationUrl === 'required')}
+                {...requiredInputProps(fields.destinationUrl === 'required', {
+                  invalid: destinationUrlValidity.invalid,
+                  errorId: 'destination-url-error',
+                  onBlur: destinationUrlValidity.onBlur,
+                })}
                 placeholder="https://yourproduct.com/signup"
                 value={destinationUrl}
                 onChange={(event) => setDestinationUrl(event.target.value)}
               />
+              {destinationUrlValidity.invalid && (
+                <p className="field-error" id="destination-url-error">
+                  {t('{name} is required.', { name: t('Destination URL') })}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -1162,15 +1198,17 @@ export function CampaignWizardPage() {
                       {...requiredInputProps(
                         inputFields.productUrl.requirement === 'required',
                       )}
+                      aria-invalid={productUrlValidity.invalid}
                       placeholder={amazonListing
                         ? t('https://www.amazon.com/dp/B0EXAMPLE')
                         : 'https://yourproduct.com'}
                       value={productUrl}
-                      aria-describedby={
+                      aria-describedby={[
                         mismatchTarget || invalidAmazonSource
                           ? 'product-url-mismatch'
-                          : undefined
-                      }
+                          : '',
+                        productUrlValidity.invalid ? 'product-url-error' : '',
+                      ].filter(Boolean).join(' ') || undefined}
                       onChange={(event) => {
                         const nextUrl = event.target.value
                         latestProductUrl.current = nextUrl
@@ -1180,10 +1218,20 @@ export function CampaignWizardPage() {
                         setEagerCapturePreview(null)
                       }}
                       onBlur={() => {
+                        productUrlValidity.onBlur()
                         prefillAmazonDestination()
                         void prefillAmazonProductName()
                       }}
                     />
+                    {productUrlValidity.invalid && (
+                      <p className="field-error" id="product-url-error">
+                        {t('{name} is required.', {
+                          name: amazonListing
+                            ? t('Amazon listing URL')
+                            : t('Website URL'),
+                        })}
+                      </p>
+                    )}
                   </div>
                 )}
                 {(mismatchTarget || invalidAmazonSource) && (
@@ -1467,10 +1515,32 @@ function isAbortError(value: unknown): boolean {
   return value instanceof DOMException && value.name === 'AbortError'
 }
 
-function requiredInputProps(required: boolean) {
+interface RequiredFieldGate {
+  invalid: boolean
+  errorId: string
+  onBlur: () => void
+}
+
+/**
+ * Native `required` alone leaves AT with no programmatic invalid state outside
+ * the submit moment, and no app-authored (localized) reason. Pass a validity
+ * gate to emit `aria-invalid` plus a described error, matching what
+ * `#product-name` already did; omit it and the field keeps required-only
+ * behaviour.
+ */
+function requiredInputProps(required: boolean, gate?: RequiredFieldGate) {
+  if (!gate) {
+    return {
+      required,
+      'aria-required': required,
+    }
+  }
   return {
     required,
     'aria-required': required,
+    'aria-invalid': gate.invalid,
+    'aria-describedby': gate.invalid ? gate.errorId : undefined,
+    onBlur: gate.onBlur,
   }
 }
 

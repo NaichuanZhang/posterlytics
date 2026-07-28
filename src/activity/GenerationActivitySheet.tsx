@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   LoaderCircle,
   RotateCcw,
+  SlidersHorizontal,
   X,
   XCircle,
 } from 'lucide-react'
@@ -15,6 +16,7 @@ import {
   elapsedSeconds,
   formatElapsed,
   generationActivityLabel,
+  isInputValidationFailure,
   isActiveGenerationJob,
 } from '../lib/generationActivity'
 import type { GenerationActivityItem } from '../lib/types'
@@ -248,6 +250,18 @@ function ActivityGroup({
               >
                 <RotateCcw size={14} aria-hidden="true" />
                 {t('Retry with same inputs')}
+              </button>
+            )}
+            {item.status === 'failed' && isInputValidationFailure(item) && (
+              // Retrying the same inputs would fail identically and cost another
+              // paid generation, so send the user to the editor to correct them.
+              <button
+                type="button"
+                className="activity-retry"
+                onClick={() => onOpen(item)}
+              >
+                <SlidersHorizontal size={14} aria-hidden="true" />
+                {t('Fix inputs')}
               </button>
             )}
           </article>

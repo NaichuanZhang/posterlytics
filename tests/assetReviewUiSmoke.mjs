@@ -75,6 +75,7 @@ try {
   await testRedNotePostPagerAndCurrentPageExport(browser)
   await testAssetModeTooltips(browser)
   await testBothEntryModes(browser)
+  await testNativeOnlyFieldInvalidState(browser)
   console.log(`asset review UI smoke passed; screenshots: ${OUTPUT_DIR}`)
 } finally {
   await browser?.close()
@@ -2127,10 +2128,13 @@ async function testAmazonEditorReusesPersistedImages(browserInstance) {
     await page.getByTestId('reference-file-input').getAttribute('aria-required'),
     'true',
   )
-  const refreshWebsite = page.getByRole('checkbox', {
-    name: 'Re-read website before generating',
-  })
-  assert.equal(await refreshWebsite.isChecked(), false)
+  // Amazon listings are never scraped, so the "re-read website" control is not
+  // offered (Order-138) — and the analyze stage still runs over seller
+  // references, which is what generation_mode='website_refresh' selects.
+  assert.equal(
+    await page.getByRole('checkbox', { name: 'Re-read website before generating' }).count(),
+    0,
+  )
 
   const generate = page.getByRole('button', { name: 'Generate version' })
   assert.equal(await generate.isEnabled(), true)
@@ -2140,7 +2144,7 @@ async function testAmazonEditorReusesPersistedImages(browserInstance) {
     state.enqueueRequests[0].p_reference_images,
     [persistedReference],
   )
-  assert.equal(state.enqueueRequests[0].p_refresh_website, false)
+  assert.equal(state.enqueueRequests[0].p_refresh_website, true)
   assert.deepEqual(state.storageUploads, [])
   assert.deepEqual(pageErrors, [])
   await context.close()
@@ -5234,4 +5238,41 @@ async function assertNoOverflow(page) {
     clientWidth: document.documentElement.clientWidth,
   }))
   assert.ok(dimensions.scrollWidth <= dimensions.clientWidth + 1)
+}
+
+async function testNativeOnlyFieldInvalidState(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1440, height: 960 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState()
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  await openWizardForm(page, 'Website product')
+
+  for (const [id, errorId] of [
+    ['product-url', 'product-url-error'],
+    ['cta-text', 'cta-text-error'],
+    ['destination-url', 'destination-url-error'],
+  ]) {
+    const field = page.locator(`#${id}`)
+    await field.fill('')
+    await field.blur()
+    await page.waitForTimeout(150)
+    const wired = await field.evaluate((el) => ({
+      ariaRequired: el.getAttribute('aria-required'),
+      ariaInvalid: el.getAttribute('aria-invalid'),
+      describedBy: el.getAttribute('aria-describedby'),
+    }))
+    assert.equal(wired.ariaRequired, 'true', id)
+    assert.equal(wired.ariaInvalid, 'true', id)
+    assert.ok(
+      (wired.describedBy ?? '').split(/\s+/).includes(errorId),
+      `${id} should reference ${errorId}, got ${wired.describedBy}`,
+    )
+    assert.ok((await page.locator(`#${errorId}`).textContent())?.trim())
+  }
+  console.log('  OK native-only required fields expose aria-invalid + described error')
+  await context.close()
 }

@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   activityForCampaign,
+  canRetryGeneration,
   deriveGenerationStages,
   elapsedSeconds,
   formatElapsed,
   generationActivityLabel,
+  isInputValidationFailure,
   normalizeGenerationActivity,
   shouldAutoSelectGeneration,
 } from '../src/lib/generationActivity.ts'
@@ -178,4 +180,53 @@ test('activity helpers localize labels and elapsed time in Chinese', () => {
     deriveGenerationStages(activity(), 'zh-CN').map(({ label }) => label),
     ['读取网站', '选择素材', '设计版式', '绘制海报'],
   )
+})
+
+test('retry is offered for transient failures but not for input-validation ones', () => {
+  // Transient: the same inputs may well succeed on a second attempt.
+  for (const message of [
+    'Image model failed',
+    'capture timed out',
+    'upstream returned 503',
+    null,
+  ]) {
+    const item = activity({ status: 'failed', last_error_message: message })
+    assert.equal(isInputValidationFailure(item), false, String(message))
+    assert.equal(canRetryGeneration(item), true, String(message))
+  }
+
+  // Validation: retrying the same inputs is guaranteed to fail again, so the
+  // paid-retry affordance must be withheld.
+  for (const message of [
+    'RedNote post generation requires draft copy.',
+    'Social cover generation requires at least one reference image.',
+    'RedNote post generation requires at least one reference image.',
+    'Campaign type does not match its source.',
+  ]) {
+    const item = activity({ status: 'failed', last_error_message: message })
+    assert.equal(isInputValidationFailure(item), true, message)
+    assert.equal(canRetryGeneration(item), false, message)
+  }
+
+  // Classified by code as well as message.
+  const byCode = activity({
+    status: 'failed',
+    last_error_code: 'use_case_source_mismatch',
+    last_error_message: null,
+  })
+  assert.equal(isInputValidationFailure(byCode), true)
+  assert.equal(canRetryGeneration(byCode), false)
+})
+
+test('retry stays withheld for every non-failed status', () => {
+  for (const status of [
+    'queued',
+    'running',
+    'retrying',
+    'awaiting_review',
+    'succeeded',
+    'canceled',
+  ] as const) {
+    assert.equal(canRetryGeneration(activity({ status })), false, status)
+  }
 })

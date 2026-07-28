@@ -142,10 +142,38 @@ export function latestActivityForCampaign(
   return items.find((item) => item.campaign_id === campaignId) ?? null
 }
 
-export function canRetryGeneration(
-  item: Pick<GenerationActivityItem, 'status'>,
+/**
+ * Validation failures cannot be fixed by resubmitting the same inputs.
+ *
+ * These are raised when the campaign is missing something the pipeline requires
+ * (draft copy, a reference image) or when the source contradicts the use case.
+ * Offering "Retry with same inputs" for them spends another paid generation to
+ * reach the identical failure, so the user is routed to correct the input
+ * instead. Matched on the stable server messages, which `generationApi` already
+ * treats as a closed set for localization; anything unrecognised keeps retry
+ * (fail-open), since transient failures are the common case.
+ */
+const INPUT_VALIDATION_FAILURE_PATTERNS = [
+  /requires draft copy/i,
+  /requires at least one reference image/i,
+  /does not match its source/i,
+] as const
+
+export function isInputValidationFailure(
+  item: Pick<GenerationActivityItem, 'last_error_code' | 'last_error_message'>,
 ): boolean {
-  return item.status === 'failed'
+  if (item.last_error_code === 'use_case_source_mismatch') return true
+  const message = item.last_error_message ?? ''
+  return INPUT_VALIDATION_FAILURE_PATTERNS.some((pattern) => pattern.test(message))
+}
+
+export function canRetryGeneration(
+  item: Pick<
+    GenerationActivityItem,
+    'status' | 'last_error_code' | 'last_error_message'
+  >,
+): boolean {
+  return item.status === 'failed' && !isInputValidationFailure(item)
 }
 
 export function normalizeGenerationActivity(value: unknown): GenerationActivity {
