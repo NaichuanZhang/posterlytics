@@ -59,6 +59,7 @@ import {
   isActiveGenerationJob,
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
+import { campaignDisplayName } from '../lib/campaignDisplayName'
 import { resolveGenerationReferenceInput } from '../lib/generationReferenceInput'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
@@ -1211,7 +1212,7 @@ export function PosterEditorPage() {
       mode="workspace"
       breadcrumbs={[
         { label: t('Campaigns'), to: '/' },
-        { label: campaign.product_name },
+        { label: campaignDisplayName(campaign, t('Untitled campaign')) },
       ]}
       campaign={campaign}
       activeSection="poster"

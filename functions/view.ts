@@ -277,9 +277,17 @@ function visitDetails(data: unknown): {
 
   const record = data as Record<string, unknown>;
   if (typeof record.destination_url !== 'string') return null;
+  // Gate on placement_code alone: an untitled campaign returns a JSON null
+  // campaign_name, and requiring a string there would drop the whole attribution
+  // object, silently losing utm_source/utm_medium/utm_content too.
   const attribution =
-    typeof record.campaign_name === 'string' && typeof record.placement_code === 'string'
-      ? { campaign: record.campaign_name, placementCode: record.placement_code }
+    typeof record.placement_code === 'string'
+      ? {
+          campaign: typeof record.campaign_name === 'string'
+            ? record.campaign_name
+            : null,
+          placementCode: record.placement_code,
+        }
       : null;
   return { destination: record.destination_url, attribution };
 }

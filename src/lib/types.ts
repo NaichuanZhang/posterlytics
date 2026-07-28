@@ -151,7 +151,8 @@ export interface GenerationActivityItem {
   job_id: string
   generation_id: string
   campaign_id: string
-  campaign_name: string
+  /** NULL when the campaign is untitled; mirrors campaigns.product_name. */
+  campaign_name: string | null
   status: GenerationJobStatus
   stage: GenerationJobStage
   color_scheme: 'light' | 'dark'
@@ -480,7 +481,8 @@ export interface Campaign {
   product_url: string | null
   /** Up to three declared source URLs. Only the first is ever fetched or captured. */
   source_urls: string[]
-  product_name: string
+  /** NULL when untitled; render via campaignDisplayName rather than raw. */
+  product_name: string | null
   tagline: string | null
   cta_text: string
   destination_url: string | null

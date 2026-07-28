@@ -322,7 +322,9 @@ export function readCookie(req: Request, name: string): string | null {
 }
 
 export interface RedirectAttribution {
-  campaign: string;
+  // Null when the campaign is untitled; utm_campaign is then omitted rather than
+  // appended empty, so the destination is not handed a squatted blank key.
+  campaign: string | null;
   placementCode: string;
 }
 
@@ -341,7 +343,12 @@ export function decorateDestinationUrl(
       ['utm_campaign', attribution.campaign],
       ['utm_content', attribution.placementCode],
     ] as const;
-    const additions = parameters.filter(([key]) => !url.searchParams.has(key));
+    const additions = parameters.filter(
+      ([key, value]) =>
+        !url.searchParams.has(key)
+        && typeof value === 'string'
+        && value.trim() !== '',
+    );
     if (additions.length === 0) return destinationUrl;
 
     const fragmentIndex = destinationUrl.indexOf('#');

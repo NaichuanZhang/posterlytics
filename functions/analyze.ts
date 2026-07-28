@@ -616,6 +616,12 @@ export async function runAnalyzeStage(
     captureSucceeded,
     themeColor: assets.themeColor ?? null,
   });
+  // A campaign may be untitled (product_name is nullable). Normalize ONCE so no
+  // prompt branch can emit the literal token "null" as the product's identity.
+  const campaignTitle = String(
+    (campaign as Record<string, unknown>).product_name ?? '',
+  ).trim();
+  const promptTitle = campaignTitle || '(untitled)';
   const sourceText = productRecipe.analyze.sourceText(visibleText);
   const referenceInstruction = productRecipe.analyze.referenceInstruction(
     referenceImages.filter((image) => image.kind === 'user-reference').length,
@@ -625,7 +631,7 @@ export async function runAnalyzeStage(
     : 'TARGET PLATFORM HINT: (none provided)';
   const user = writesRedNotePost
     ? (
-      `POST NAME: ${campaign.product_name}\n` +
+      `POST NAME: ${promptTitle}\n` +
       `SUPPORTING LINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
       `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
       `${redNotePlatformInstruction}\n\n` +
@@ -634,7 +640,7 @@ export async function runAnalyzeStage(
     )
     : productRecipe.analyze.promptKind === 'social-reference'
     ? (
-      `ARTWORK NAME: ${campaign.product_name}\n` +
+      `ARTWORK NAME: ${promptTitle}\n` +
       `SUPPORTING LINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
       `VISUAL EVIDENCE SOURCE: ${evidenceSource}\n` +
       `${productRecipe.analyze.platformInstruction(platformHint)}\n\n` +
@@ -642,7 +648,7 @@ export async function runAnalyzeStage(
       referenceInstruction
     )
     : (
-      `PRODUCT NAME: ${campaign.product_name}\n` +
+      `PRODUCT NAME: ${promptTitle}\n` +
       `TAGLINE (optional): ${(campaign as Record<string, string>).tagline ?? ''}\n` +
       `CTA HINT: ${(campaign as Record<string, string>).cta_text ?? ''}\n` +
       `PRODUCT URL: ${productUrl}\n` +
@@ -932,7 +938,9 @@ function normalize(
   const o = recordOf(raw);
   const sp = recordOf(o.style_profile);
   const lc = recordOf(o.poster_content);
-  const product = c.product_name;
+  // Nullable title: keep a non-empty identity so poster_content.headline
+  // (typed string) and brand_essence never persist the literal "null".
+  const product = String(c.product_name ?? '').trim() || 'this product';
   const tagline = c.tagline || '';
 
   const modelPalette = recordOf(sp.palette);

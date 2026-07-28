@@ -13,6 +13,7 @@ import { usePlacements } from '../hooks/usePlacements'
 import { usePosterGenerations } from '../hooks/usePosterGenerations'
 import { overlayGeneration } from '../lib/generations'
 import { getPosterSize, hasPosterQrBand } from '../lib/posterSize'
+import { campaignDisplayName } from '../lib/campaignDisplayName'
 import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 import { buildViewUrl } from '../lib/viewUrl'
 import { useI18n } from '../i18n/I18nProvider'
@@ -130,7 +131,10 @@ export function PlacementsPage() {
     <AppShell
       breadcrumbs={[
         { label: t('Campaigns'), to: '/' },
-        { label: campaign.product_name, to: `/campaigns/${campaign.id}` },
+        {
+          label: campaignDisplayName(campaign, t('Untitled campaign')),
+          to: `/campaigns/${campaign.id}`,
+        },
         { label: t('Placements') },
       ]}
       campaign={campaign}

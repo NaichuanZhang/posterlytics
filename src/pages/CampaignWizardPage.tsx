@@ -37,6 +37,7 @@ import { WebsiteCapturePreview } from '../components/WebsiteCapturePreview'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
+import { displayNameOrUntitled } from '../lib/campaignDisplayName'
 import { insforge } from '../lib/insforge'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import { useCampaign } from '../hooks/useCampaign'
@@ -534,7 +535,9 @@ export function CampaignWizardPage() {
       scenario: 'product',
       use_case: selectedUseCaseId,
       product_url: resolvedProductUrl,
-      product_name: productName.trim(),
+      // NULL, never '': every downstream fallback uses ?? / ||, and '' would
+      // yield blank prompt identity lines and colliding export filenames.
+      product_name: productName.trim() || null,
       tagline: tagline.trim() || null,
       cta_text: ctaText.trim() || 'Learn more',
       destination_url: resolvedDestinationUrl,
@@ -1032,7 +1035,14 @@ export function CampaignWizardPage() {
             <CheckCircle2 size={23} aria-hidden="true" />
             <div>
               <span>{t('Version {number}', { number: activity.version_number ?? 1 })}</span>
-              <h2>{t('{name} is ready', { name: activity.campaign_name })}</h2>
+              <h2>
+                {t('{name} is ready', {
+                  name: displayNameOrUntitled(
+                    activity.campaign_name,
+                    t('Untitled campaign'),
+                  ),
+                })}
+              </h2>
               <p>{t("The completed poster is now the campaign's current version.")}</p>
             </div>
           </div>
@@ -1057,7 +1067,12 @@ export function CampaignWizardPage() {
           ) : activity.hero_image_url ? (
             <img
               src={activity.hero_image_url}
-              alt={t('{name} poster', { name: activity.campaign_name })}
+              alt={t('{name} poster', {
+                name: displayNameOrUntitled(
+                  activity.campaign_name,
+                  t('Untitled campaign'),
+                ),
+              })}
               style={{
                 aspectRatio: `${activityPosterSize!.artwork.width} / ${activityPosterSize!.artwork.height}`,
               }}

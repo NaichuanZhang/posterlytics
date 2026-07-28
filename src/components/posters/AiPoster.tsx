@@ -2,6 +2,7 @@ import { forwardRef, useLayoutEffect, useRef, useState } from 'react'
 import type { Campaign, EventPosterSpec } from '../../lib/types'
 import { buildViewUrl } from '../../lib/viewUrl'
 import { posterColors } from '../../lib/posterColors'
+import { campaignDisplayName } from '../../lib/campaignDisplayName'
 import { parseColor, toHex } from '../../lib/colorUtils'
 import {
   getBottomEdgeStripHeight,
@@ -77,6 +78,7 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
   ref,
 ) {
   const { t } = useI18n()
+  const campaignName = campaignDisplayName(campaign, t('Untitled campaign'))
   const img = imageSrcOverride ?? campaign.hero_image_url
   const [imageRender, setImageRender] = useState<ImageRenderState | null>(null)
   const settledImageSrc = useRef<string | null>(null)
@@ -262,10 +264,10 @@ export const AiPoster = forwardRef<HTMLDivElement, Props>(function AiPoster(
             }}
           >
             {placeholderStatus === 'canceled'
-              ? t('{name} generation was canceled', { name: campaign.product_name })
+              ? t('{name} generation was canceled', { name: campaignName })
               : placeholderStatus === 'failed'
-                ? t("{name} generation didn't complete", { name: campaign.product_name })
-                : t('{name} poster is still generating', { name: campaign.product_name })}
+                ? t("{name} generation didn't complete", { name: campaignName })
+                : t('{name} poster is still generating', { name: campaignName })}
           </div>
         )}
       </div>

@@ -61,3 +61,32 @@ test('filterCampaigns accepts URL-less campaigns', () => {
   assert.deepEqual(filterCampaigns([socialCover], 'summer', 'all'), [socialCover])
   assert.deepEqual(filterCampaigns([socialCover], 'example.com', 'all'), [])
 })
+
+test('an untitled campaign stays searchable and never crashes the list', () => {
+  const untitled = {
+    id: 'campaign-abc123',
+    product_name: null,
+    product_url: 'https://untitled.example/product',
+    status: 'draft' as const,
+  }
+  const titled = {
+    id: 'campaign-def456',
+    product_name: 'Signal Studio',
+    product_url: 'https://signal.example',
+    status: 'draft' as const,
+  }
+  const rows = [untitled, titled]
+
+  // A null name previously threw inside the list's useMemo on the first keystroke.
+  assert.deepEqual(filterCampaigns(rows, 'untitled.example', 'all'), [untitled])
+  assert.deepEqual(filterCampaigns(rows, 'campaign-abc', 'all'), [untitled])
+  assert.deepEqual(filterCampaigns(rows, 'signal', 'all'), [titled])
+  assert.deepEqual(filterCampaigns(rows, 'draft', 'all'), rows)
+  assert.deepEqual(filterCampaigns(rows, 'nothing-matches', 'all'), [])
+
+  // A blank title behaves the same as null.
+  assert.deepEqual(
+    filterCampaigns([{ ...untitled, product_name: '' }], 'campaign-abc', 'all'),
+    [{ ...untitled, product_name: '' }],
+  )
+})

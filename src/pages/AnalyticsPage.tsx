@@ -13,6 +13,7 @@ import { usePlacementStats } from '../hooks/usePlacementStats'
 import { useI18n } from '../i18n/I18nProvider'
 import { countryBreakdownsForDisplay } from '../lib/countryBreakdowns'
 import { formatFreshnessTimestamp } from '../lib/i18n'
+import { campaignDisplayName } from '../lib/campaignDisplayName'
 import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 
 export function AnalyticsPage() {
@@ -106,7 +107,10 @@ export function AnalyticsPage() {
     <AppShell
       breadcrumbs={[
         { label: t('Campaigns'), to: '/' },
-        { label: campaign.product_name, to: `/campaigns/${campaign.id}` },
+        {
+          label: campaignDisplayName(campaign, t('Untitled campaign')),
+          to: `/campaigns/${campaign.id}`,
+        },
         { label: t('Analytics') },
       ]}
       campaign={campaign}

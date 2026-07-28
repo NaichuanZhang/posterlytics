@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   REDNOTE_POST_FORMAT,
   REDNOTE_POST_MAX_PAGES,
+  REDNOTE_UNTITLED_COVER_TITLE,
   REDNOTE_POST_MIN_PAGES,
   getRedNotePageComposition,
   normalizeRedNotePostPlan,
@@ -208,20 +209,33 @@ test('normalization moves one cover to the front and preserves unique content or
   })
 })
 
-test('splitting always returns at least a cover and one content page without placeholder copy', () => {
-  const plan = splitRedNoteSourceCopy({
-    title: '',
-    subtitle: '',
-    sourceCopy: '',
-  })
+test('splitting always returns a cover and one content page its own validator accepts', () => {
+  // A blank title with no usable source copy previously produced title: '', which
+  // parseRedNotePostPlan rejects (a cover title may not be empty) — dropping the
+  // poster into the 'invalid' render state. The synthesized title keeps the plan
+  // self-consistent; the content heading inherits it rather than staying blank.
+  for (const sourceCopy of ['', '   ', '...', '。。。', '!!!']) {
+    const plan = splitRedNoteSourceCopy({ title: '', subtitle: '', sourceCopy })
 
-  assert.deepEqual(plan, {
-    schema_version: 1,
-    pages: [
-      { kind: 'cover', title: '' },
-      { kind: 'content', heading: '', blocks: [] },
-    ],
-  })
+    assert.deepEqual(plan, {
+      schema_version: 1,
+      pages: [
+        { kind: 'cover', title: REDNOTE_UNTITLED_COVER_TITLE },
+        {
+          kind: 'content',
+          heading: REDNOTE_UNTITLED_COVER_TITLE,
+          blocks: [],
+        },
+      ],
+    })
+    assert.notEqual(parseRedNotePostPlan(plan), null)
+  }
+
+  // A NULL campaign title behaves identically to a blank one.
+  assert.deepEqual(
+    splitRedNoteSourceCopy({ title: null, subtitle: null, sourceCopy: '' }),
+    splitRedNoteSourceCopy({ title: '', subtitle: '', sourceCopy: '' }),
+  )
 })
 
 test('normalization and fallback splitting cap posts at nine pages', () => {

@@ -23,7 +23,9 @@ test('social migration makes campaign URLs nullable only behind a use-case check
     migration,
     /ALTER COLUMN product_url DROP NOT NULL,\s+ALTER COLUMN destination_url DROP NOT NULL/,
   )
-  assert.match(baseline, /product_url TEXT,\s+product_name TEXT NOT NULL/)
+  // product_name has since become nullable too — the untitled representation is
+  // NULL, asserted in tests/optionalCampaignTitleSchema.test.ts.
+  assert.match(baseline, /product_url TEXT,\s+product_name TEXT,/)
   assert.match(baseline, /destination_url TEXT,\s+style_profile JSONB/)
 
   for (const [sql, referenceOnlyCheck] of [

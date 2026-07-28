@@ -92,7 +92,11 @@ export function buildPosterExportRunSnapshot({
       pixelRatio: posterSize.export.pixelRatio,
     },
     naming: {
-      productName: runCampaign.product_name,
+      // A guaranteed-non-empty, collision-free stem rather than the raw title.
+      productName: resolveExportFilenameStem(
+        runCampaign.product_name,
+        runCampaign.id,
+      ),
       versionNumber,
       placementLabel: includesQrBand && placement
         ? placement.label
@@ -154,4 +158,24 @@ function orderedPageSuffix({
 
 function sanitizeFilenamePart(value: string): string {
   return value.replace(/\W+/g, '-')
+}
+
+/**
+ * A filename stem that is never empty and never collides between campaigns.
+ *
+ * Gated on the SANITIZED result rather than on a blank title, because
+ * `sanitizeFilenamePart` is ASCII-only: two different CJK titles both collapse to
+ * separators, so title-blankness alone would leave that collision in place. Falls
+ * back to the campaign id, which is unique per campaign.
+ */
+export function resolveExportFilenameStem(
+  productName: string | null | undefined,
+  campaignId: string,
+): string {
+  const title = productName?.trim() ?? ''
+  // Returns the RAW title when it survives sanitization, so a titled campaign's
+  // filename bytes are unchanged.
+  return sanitizeFilenamePart(title).replace(/-/g, '')
+    ? title
+    : `campaign-${campaignId}`
 }

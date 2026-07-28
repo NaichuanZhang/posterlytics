@@ -6,7 +6,7 @@ CREATE TABLE public.campaigns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   product_url TEXT,
-  product_name TEXT NOT NULL,
+  product_name TEXT,
   tagline TEXT,
   cta_text TEXT NOT NULL DEFAULT 'Learn more',
   destination_url TEXT,

@@ -11,6 +11,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useToast } from '../components/ui/Toast'
+import { displayNameOrUntitled } from '../lib/campaignDisplayName'
 import { useI18n } from '../i18n/I18nProvider'
 import {
   fetchGenerationActivity,
@@ -73,8 +74,18 @@ export function GenerationActivityProvider({ children }: { children: ReactNode }
             }
             notify(
               item.status === 'succeeded'
-                ? t('{name} poster is ready.', { name: item.campaign_name })
-                : t('{name} generation failed.', { name: item.campaign_name }),
+                ? t('{name} poster is ready.', {
+                    name: displayNameOrUntitled(
+                      item.campaign_name,
+                      t('Untitled campaign'),
+                    ),
+                  })
+                : t('{name} generation failed.', {
+                    name: displayNameOrUntitled(
+                      item.campaign_name,
+                      t('Untitled campaign'),
+                    ),
+                  }),
               item.status === 'succeeded' ? 'success' : 'error',
               {
                 dedupeKey: `generation-notification:${notificationId}`,

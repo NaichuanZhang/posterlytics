@@ -4,6 +4,7 @@ import {
   buildPosterExportArchiveFilename,
   buildPosterExportFilename,
   buildPosterExportRunSnapshot,
+  resolveExportFilenameStem,
 } from '../src/lib/posterExport.ts'
 import { getPosterSize } from '../src/lib/posterSize.ts'
 import type { Campaign, Placement } from '../src/lib/types.ts'
@@ -182,5 +183,51 @@ test('poster export filename rejects an out-of-range page', () => {
       },
     }),
     RangeError,
+  )
+})
+
+test('an untitled campaign exports a unique, well-formed filename', () => {
+  const stemA = resolveExportFilenameStem(null, 'campaign-aaa')
+  const stemB = resolveExportFilenameStem(null, 'campaign-bbb')
+
+  // Two untitled campaigns must not collide, and no name may start with '-'.
+  assert.notEqual(stemA, stemB)
+  for (const stem of [stemA, stemB]) {
+    const filename = buildPosterExportFilename({
+      productName: stem,
+      versionNumber: 2,
+      filenameSuffix: 'A4',
+    })
+    assert.ok(filename.length > 0)
+    assert.equal(filename.startsWith('-'), false)
+    assert.doesNotMatch(filename, /^-/)
+    assert.match(filename, /^campaign-/)
+  }
+  assert.equal(
+    buildPosterExportArchiveFilename({
+      productName: stemA,
+      versionNumber: 2,
+      filenameSuffix: 'A4',
+    }).startsWith('-'),
+    false,
+  )
+
+  // A blank title behaves like null.
+  assert.equal(resolveExportFilenameStem('', 'campaign-aaa'), stemA)
+  assert.equal(resolveExportFilenameStem('   ', 'campaign-aaa'), stemA)
+
+  // Pre-existing CJK collision: sanitizeFilenamePart is ASCII-only, so two
+  // different CJK titles both sanitized to separators and produced one filename.
+  const cjkA = resolveExportFilenameStem('夏日信号', 'campaign-aaa')
+  const cjkB = resolveExportFilenameStem('春天来了', 'campaign-bbb')
+  assert.notEqual(
+    buildPosterExportFilename({ productName: cjkA, filenameSuffix: 'A4' }),
+    buildPosterExportFilename({ productName: cjkB, filenameSuffix: 'A4' }),
+  )
+
+  // A title that survives sanitization keeps its exact bytes.
+  assert.equal(
+    resolveExportFilenameStem('Signal Studio', 'campaign-aaa'),
+    'Signal Studio',
   )
 })

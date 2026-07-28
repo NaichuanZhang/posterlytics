@@ -65,3 +65,38 @@ test('decorateDestinationUrl returns an unparseable destination unchanged', () =
   const destination = 'not a valid destination'
   assert.equal(decorateDestinationUrl(destination, attribution), destination)
 })
+
+test('an untitled campaign omits utm_campaign but keeps the other three keys', () => {
+  const decorated = decorateDestinationUrl('https://shop.example/product', {
+    campaign: null,
+    placementCode: 'abc123',
+  })
+  const url = new URL(decorated)
+  assert.equal(url.searchParams.has('utm_campaign'), false)
+  assert.equal(url.searchParams.get('utm_source'), 'posterlytics')
+  assert.equal(url.searchParams.get('utm_medium'), 'qr')
+  assert.equal(url.searchParams.get('utm_content'), 'abc123')
+  // Never a squatted empty key.
+  assert.doesNotMatch(decorated, /utm_campaign=/)
+  assert.doesNotMatch(decorated, /utm_campaign=null/)
+
+  // A blank or whitespace-only title behaves identically.
+  for (const campaign of ['', '   ']) {
+    const blank = decorateDestinationUrl('https://shop.example/product', {
+      campaign,
+      placementCode: 'abc123',
+    })
+    assert.equal(blank, decorated)
+  }
+})
+
+test('omitting utm_campaign still leaves Amazon attribution bytes unreserialized', () => {
+  const amazon = 'https://www.amazon.com/dp/B0EXAMPLE?maas=x%2Fy&ascsubtag=z'
+  const decorated = decorateDestinationUrl(amazon, {
+    campaign: null,
+    placementCode: 'abc123',
+  })
+  assert.ok(decorated.startsWith(`${amazon}&`))
+  assert.match(decorated, /maas=x%2Fy/)
+  assert.equal(decorated.includes('utm_campaign'), false)
+})

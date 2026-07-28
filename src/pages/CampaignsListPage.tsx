@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { EmptyState, InlineNotice, Skeleton } from '../components/ui/Feedback'
+import { campaignDisplayName } from '../lib/campaignDisplayName'
 import { insforge } from '../lib/insforge'
 import {
   filterCampaigns,
@@ -57,6 +58,7 @@ export function CampaignsListPage() {
     return {
       campaign,
       activity,
+      id: campaign.id,
       product_name: campaign.product_name,
       product_url: campaign.product_url,
       status: campaign.status,
@@ -224,7 +226,7 @@ function CampaignFile({
         )}
       </div>
       <div className="campaign-file-copy">
-        <strong>{campaign.product_name}</strong>
+        <strong>{campaignDisplayName(campaign, t('Untitled campaign'))}</strong>
         <span>
           {isReferenceOnlyUseCaseId(campaign.use_case)
             ? t(getUseCase(campaign.use_case).label)

@@ -19,6 +19,7 @@ import {
   isInputValidationFailure,
   isActiveGenerationJob,
 } from '../lib/generationActivity'
+import { displayNameOrUntitled } from '../lib/campaignDisplayName'
 import type { GenerationActivityItem } from '../lib/types'
 import { EmptyState, InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
@@ -217,7 +218,9 @@ function ActivityGroup({
             <button type="button" className="activity-row-main" onClick={() => onOpen(item)}>
               <ActivityIcon item={item} />
               <span className="activity-row-copy">
-                <strong>{item.campaign_name}</strong>
+                <strong>
+                  {displayNameOrUntitled(item.campaign_name, t('Untitled campaign'))}
+                </strong>
                 <span>{generationActivityLabel(item, locale)}</span>
                 <small>
                   {formatElapsed(elapsedSeconds(item, now), locale)}

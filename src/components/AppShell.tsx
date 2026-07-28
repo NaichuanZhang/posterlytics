@@ -10,6 +10,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { useI18n } from '../i18n/I18nProvider'
+import { campaignDisplayName } from '../lib/campaignDisplayName'
 import { isCampaignTrackingActive } from '../lib/trackingPolicy'
 import type { Campaign } from '../lib/types'
 import { LanguageSelect } from './LanguageSelect'
@@ -154,6 +155,7 @@ export function CampaignTabs({
   activeSection: CampaignSection
 }) {
   const { t } = useI18n()
+  const campaignName = campaignDisplayName(campaign, t('Untitled campaign'))
   const trackingActive = isCampaignTrackingActive(campaign)
   const allTabs: Array<{ section: CampaignSection; label: string; to: string }> = [
     { section: 'poster', label: t('Poster'), to: `/campaigns/${campaign.id}` },
@@ -167,7 +169,7 @@ export function CampaignTabs({
   return (
     <div className="campaign-bar">
       <div className="campaign-identity">
-        <strong>{campaign.product_name}</strong>
+        <strong>{campaignName}</strong>
         {trackingActive && (
           <span className={`status-badge status-${campaign.status}`}>
             {campaign.status === 'published'
@@ -180,7 +182,7 @@ export function CampaignTabs({
       </div>
       <nav
         className="campaign-tabs"
-        aria-label={t('{name} sections', { name: campaign.product_name })}
+        aria-label={t('{name} sections', { name: campaignName })}
       >
         {tabs.map((tab) => (
           <Link

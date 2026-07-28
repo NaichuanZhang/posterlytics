@@ -5,6 +5,7 @@ export const REDNOTE_POST_MIN_PAGES = 2
 export const REDNOTE_POST_MAX_PAGES = 9
 
 const COVER_TITLE_MAX_CODE_POINTS = 48
+export const REDNOTE_UNTITLED_COVER_TITLE = 'Untitled post'
 const COVER_SUBTITLE_MAX_CODE_POINTS = 96
 const CONTENT_HEADING_MAX_CODE_POINTS = 64
 const CONTENT_BLOCK_MAX_CODE_POINTS = 160
@@ -30,7 +31,8 @@ export interface RedNotePostPlan {
 }
 
 export interface RedNoteSourceCopyInput {
-  title: string
+  /** May be absent: a campaign title is optional. */
+  title: string | null
   subtitle?: string | null
   sourceCopy: string
 }
@@ -222,8 +224,14 @@ export function splitRedNoteSourceCopy(
     splitSourceSegments(input.sourceCopy)
       .flatMap((segment) => chunkByCodePoints(segment, CONTENT_BLOCK_MAX_CODE_POINTS)),
   )
+  // parseRedNotePostPlan requires a non-empty cover title, so a blank campaign
+  // title plus punctuation-only draft copy (which yields no segments at all) would
+  // otherwise build a plan that fails its own validator and renders as 'invalid'.
+  // Locale-free and deterministic on purpose: this runs in the Deno bundle and the
+  // value is persisted into poster_content.rednote_post.
   const title = boundedText(input.title, COVER_TITLE_MAX_CODE_POINTS)
     || boundedText(sourceSegments[0], COVER_TITLE_MAX_CODE_POINTS)
+    || REDNOTE_UNTITLED_COVER_TITLE
   const subtitle = boundedText(input.subtitle, COVER_SUBTITLE_MAX_CODE_POINTS)
   const cover: RedNoteCoverPage = {
     kind: 'cover',

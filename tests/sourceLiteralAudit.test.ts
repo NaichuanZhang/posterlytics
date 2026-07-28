@@ -119,6 +119,16 @@ const SOURCE_LITERAL_ALLOWLIST: AllowedLiteral[] = [
     reason: 'Decorative sample-poster folio mark.',
   },
   {
+    file: 'src/lib/redNotePost.ts',
+    kind: 'visible-variable',
+    text: 'Untitled post',
+    count: 1,
+    category: 'generated-poster-copy',
+    reason:
+      'Cover title persisted into poster_content.rednote_post by the Deno bundle, '
+      + 'where no locale exists; parseRedNotePostPlan rejects an empty cover title.',
+  },
+  {
     file: 'src/marketing/PublicLandingShell.tsx',
     kind: 'jsx-text',
     text: 'PRINT TO SIGNAL',
