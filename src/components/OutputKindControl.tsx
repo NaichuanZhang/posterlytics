@@ -53,7 +53,7 @@ export function OutputKindControl({
               role="radio"
               aria-checked={selected}
               disabled={disabled}
-              className={`segmented-option${selected ? ' is-selected' : ''}`}
+              className={selected ? 'is-active' : undefined}
               onClick={() => onChange(option.value)}
             >
               <Icon size={16} aria-hidden="true" />

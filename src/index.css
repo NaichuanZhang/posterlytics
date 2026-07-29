@@ -765,6 +765,42 @@ img {
   line-height: 1.4;
 }
 
+/* Output kind: the shared .segmented-control supplies the track and the
+   .is-active treatment; this only adds the icon/label pairing, matching how
+   .asset-mode-control scopes the same control. */
+.output-kind-control .segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Source URLs: each row keeps its remove control on the input's own line. The
+   input flexes and the icon button stays at its intrinsic 30px so a long URL
+   never pushes the "x" onto a line of its own. */
+.source-urls-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-urls-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-urls-row > .input {
+  min-width: 0;
+  flex: 1;
+}
+
+.source-urls-field > .button {
+  margin-top: 8px;
+}
+
 .social-cover-qr-settings {
   display: grid;
   gap: 14px;

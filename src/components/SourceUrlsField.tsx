@@ -69,7 +69,7 @@ export function SourceUrlsField({
             {rows.length > 1 && (
               <button
                 type="button"
-                className="button button-icon button-small"
+                className="icon-button"
                 disabled={disabled}
                 aria-label={t('Remove source URL {number}', { number: index + 1 })}
                 onClick={() => removeRow(index)}
