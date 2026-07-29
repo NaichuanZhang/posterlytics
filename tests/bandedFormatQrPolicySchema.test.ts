@@ -124,8 +124,11 @@ test('existing rows are normalized by flipping the format, never by clearing a d
   assert.doesNotMatch(update, /destination_url =/)
 })
 
-test('the placement guard generalizes to banded formats and stays no weaker', () => {
-  for (const sql of [migration, baseline]) {
+test('the migration records the banded-format placement guard it shipped', () => {
+  // Historical only. Once item 6a made a bandless campaign legal without a
+  // destination, the guard was simplified to require a destination for ANY
+  // placement — see tests/bandlessOptionalDestinationSchema.test.ts.
+  for (const sql of [migration]) {
     const guard = lastFunction(sql, 'guard_placement_tracking_policy')
     // Reads the format alongside the use case, under the same row lock.
     assert.match(
@@ -170,11 +173,17 @@ test('the migration is append-only and leaves the pinned functions alone', () =>
   assert.doesNotMatch(statements, /log_visit_attributed/)
 })
 
-test('the migration owns the baseline copy of the guard it replaced', () => {
+test('a later migration now owns the baseline copy of the placement guard', () => {
+  // This migration no longer matches the baseline: item 6a superseded its guard.
+  // The constraint it introduced is still the baseline's, asserted above.
   const normalize = (value: string) =>
     value.replace(/^CREATE(?: OR REPLACE)? FUNCTION/, 'CREATE FUNCTION')
-  assert.equal(
+  assert.notEqual(
     normalize(lastFunction(migration, 'guard_placement_tracking_policy')),
     normalize(lastFunction(baseline, 'guard_placement_tracking_policy')),
   )
+  // The baseline must still reject RedNote placements and destination-less ones.
+  const current = lastFunction(baseline, 'guard_placement_tracking_policy')
+  assert.match(current, /RedNote post campaigns cannot have placements\./)
+  assert.match(current, /NULLIF\(BTRIM\(v_destination_url\), ''\) IS NULL/)
 })

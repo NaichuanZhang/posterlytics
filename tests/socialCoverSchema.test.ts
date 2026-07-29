@@ -34,11 +34,22 @@ test('social migration makes campaign URLs nullable only behind a use-case check
   ] as const) {
     const constraint = namedConstraint(sql, 'campaigns_source_urls_required')
     assert.match(constraint, referenceOnlyCheck)
-    assert.match(
-      constraint,
-      /product_url IS NOT NULL AND destination_url IS NOT NULL/,
-    )
   }
+  // The destination half was historical: the requirement now lives entirely in
+  // campaigns_banded_format_destination_required, so a bandless campaign may omit
+  // a destination. See tests/bandlessOptionalDestinationSchema.test.ts.
+  assert.match(
+    namedConstraint(migration, 'campaigns_source_urls_required'),
+    /product_url IS NOT NULL AND destination_url IS NOT NULL/,
+  )
+  assert.match(
+    namedConstraint(baseline, 'campaigns_source_urls_required'),
+    /OR product_url IS NOT NULL/,
+  )
+  assert.doesNotMatch(
+    namedConstraint(baseline, 'campaigns_source_urls_required'),
+    /destination_url/,
+  )
 })
 
 test('both snapshot tables accept social_cover while preserving scenario equivalence', () => {
@@ -205,10 +216,9 @@ test('same-input retry copies the frozen platform hint instead of the mutable ta
 test('historical tracking guards stay social-only while the baseline extends them', () => {
   for (const [sql, useCaseCheck, message] of [
     [migration, /v_use_case = 'social_cover'/, /Social cover campaigns cannot have placements\./],
-    // The baseline message generalized with the policy: the destination
-    // requirement is now keyed on a banded format, with social_cover retained so
-    // the guard stays no weaker than before.
-    [baseline, /v_use_case = 'social_cover'/, /Tracked poster campaigns require a destination before placements can be added\./],
+    // The baseline guard no longer names social_cover: every placement needs a
+    // destination now, since a bandless campaign may legally omit one.
+    [baseline, /v_use_case = 'rednote_post'/, /Tracked poster campaigns require a destination before placements can be added\./],
   ] as const) {
     const placementGuard = lastFunction(sql, 'guard_placement_tracking_policy')
     assert.match(placementGuard, /FROM public\.campaigns/)

@@ -67,7 +67,7 @@ CREATE TABLE public.campaigns (
   CONSTRAINT campaigns_source_urls_required
     CHECK (
       use_case IN ('social_cover', 'rednote_post')
-      OR (product_url IS NOT NULL AND destination_url IS NOT NULL)
+      OR product_url IS NOT NULL
     ),
   CONSTRAINT campaigns_banded_format_destination_required
     CHECK (
@@ -615,11 +615,10 @@ AS $$
 DECLARE
   v_use_case TEXT;
   v_destination_url TEXT;
-  v_poster_format TEXT;
 BEGIN
   -- Serialize placement writes with campaign use-case changes.
-  SELECT use_case, destination_url, poster_format
-  INTO v_use_case, v_destination_url, v_poster_format
+  SELECT use_case, destination_url
+  INTO v_use_case, v_destination_url
   FROM public.campaigns
   WHERE id = NEW.campaign_id
     AND user_id = NEW.user_id
@@ -633,11 +632,7 @@ BEGIN
   IF v_use_case = 'rednote_post' THEN
     RAISE EXCEPTION 'RedNote post campaigns cannot have placements.'
       USING ERRCODE = '23514';
-  ELSIF NULLIF(BTRIM(v_destination_url), '') IS NULL
-    AND (
-      v_poster_format IN ('a4_2x3', 'rednote_3x4', 'yt_thumb_16x9', 'luma_1x1')
-      OR v_use_case = 'social_cover'
-    ) THEN
+  ELSIF NULLIF(BTRIM(v_destination_url), '') IS NULL THEN
     RAISE EXCEPTION 'Tracked poster campaigns require a destination before placements can be added.'
       USING ERRCODE = '23514';
   END IF;
