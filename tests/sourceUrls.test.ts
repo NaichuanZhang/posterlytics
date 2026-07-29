@@ -80,14 +80,20 @@ test('migration constrains the shape and freezes the set after a generation exis
     migration,
     /ADD COLUMN source_urls JSONB NOT NULL DEFAULT '\[\]'::jsonb/,
   )
+  // Bound the slice to the constraint statement, not the rest of the file.
+  const shapeStart = migration.indexOf('campaigns_source_urls_shape')
   const shape = migration.slice(
-    migration.indexOf('campaigns_source_urls_shape'),
+    shapeStart,
+    migration.indexOf(';', shapeStart),
   )
   assert.match(shape, /jsonb_typeof\(source_urls\) = 'array'/)
   assert.match(shape, /jsonb_array_length\(source_urls\) <= 3/)
-  // Rejects a non-string member and a blank/whitespace-only entry.
-  assert.match(shape, /jsonb_typeof\(entry\.value\) <> 'string'/)
-  assert.match(shape, /NULLIF\(BTRIM\(entry\.value #>> '\{\}'\), ''\) IS NULL/)
+  // Rejects a non-string member and a blank/whitespace-only entry. Expressed with
+  // jsonb_path_exists because Postgres forbids a subquery in a CHECK constraint.
+  assert.doesNotMatch(shape, /SELECT/)
+  assert.match(shape, /NOT jsonb_path_exists\(/)
+  assert.match(shape, /!\(@\.type\(\) == "string"\)/)
+  assert.match(shape, /@ like_regex "\^\[\[:space:\]\]\*\$"/)
 
   for (const sql of [migration, baseline]) {
     // Anchor on the definition, not the trigger's EXECUTE FUNCTION reference.

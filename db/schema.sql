@@ -101,11 +101,13 @@ CREATE TABLE public.campaigns (
     CHECK (
       jsonb_typeof(source_urls) = 'array'
       AND jsonb_array_length(source_urls) <= 3
-      AND NOT EXISTS (
-        SELECT 1
-        FROM jsonb_array_elements(source_urls) AS entry
-        WHERE jsonb_typeof(entry.value) <> 'string'
-          OR NULLIF(BTRIM(entry.value #>> '{}'), '') IS NULL
+      AND NOT jsonb_path_exists(
+        source_urls,
+        '$[*] ? (!(@.type() == "string"))'
+      )
+      AND NOT jsonb_path_exists(
+        source_urls,
+        '$[*] ? (@.type() == "string" && @ like_regex "^[[:space:]]*$")'
       )
     )
 );

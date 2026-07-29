@@ -15,16 +15,22 @@
 ALTER TABLE public.campaigns
   ADD COLUMN source_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+-- Expressed with jsonb_path_exists rather than NOT EXISTS (SELECT ...): Postgres
+-- forbids subqueries in a CHECK constraint.
 ALTER TABLE public.campaigns
   ADD CONSTRAINT campaigns_source_urls_shape
     CHECK (
       jsonb_typeof(source_urls) = 'array'
       AND jsonb_array_length(source_urls) <= 3
-      AND NOT EXISTS (
-        SELECT 1
-        FROM jsonb_array_elements(source_urls) AS entry
-        WHERE jsonb_typeof(entry.value) <> 'string'
-          OR NULLIF(BTRIM(entry.value #>> '{}'), '') IS NULL
+      -- No element may be a non-string (number, null, object, array)...
+      AND NOT jsonb_path_exists(
+        source_urls,
+        '$[*] ? (!(@.type() == "string"))'
+      )
+      -- ...and no string element may be empty or whitespace-only.
+      AND NOT jsonb_path_exists(
+        source_urls,
+        '$[*] ? (@.type() == "string" && @ like_regex "^[[:space:]]*$")'
       )
     );
 
