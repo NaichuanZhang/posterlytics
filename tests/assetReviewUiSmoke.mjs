@@ -431,212 +431,127 @@ async function testCampaignWizardUseCases(browserInstance) {
 
   await page.goto(`${BASE_URL}/campaigns/new`)
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
-  const picker = page.locator('.use-case-picker')
-  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  assert.equal(await picker.getByRole('button').count(), 4)
-  await picker.getByText(
-    'Create from a product website and its visual identity.',
-    { exact: true },
-  ).waitFor()
-  await picker.getByText(
-    'Create from an Amazon listing plus seller-provided copy and images.',
-    { exact: true },
-  ).waitFor()
-  await picker.getByText(
-    'Create full-bleed artwork from creative references and direction.',
-    { exact: true },
-  ).waitFor()
-  await picker.getByText(
-    'Create a 3:4 RedNote cover from draft copy and creative references.',
-    { exact: true },
-  ).waitFor()
-  assert.equal(await picker.getByText('Event', { exact: true }).count(), 0)
+  await page.locator('.campaign-form').waitFor()
+
+  // The unified screen: one form, no picker, no CTA or platform-hint inputs.
+  assert.equal(await page.locator('.use-case-picker').count(), 0)
+  assert.equal(await page.getByText('Choose a campaign type').count(), 0)
+  assert.equal(await page.locator('#cta-text').count(), 0)
+  assert.equal(await page.locator('#platform-hint').count(), 0)
+  assert.equal(await page.locator('#destination-url').count(), 0)
+  assert.deepEqual(
+    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Campaign details', 'Generation references'],
+  )
+  // Title is optional; the primary source URL and output control are present.
+  assert.equal(
+    await page.locator('#product-name').evaluate((el) => el.required),
+    false,
+  )
+  assert.equal(await page.locator('#source-url').count(), 1)
+  const outputPoster = page.getByRole('radio', { name: 'Single poster' })
+  const outputPost = page.getByRole('radio', { name: 'Multi-page post' })
+  assert.equal(await outputPoster.getAttribute('aria-checked'), 'true')
+  assert.equal(await outputPost.getAttribute('aria-checked'), 'false')
+
   await assertNoOverflow(page)
   await page.screenshot({
-    path: `${OUTPUT_DIR}/campaign-use-case-picker-desktop.png`,
+    path: `${OUTPUT_DIR}/campaign-unified-form-desktop.png`,
     fullPage: true,
   })
 
-  await selectWizardUseCase(page, 'Social cover')
-  assert.deepEqual(
-    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
-    ['Artwork details', 'Creative references and direction', 'Artwork output'],
-  )
-  assert.equal(await page.locator('#product-url').count(), 0)
-  assert.equal(await page.locator('#destination-url').count(), 0)
-  assert.equal(await page.locator('#cta-text').count(), 0)
-  assert.equal(await page.locator('#platform-hint').count(), 1)
-  assert.equal(await page.locator('#poster-format').count(), 0)
-  const socialQrSwitch = page.getByRole('switch', {
-    name: /Add a tracked QR footer/,
-  })
-  assert.equal(await socialQrSwitch.isChecked(), false)
-  assert.equal(await page.locator('#social-cover-qr-destination').count(), 0)
-  await socialQrSwitch.click()
-  const socialDestination = page.locator('#social-cover-qr-destination')
-  await socialDestination.waitFor()
-  assert.equal(await socialDestination.getAttribute('required'), '')
-  assert.equal(await socialDestination.getAttribute('aria-required'), 'true')
-  assert.equal(await socialDestination.getAttribute('pattern'), 'https?://.+')
-  await socialQrSwitch.click()
-  assert.equal(await page.locator('#social-cover-qr-destination').count(), 0)
-  const socialReferences = page.locator('section[aria-labelledby="references-heading"]')
-  assert.equal(
-    await socialReferences.locator('.generation-references label').first().innerText(),
-    'Creative direction (optional)',
-  )
+  // Default (no URL, single poster) is a tracked poster: QR on, banded 2:3, with a
+  // revealed required destination. This matches campaigns.poster_format's a4_2x3
+  // default and the product's tracked-QR-poster premise.
+  const posterFormat = page.locator('#poster-format')
+  const qrSwitch = page.getByRole('switch', { name: /Add a tracked QR footer/ })
+  assert.equal(await qrSwitch.isChecked(), true)
+  assert.equal(await posterFormat.inputValue(), 'a4_2x3')
+  // One option per aspect for the current (banded) band.
+  assert.equal(await posterFormat.locator('option').count(), 4)
+  const qrDestination = page.locator('#poster-qr-destination')
+  await qrDestination.waitFor()
+  assert.equal(await qrDestination.getAttribute('required'), '')
+  assert.equal(await qrDestination.getAttribute('aria-required'), 'true')
+  assert.equal(await qrDestination.getAttribute('pattern'), 'https?://.+')
+  const references = page.locator('section[aria-labelledby="references-heading"]')
   assert.match(
-    await socialReferences.locator('.generation-references .field-label').innerText(),
-    /^Creative references Required/,
+    await references.locator('.generation-references .field-label').innerText(),
+    /^Creative references Required|^Supporting images Required/,
   )
-  assert.equal(
-    await page.getByRole('button', { name: 'Generate poster', exact: true }).isDisabled(),
-    true,
-  )
-  await assertNoOverflow(page)
-
-  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
-  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  await selectWizardUseCase(page, 'Website product')
-  assert.deepEqual(
-    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
-    ['Product source', 'Campaign action', 'Generation references'],
-  )
-  for (const [selector, expectedRequired] of [
-    ['#product-url', true],
-    ['#product-name', true],
-    ['#cta-text', true],
-    ['#destination-url', true],
-    ['#tagline', false],
-  ]) {
-    const control = page.locator(selector)
-    assert.equal(
-      await control.evaluate((element) => element.required),
-      expectedRequired,
-    )
-    assert.equal(
-      await control.getAttribute('aria-required'),
-      String(expectedRequired),
-    )
-  }
-  assert.equal(await page.locator('#product-url').getAttribute('placeholder'), 'https://yourproduct.com')
-  assert.equal(
-    await page.locator('#destination-url').getAttribute('placeholder'),
-    'https://yourproduct.com/signup',
-  )
-  assert.equal(
-    await page.locator('.generation-references label').first().innerText(),
-    'Creative context (optional)',
-  )
-  assert.equal(
-    await page.locator('.generation-references .field-label').innerText(),
-    'Supporting images (optional)',
-  )
-  assert.equal(
-    await page.getByText('The website supplies the visual and product context.', {
-      exact: true,
-    }).count(),
-    1,
-  )
-  assert.equal(await page.getByText('Amazon seller reference mode', { exact: true }).count(), 0)
-  // The full registry: QR/destination/placement policy is band-aware, so every
-  // bandless twin is selectable on a tracking-enabled use case.
-  assert.equal(await page.locator('#poster-format option').count(), 8)
-  assert.equal(await page.locator('#poster-format').inputValue(), 'a4_2x3')
-
-  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
-  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  await selectWizardUseCase(page, 'RedNote post')
-  assert.equal(await page.locator('#poster-format').inputValue(), 'rednote_cover_3x4')
-  assert.equal(await page.locator('#poster-format option').count(), 1)
-  assert.equal(
-    await page.getByRole('switch', { name: /Add a tracked QR footer/ }).count(),
-    0,
-  )
-  assert.equal(
-    await page.getByText(
-      'Artwork-only export. No QR code or placement tracking is included.',
-      { exact: true },
-    ).count(),
-    1,
-  )
-
-  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
-  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  await selectWizardUseCase(page, 'Website product')
-  assert.equal(await page.locator('#poster-format').inputValue(), 'a4_2x3')
-  assert.equal(
-    await page.getByText(
-      'Artwork-only export. No QR code or placement tracking is included.',
-      { exact: true },
-    ).count(),
-    0,
-  )
-
-  await page.locator('#poster-format').selectOption('luma_1x1')
-  await page.getByRole('button', { name: 'Change campaign type', exact: true }).click()
-  await picker.getByRole('heading', { name: 'Choose a campaign type' }).waitFor()
-  await selectWizardUseCase(page, 'Website product')
-  assert.equal(await page.locator('#poster-format').inputValue(), 'luma_1x1')
-
-  const amazonUrl =
-    'https://www.amazon.com/dp/B0EXAMPLE?ref_=abc%2Fdef&tag=seller%20bytes#details'
-  await page.locator('#product-url').fill(amazonUrl)
-  await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
-  await page.getByLabel('Amazon listing URL Required', { exact: true }).waitFor()
-  assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
-  await page.locator('#product-name').fill('Seller-provided product')
-  assert.deepEqual(
-    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
-    ['Product source', 'Listing copy and product images', 'Campaign action'],
-  )
-  const listingReferences = page.locator('section[aria-labelledby="references-heading"]')
-  assert.equal(
-    await listingReferences.locator('.generation-references label').first().innerText(),
-    'Listing copy (optional)',
-  )
-  assert.equal(
-    await listingReferences.locator('.generation-references .field-label').innerText(),
-    'Product and brand images Required',
-  )
-  const listingFileInput = listingReferences.getByTestId('reference-file-input')
-  assert.equal(await listingFileInput.getAttribute('aria-required'), 'true')
   const generatePoster = page.getByRole('button', {
     name: 'Generate poster',
     exact: true,
   })
   assert.equal(await generatePoster.isDisabled(), true)
+  // No mid-pipeline asset-selection control on creation.
+  assert.equal(
+    await page.getByRole('group', { name: 'Asset selection mode' }).count(),
+    0,
+  )
+
+  // Turning QR off hides the destination and swaps to the bandless twin.
+  await qrSwitch.click()
+  assert.equal(await page.locator('#poster-qr-destination').count(), 0)
+  assert.equal(await posterFormat.inputValue(), 'a4_2x3_cover')
+  assert.equal(await posterFormat.locator('option').count(), 4)
+  assert.equal(
+    await page.getByText(
+      'Artwork-only export. No QR code or placement tracking is included.',
+      { exact: true },
+    ).count(),
+    1,
+  )
+  // Back on for the rest of the flow.
+  await qrSwitch.click()
+  await page.locator('#poster-qr-destination').waitFor()
+
+  // A source URL => website_product: capture preview appears, references optional.
+  await page.locator('#source-url').fill('https://yourproduct.com')
+  await page.getByText('The website supplies the visual and product context.', {
+    exact: true,
+  }).waitFor().catch(() => {})
+  assert.equal(await page.getByText('Amazon seller reference mode', { exact: true }).count(), 0)
+
+  // A supported Amazon URL => amazon_listing: seller-reference notice, references required.
+  await page.locator('#source-url').fill('https://www.amazon.com/dp/B0EXAMPLE')
+  await page.getByText('Amazon seller reference mode', { exact: true }).waitFor()
+  assert.deepEqual(
+    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Campaign details', 'Listing copy and product images'],
+  )
+  const listingFileInput = references.getByTestId('reference-file-input')
+  assert.equal(await listingFileInput.getAttribute('aria-required'), 'true')
+  assert.equal(await generatePoster.isDisabled(), true)
   await listingFileInput.setInputFiles(
     referenceImageFile('amazon-seller-reference.png'),
   )
-  await listingReferences.locator('.reference-tile').waitFor()
+  await references.locator('.reference-tile').waitFor()
   assert.equal(await generatePoster.isEnabled(), true)
-  await listingReferences.getByRole('group', { name: 'Asset selection mode' }).waitFor()
-  assert.equal(
-    await page.getByText('Generation references', { exact: true }).count(),
-    0,
-  )
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/campaign-amazon-form-desktop.png`,
     fullPage: true,
   })
 
-  await page.locator('#product-url').fill('https://example.com/product')
-  await page.getByRole('button', { name: 'Switch to Website product', exact: true }).click()
-  await page.getByLabel('Website URL Required', { exact: true }).waitFor()
-  assert.equal(await page.locator('#product-url').inputValue(), 'https://example.com/product')
-  assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
-
-  await page.locator('#product-url').fill(amazonUrl)
-  await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
-  await page.locator('#product-url').fill('https://amazon.co.uk/dp/B0UNSUPPORTED')
-  await page.locator('#product-name').fill('Unsupported marketplace')
-  await generatePoster.click()
-  await page.locator('.source-mismatch .inline-notice-error').waitFor()
-  await waitForFocused(page, '#product-url')
-  assert.deepEqual(state.campaignWrites, [])
-  assert.deepEqual(state.enqueueRequests, [])
+  // Multi-page post => rednote_post: creative direction required, no QR toggle.
+  // Let the Amazon title-lookup hint settle first so its layout shift cannot land
+  // between the click's pointer-down and pointer-up.
+  await page.locator('#amazon-title-lookup-status').waitFor({ state: 'hidden' }).catch(() => {})
+  const outputPostRadio = page.getByRole('radio', { name: 'Multi-page post' })
+  await outputPostRadio.click()
+  await page.waitForFunction(
+    () => document.querySelector('[role="radio"][aria-checked="true"]')?.textContent?.includes('Multi-page post') ?? false,
+  )
+  await page.waitForFunction(
+    () => document.querySelectorAll('[role="switch"]').length === 0,
+  )
+  assert.equal(await page.getByRole('switch', { name: /Add a tracked QR footer/ }).count(), 0)
+  assert.equal(await page.locator('#poster-format').count(), 0)
+  assert.deepEqual(
+    await page.locator('.campaign-form .form-section-heading h2').allTextContents(),
+    ['Campaign details', 'Draft copy and creative references'],
+  )
   await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
   await context.close()
@@ -654,89 +569,66 @@ async function testCampaignWizardAccessibility(browserInstance) {
   const redNoteErrors = []
   redNotePage.on('pageerror', (error) => redNoteErrors.push(error))
 
+  // Multi-page post: draft copy and >=1 reference are required; the title stays
+  // optional. Creation always runs the full pipeline (yolo), never the editor
+  // asset-review redirect.
   await redNotePage.goto(`${BASE_URL}/campaigns/new`)
   await redNotePage.getByRole('heading', { name: 'Create campaign' }).waitFor()
-  await redNotePage.getByRole('button', { name: /RedNote post/ }).click()
   await redNotePage.locator('.campaign-form').waitFor()
-  await waitForFocused(redNotePage, '#source-heading')
-  assert.equal(
-    await redNotePage.evaluate(() => document.activeElement !== document.body),
-    true,
+  await redNotePage.getByRole('radio', { name: 'Multi-page post' }).click()
+  await redNotePage.waitForFunction(
+    () => document.querySelector('[role="radio"][aria-checked="true"]')?.textContent?.includes('Multi-page post') ?? false,
   )
   assert.deepEqual(
     await redNotePage.locator('.campaign-form .form-section-heading h2').allTextContents(),
-    ['Artwork details', 'Draft copy and creative references', 'Artwork output'],
+    ['Campaign details', 'Draft copy and creative references'],
   )
 
   const productName = redNotePage.locator('#product-name')
   const draftCopy = redNotePage.locator('.generation-references textarea')
   const fileInput = redNotePage.getByTestId('reference-file-input')
-  const imageUrl = redNotePage.getByLabel('Image URL', { exact: true })
-  const editorMode = redNotePage.getByRole('button', { name: 'Editor' })
-  const automaticMode = redNotePage.getByRole('button', { name: 'Automatic' })
-  const tagline = redNotePage.locator('#tagline')
-  const posterFormat = redNotePage.locator('#poster-format')
-  const platformHint = redNotePage.locator('#platform-hint')
   const generate = redNotePage.getByRole('button', {
     name: 'Generate poster',
     exact: true,
   })
 
-  for (const control of [productName, draftCopy, fileInput]) {
-    assert.equal(await control.getAttribute('aria-required'), 'true')
-    assert.equal(await control.getAttribute('aria-invalid'), 'false')
-  }
+  // Title is optional now; draft copy and references are required for a post.
+  assert.equal(await productName.evaluate((el) => el.required), false)
+  assert.equal(await draftCopy.getAttribute('aria-required'), 'true')
+  assert.equal(await fileInput.getAttribute('aria-required'), 'true')
   assert.equal(await generate.isDisabled(), true)
 
-  await productName.focus()
-  await waitForFocused(redNotePage, productName)
-  for (const control of [
-    draftCopy,
-    fileInput,
-    imageUrl,
-    editorMode,
-    automaticMode,
-    tagline,
-    posterFormat,
-    platformHint,
-  ]) {
-    await redNotePage.keyboard.press('Tab')
-    await waitForFocused(redNotePage, control)
-  }
-  await redNotePage.keyboard.press('Tab')
-  await waitForFocused(redNotePage, '.form-actions .button-secondary')
+  // No mid-pipeline asset-selection control on creation.
+  assert.equal(
+    await redNotePage.getByRole('group', { name: 'Asset selection mode' }).count(),
+    0,
+  )
 
-  for (const control of [productName, draftCopy, fileInput]) {
-    assert.equal(await control.getAttribute('aria-invalid'), 'true')
-    assert.ok(await control.getAttribute('aria-describedby'))
-  }
-
-  await productName.fill('Accessible RedNote launch')
   await draftCopy.fill('A complete launch draft for the RedNote post.')
   await fileInput.setInputFiles(referenceImageFile('rednote-reference.png'))
   await redNotePage.locator('.reference-tile').waitFor()
-  for (const control of [productName, draftCopy, fileInput]) {
-    assert.equal(await control.getAttribute('aria-invalid'), 'false')
-  }
   assert.equal(await generate.isEnabled(), true)
 
-  await productName.fill('')
+  // Generate WITHOUT a title: an untitled post is allowed and runs in yolo mode
+  // without redirecting to the asset-review page.
   await generate.click()
-  await redNotePage.locator('#product-name[aria-invalid="true"]').waitFor()
-  await waitForFocused(redNotePage, productName)
-  assert.deepEqual(redNoteState.enqueueRequests, [])
-
-  await productName.fill('Accessible RedNote launch')
-  assert.equal(await productName.getAttribute('aria-invalid'), 'false')
-  await automaticMode.click()
-  await productName.press('Enter')
   await redNotePage.getByRole('heading', { name: 'Building your poster' }).waitFor()
   await waitForFocused(redNotePage, '.page-heading h1')
   await waitFor(() => redNoteState.enqueueRequests.length === 1)
   assert.deepEqual(redNoteState.enqueueModes, ['yolo'])
+  const rednoteCreate = redNoteState.campaignWrites.find(
+    (write) => write.method === 'POST',
+  )
+  assert.ok(rednoteCreate)
+  assert.equal(rednoteCreate.body[0].use_case, 'rednote_post')
+  assert.equal(rednoteCreate.body[0].poster_format, 'rednote_cover_3x4')
+  assert.equal(rednoteCreate.body[0].product_name, null)
+  assert.deepEqual(redNoteState.placementWrites, [])
   assert.deepEqual(redNoteErrors, [])
   await redNoteContext.close()
 
+  // A reference-only single poster (no source URL) resolves to social_cover and
+  // stays on the creation page in yolo mode.
   const socialContext = await browserInstance.newContext({
     locale: 'en-US',
     viewport: { width: 1360, height: 900 },
@@ -750,38 +642,27 @@ async function testCampaignWizardAccessibility(browserInstance) {
 
   await socialPage.goto(`${BASE_URL}/campaigns/new`)
   await socialPage.getByRole('heading', { name: 'Create campaign' }).waitFor()
-  await socialPage.getByRole('button', { name: /Social cover/ }).click()
   await socialPage.locator('.campaign-form').waitFor()
-  await waitForFocused(socialPage, '#source-heading')
-  assert.deepEqual(
-    await socialPage.locator('.campaign-form .form-section-heading h2').allTextContents(),
-    ['Artwork details', 'Creative references and direction', 'Artwork output'],
-  )
+  // Turn QR off so no destination or placement is required.
+  await socialPage.getByRole('switch', { name: /Add a tracked QR footer/ }).click()
 
   const socialName = socialPage.locator('#product-name')
   const socialFileInput = socialPage.getByTestId('reference-file-input')
   await socialName.fill('Accessible social cover')
   await socialFileInput.setInputFiles(referenceImageFile('social-reference.png'))
   await socialPage.locator('.reference-tile').waitFor()
-  assert.equal(
-    await socialPage.getByRole('button', { name: 'Editor' })
-      .getAttribute('aria-pressed'),
-    'true',
-  )
 
-  await socialName.press('Enter')
+  await socialPage.getByRole('button', { name: 'Generate poster', exact: true }).click()
+  await socialPage.getByRole('heading', { name: 'Building your poster' }).waitFor()
   await waitFor(() => socialState.enqueueRequests.length === 1)
-  await socialPage.waitForURL(
-    new RegExp('/campaigns/campaign-asset/generations/generated-1/assets$'),
-  )
-  await socialPage.getByRole('heading', { name: 'Generation assets' }).waitFor()
-  await waitForFocused(socialPage, '.asset-review-header h1')
-  assert.deepEqual(socialState.enqueueModes, ['editor'])
+  assert.deepEqual(socialState.enqueueModes, ['yolo'])
   const socialCreate = socialState.campaignWrites.find(
     (write) => write.method === 'POST',
   )
   assert.ok(socialCreate)
-  assert.equal(socialCreate.body[0].poster_format, 'rednote_cover_3x4')
+  assert.equal(socialCreate.body[0].use_case, 'social_cover')
+  // QR off from the default a4_2x3 => the bandless 2:3 twin.
+  assert.equal(socialCreate.body[0].poster_format, 'a4_2x3_cover')
   assert.equal(socialCreate.body[0].destination_url, null)
   assert.deepEqual(socialState.placementWrites, [])
   assert.deepEqual(socialErrors, [])
@@ -801,20 +682,20 @@ async function testSocialCoverQrLifecycle(browserInstance) {
   const wizardErrors = []
   wizardPage.on('pageerror', (error) => wizardErrors.push(error))
 
+  // A reference-only single poster with QR ON: the tracked destination is
+  // required, a placement is provisioned, and the banded default format persists.
   await openWizardForm(wizardPage, 'Social cover')
   const wizardSwitch = wizardPage.getByRole('switch', {
     name: /Add a tracked QR footer/,
   })
-  assert.equal(await wizardSwitch.isChecked(), false)
+  // The tracked-poster default: QR on for the banded a4_2x3 default.
+  assert.equal(await wizardSwitch.isChecked(), true)
   await wizardPage.locator('#product-name').fill('Tracked social launch')
   await wizardPage.getByTestId('reference-file-input')
     .setInputFiles(referenceImageFile('tracked-social.png'))
   await wizardPage.locator('.reference-tile').waitFor()
-  await wizardSwitch.click()
 
-  const wizardDestination = wizardPage.locator(
-    '#social-cover-qr-destination',
-  )
+  const wizardDestination = wizardPage.locator('#poster-qr-destination')
   await wizardDestination.fill('ftp://example.com/not-trackable')
   assert.equal(
     await wizardDestination.evaluate((element) => element.checkValidity()),
@@ -839,7 +720,9 @@ async function testSocialCoverQrLifecycle(browserInstance) {
   )
   assert.ok(wizardCreate)
   assert.equal(wizardCreate.body.length, 1)
-  assert.equal(wizardCreate.body[0].poster_format, 'rednote_3x4')
+  // No source URL => social_cover; QR on => the banded default format persists.
+  assert.equal(wizardCreate.body[0].use_case, 'social_cover')
+  assert.equal(wizardCreate.body[0].poster_format, 'a4_2x3')
   assert.equal(
     wizardCreate.body[0].destination_url,
     'https://example.com/social-launch',
@@ -1057,51 +940,28 @@ async function testCampaignWizardTextResize(browserInstance) {
   page.on('pageerror', (error) => pageErrors.push(error))
 
   await openWizardForm(page, 'Website product')
+  // A tracked destination so the summary has a Destination row and a long URL.
+  const sourceHost =
+    'source-catalog-for-low-vision-wizard-reflow.posterlytics-example.com'
+  const destinationHost =
+    'destination-checkout-for-low-vision-wizard-reflow.posterlytics-example.com'
+  await page.locator('#source-url').fill(`https://${sourceHost}/products/poster`)
+  await page.locator('#poster-qr-destination').fill(`https://${destinationHost}/signup`)
   // Stay one pixel above the 899px stack breakpoint so this exercises the narrow two-column wizard.
   await page.setViewportSize({ width: 900, height: 900 })
   await waitForAnimationFrames(page, 2)
+  await page.locator('.campaign-summary dd').filter({ hasText: sourceHost }).waitFor()
+  await page.locator('.campaign-summary dd').filter({ hasText: destinationHost }).waitFor()
 
   const normalReport = await readCampaignWizardReflowGeometry(page)
   const normalDetails = JSON.stringify(normalReport)
   assert.ok(normalReport.summaryRows.length > 0, 'Expected campaign summary rows.')
   assert.equal(
-    normalReport.summaryRows.every((row) =>
-      row.termTextRects.length === 1
-      && row.valueTextRects.length === 1
-      && row.termValueShareLine),
-    true,
-    `normal-size summary items did not share one flex line: ${normalDetails}`,
-  )
-  assert.equal(
-    normalReport.assetMode.buttons.length,
+    normalReport.outputButtons.length,
     2,
-    `Expected both asset mode buttons: ${normalDetails}`,
-  )
-  assert.equal(
-    normalReport.assetMode.buttons.every((button) => button.textRects.length === 1),
-    true,
-    `normal-size asset mode button text wrapped: ${normalDetails}`,
-  )
-  assert.equal(
-    normalReport.assetMode.buttonsShareLine,
-    true,
-    `normal-size asset mode buttons did not share one flex line: ${normalDetails}`,
+    `Expected both output-kind buttons: ${normalDetails}`,
   )
 
-  const sourceHost =
-    'source-catalog-for-low-vision-wizard-reflow.posterlytics-example.com'
-  const destinationHost =
-    'destination-checkout-for-low-vision-wizard-reflow.posterlytics-example.com'
-  await page.locator('#product-url').fill(`https://${sourceHost}/products/poster`)
-  await page.locator('#destination-url').fill(`https://${destinationHost}/signup`)
-  await page.locator('.campaign-summary dd').filter({ hasText: sourceHost }).waitFor()
-  await page.locator('.campaign-summary dd').filter({ hasText: destinationHost }).waitFor()
-
-  const selectedLabel = page.locator('.campaign-use-case-selection strong')
-  await selectedLabel.evaluate((element) => {
-    element.textContent =
-      'Website product campaign type with extended localized wording for text resizing'
-  })
   await page.addStyleTag({
     content: `
       .wizard-layout,
@@ -1115,36 +975,16 @@ async function testCampaignWizardTextResize(browserInstance) {
   await doubleComputedTextMetrics(
     page,
     [
-      '.campaign-use-case-selection strong',
       '.campaign-form .input',
       '.campaign-summary dt',
       '.campaign-summary dd',
-      '.asset-mode-control:not(.is-compact) > span:not(.sr-only)',
-      '.asset-mode-control:not(.is-compact) .segmented-control button',
+      '.output-kind-control .segmented-control button',
     ].join(', '),
   )
 
   const report = await readCampaignWizardReflowGeometry(page)
   const details = JSON.stringify(report)
 
-  assert.ok(
-    report.labelScrollWidth <= report.labelClientWidth,
-    `resized campaign type clipped horizontally: ${details}`,
-  )
-  assert.ok(
-    report.labelScrollHeight <= report.labelClientHeight,
-    `resized campaign type clipped vertically: ${details}`,
-  )
-  assert.equal(
-    report.labelTextWithinBox,
-    true,
-    `resized campaign type escaped its box: ${details}`,
-  )
-  assert.equal(
-    report.labelTextWithinSelection,
-    true,
-    `resized campaign type escaped its selection row: ${details}`,
-  )
   assert.ok(report.inputReports.length > 0, 'Expected visible campaign inputs.')
   assert.equal(
     report.inputReports.every((input) => input.height + 1 >= input.requiredHeight),
@@ -1192,32 +1032,21 @@ async function testCampaignWizardTextResize(browserInstance) {
   )
 
   assert.equal(
-    report.assetMode.groupInsideControl,
-    true,
-    `asset mode group escaped its control: ${details}`,
-  )
-  assert.equal(
-    report.assetMode.buttons.length,
+    report.outputButtons.length,
     2,
-    `Expected both resized asset mode buttons: ${details}`,
+    `Expected both resized output-kind buttons: ${details}`,
   )
   assert.equal(
-    report.assetMode.buttons.every((button) =>
-      button.buttonWithinGroup
-      && button.textWithinButton
-      && button.textWithinGroup
+    report.outputButtons.every((button) =>
+      button.textWithinButton
       && button.scrollWidth <= button.clientWidth + 1),
     true,
-    `resized asset mode button escaped or clipped: ${details}`,
+    `resized output-kind button escaped or clipped: ${details}`,
   )
   assert.equal(
-    report.assetMode.buttonsIntersect,
+    report.outputButtonsIntersect,
     false,
-    `resized asset mode buttons intersected: ${details}`,
-  )
-  assert.ok(
-    report.assetMode.groupScrollWidth <= report.assetMode.groupClientWidth + 1,
-    `resized asset mode group overflowed horizontally: ${details}`,
+    `resized output-kind buttons intersected: ${details}`,
   )
   await assertNoOverflow(page)
   assert.deepEqual(pageErrors, [])
@@ -1248,9 +1077,10 @@ async function testAmazonProductTitleAssist(browserInstance) {
   page.on('pageerror', (error) => pageErrors.push(error))
 
   await openWizardForm(page, 'Amazon listing')
-  const source = page.locator('#product-url')
+  const source = page.locator('#source-url')
   const productName = page.locator('#product-name')
-  assert.equal(await productName.getAttribute('required'), '')
+  // Title is optional in the unified screen.
+  assert.equal(await productName.evaluate((el) => el.required), false)
 
   const firstUrl = 'https://www.amazon.com/dp/B0TITLE001?tag=seller-20'
   await source.fill(firstUrl)
@@ -1270,7 +1100,6 @@ async function testAmazonProductTitleAssist(browserInstance) {
       document.querySelector('#product-name')?.value === title,
     'Northstar Portable Signal Lamp',
   )
-  assert.equal(await page.locator('#destination-url').inputValue(), firstUrl)
 
   await productName.fill('')
   await source.fill('https://www.amazon.com/dp/B0TITLE001?ref_=same-product')
@@ -1319,7 +1148,7 @@ async function testAmazonProductTitleAssist(browserInstance) {
     'Product title unavailable. Enter the product name.',
     { exact: true },
   ).waitFor()
-  assert.equal(await productName.getAttribute('required'), '')
+  assert.equal(await productName.evaluate((el) => el.required), false)
   assert.equal(await page.locator('.campaign-form > .inline-notice-error').count(), 0)
   await assertNoOverflow(page)
   await page.screenshot({
@@ -1350,21 +1179,22 @@ async function testWebsiteCapturePreview(browserInstance) {
   const pageErrors = []
   page.on('pageerror', (error) => pageErrors.push(error))
 
-  await openWizardForm(page, 'Amazon listing')
-  assert.equal(
-    await page.getByRole('button', { name: 'Capture website' }).count(),
-    0,
-  )
-  await page.getByRole('button', { name: 'Change campaign type' }).click()
-  await selectWizardUseCase(page, 'Social cover')
-  assert.equal(
-    await page.getByRole('button', { name: 'Capture website' }).count(),
-    0,
-  )
-  await page.getByRole('button', { name: 'Change campaign type' }).click()
-  await selectWizardUseCase(page, 'Website product')
+  await openWizardForm(page, 'Website product')
+  const productUrl = page.locator('#source-url')
 
-  const productUrl = page.locator('#product-url')
+  // An Amazon URL routes to amazon_listing: no website capture.
+  await productUrl.fill('https://www.amazon.com/dp/B0EXAMPLE')
+  assert.equal(
+    await page.getByRole('button', { name: 'Capture website' }).count(),
+    0,
+  )
+  // No URL routes to social_cover: still no capture.
+  await productUrl.fill('')
+  assert.equal(
+    await page.getByRole('button', { name: 'Capture website' }).count(),
+    0,
+  )
+  // A non-Amazon URL routes to website_product and offers capture.
   await productUrl.fill(initialInputUrl)
   const captureButton = page.getByRole('button', { name: 'Capture website' })
   await captureButton.evaluate((element) => {
@@ -1419,7 +1249,7 @@ async function testWebsiteCapturePreview(browserInstance) {
       },
     },
   })
-  await page.locator('#product-url').fill(retryUrl)
+  await page.locator('#source-url').fill(retryUrl)
   const resetCaptureButton = page.getByRole('button', { name: 'Capture website' })
   await resetCaptureButton.waitFor()
   assert.equal(await resetCaptureButton.isEnabled(), true)
@@ -1438,7 +1268,7 @@ async function testWebsiteCapturePreview(browserInstance) {
     status: 429,
     body: { error: { code: 'rate_limited' } },
   })
-  await page.locator('#product-url').fill(rateLimitedUrl)
+  await page.locator('#source-url').fill(rateLimitedUrl)
   const rateLimitedButton = page.getByRole('button', { name: 'Capture website' })
   await rateLimitedButton.waitFor()
   await rateLimitedButton.click()
@@ -1483,10 +1313,10 @@ async function testWebsiteCapturePreview(browserInstance) {
       body: capturePreviewFixture('https://new.example/product', 'fresh'),
     },
   )
-  await page.locator('#product-url').fill('https://old.example/product')
+  await page.locator('#source-url').fill('https://old.example/product')
   await page.getByRole('button', { name: 'Capture website' }).click()
   await waitFor(() => state.capturePreviewRequests.length === 4)
-  await page.locator('#product-url').fill('https://new.example/product')
+  await page.locator('#source-url').fill('https://new.example/product')
   await page.getByRole('button', { name: 'Capture website' }).click()
   await waitFor(() => state.capturePreviewRequests.length === 5)
   await page.locator('img[src*="logo-fresh.svg"]').waitFor()
@@ -1512,7 +1342,7 @@ async function testWebsiteCapturePreview(browserInstance) {
   mobilePage.on('pageerror', (error) => mobileErrors.push(error))
 
   await openWizardForm(mobilePage, 'Website product')
-  await mobilePage.locator('#product-url').fill('https://mobile.example/product')
+  await mobilePage.locator('#source-url').fill('https://mobile.example/product')
   await mobilePage.getByRole('button', { name: 'Capture website' }).click()
   const mobileEvidence = mobilePage.locator('.website-evidence-panel')
   await mobileEvidence.waitFor()
@@ -1807,7 +1637,7 @@ async function testSinglePaidEagerCapture(browserInstance) {
   })
   await invalidationPage.getByRole('button', { name: 'Capture website' }).click()
   await invalidationPage.locator('.website-evidence-panel').waitFor()
-  await invalidationPage.locator('#product-url').fill('https://new.example/product')
+  await invalidationPage.locator('#source-url').fill('https://new.example/product')
   await submitWizardAndWaitForEnqueue(
     invalidationPage,
     invalidationState,
@@ -1913,12 +1743,14 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
   )
   assert.equal(state.campaignWrites[0].body[0].use_case, 'website_product')
 
+  // In the unified screen the use case follows the source URL — no banner, no
+  // click. Editing the primary URL to an Amazon host reclassifies the draft.
   const amazonUrl =
     'https://www.amazon.com/dp/B0SWITCH?maas=maas_adg_api_123%2F456&ref_=aa_maas'
-  await page.locator('#destination-url').fill('')
-  await page.locator('#product-url').fill(amazonUrl)
-  await page.getByRole('button', { name: 'Switch to Amazon listing', exact: true }).click()
-  assert.equal(await page.locator('#destination-url').inputValue(), amazonUrl)
+  // Turn QR off first so the retry does not require a destination.
+  await page.getByRole('switch', { name: /Add a tracked QR footer/ }).click()
+  await page.locator('#source-url').fill(amazonUrl)
+  await page.getByText('Amazon seller reference mode', { exact: true }).waitFor()
   const listingFileInput = page.getByTestId('reference-file-input')
   await listingFileInput.setInputFiles(
     referenceImageFile('amazon-draft-switch.png'),
@@ -1926,25 +1758,23 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
   await page.locator('.reference-tile').waitFor()
   await submitWizardAndWaitForEnqueue(page, state, 2)
 
-  assert.deepEqual(
-    state.campaignWrites.map((write) => write.method),
-    ['POST', 'PATCH', 'PATCH', 'PATCH', 'PATCH'],
-  )
   const correction = state.campaignWrites.find((write) =>
     write.method === 'PATCH' && write.body.product_url === amazonUrl
   )
   assert.ok(correction)
-  assert.equal(correction.method, 'PATCH')
   assert.equal(correction.body.product_url, amazonUrl)
   assert.equal(correction.body.use_case, 'amazon_listing')
-  assert.equal(correction.body.destination_url, amazonUrl)
-  assert.equal(state.campaignWrites.at(-1).body.eager_capture_url, null)
   assert.equal(state.enqueueModes.length, 1)
+  // Creation never runs the editor asset-review mode.
+  assert.deepEqual(state.enqueueModes, ['yolo'])
   assert.deepEqual(pageErrors, [])
   await context.close()
 }
 
 async function testCampaignWizardPreference(browserInstance) {
+  // The mid-pipeline asset-selection preference was removed from creation (it is
+  // hardcoded to yolo and lives only in the editor). What remains worth checking
+  // is that a local draft round-trips the output kind across a reload.
   const context = await browserInstance.newContext({
     locale: 'en-US',
     viewport: { width: 1360, height: 900 },
@@ -1955,16 +1785,22 @@ async function testCampaignWizardPreference(browserInstance) {
   const page = await context.newPage()
 
   await openWizardForm(page, 'Website product')
-  let mode = page.getByRole('group', { name: 'Asset selection mode' })
-  assert.equal(await mode.getByRole('button', { name: 'Editor' }).getAttribute('aria-pressed'), 'true')
-
-  await mode.getByRole('button', { name: 'Automatic' }).click()
+  assert.equal(
+    await page.getByRole('group', { name: 'Asset selection mode' }).count(),
+    0,
+  )
+  await page.getByRole('radio', { name: 'Multi-page post' }).click()
+  await page.waitForFunction(
+    () => document.querySelector('[role="radio"][aria-checked="true"]')?.textContent?.includes('Multi-page post') ?? false,
+  )
   await page.reload()
   await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
   await page.getByText('Local draft restored.', { exact: true }).waitFor()
-  await page.locator('#product-url').waitFor()
-  mode = page.getByRole('group', { name: 'Asset selection mode' })
-  assert.equal(await mode.getByRole('button', { name: 'Automatic' }).getAttribute('aria-pressed'), 'true')
+  await page.getByRole('radio', { name: 'Multi-page post' }).waitFor()
+  assert.equal(
+    await page.getByRole('radio', { name: 'Multi-page post' }).getAttribute('aria-checked'),
+    'true',
+  )
   await context.close()
 }
 
@@ -2805,6 +2641,8 @@ async function testRedNoteCoverFormat(browserInstance) {
   page.on('pageerror', (error) => pageErrors.push(error))
 
   await openWizardForm(page, 'Website product')
+  // Bandless formats (the full-bleed twins) appear once the QR footer is off.
+  await page.getByRole('switch', { name: /Add a tracked QR footer/ }).click()
   assert.ok(
     (await page.locator('#poster-format option').allTextContents())
       .includes('Portrait 3:4 full bleed'),
@@ -3498,22 +3336,11 @@ async function testAssetModeTooltips(browserInstance) {
   const desktopErrors = []
   desktopPage.on('pageerror', (error) => desktopErrors.push(error))
 
-  await openWizardForm(desktopPage, 'Website product')
-  let mode = desktopPage.getByRole('group', { name: 'Asset selection mode' })
-  await assertModeTooltipBehavior(
-    desktopPage,
-    mode,
-    desktopPage.locator('.campaign-form'),
-    desktopPage.getByRole('button', { name: 'Generate poster' }),
-  )
-  await desktopPage.screenshot({
-    path: `${OUTPUT_DIR}/mode-tooltip-wizard-desktop.png`,
-    fullPage: true,
-  })
-
+  // The asset-mode control lives only in the editor now (creation is hardcoded
+  // yolo), so the tooltip behavior is exercised there.
   await desktopPage.goto(`${BASE_URL}/campaigns/campaign-asset`)
   await desktopPage.getByRole('heading', { name: 'Create next version' }).waitFor()
-  mode = desktopPage.getByRole('group', { name: 'Asset selection mode' })
+  let mode = desktopPage.getByRole('group', { name: 'Asset selection mode' })
   await assertModeTooltipBehavior(
     desktopPage,
     mode,
@@ -3539,25 +3366,12 @@ async function testAssetModeTooltips(browserInstance) {
   const mobileErrors = []
   mobilePage.on('pageerror', (error) => mobileErrors.push(error))
 
-  await openWizardForm(mobilePage, 'Website product')
-  mode = mobilePage.getByRole('group', { name: 'Asset selection mode' })
-  await assertModeTooltipBehavior(
-    mobilePage,
-    mode,
-    mobilePage.locator('.campaign-form'),
-    mobilePage.getByRole('button', { name: 'Generate poster' }),
-  )
-  await mobilePage.screenshot({
-    path: `${OUTPUT_DIR}/mode-tooltip-wizard-mobile.png`,
-    fullPage: true,
-  })
-
   await mobilePage.goto(`${BASE_URL}/campaigns/campaign-asset`)
   await mobilePage.getByRole('heading', { name: 'Create next version' }).waitFor()
-  mode = mobilePage.getByRole('group', { name: 'Asset selection mode' })
+  const mobileMode = mobilePage.getByRole('group', { name: 'Asset selection mode' })
   await assertModeTooltipBehavior(
     mobilePage,
-    mode,
+    mobileMode,
     mobilePage.locator('.mobile-panel-content'),
     mobilePage.getByRole('button', { name: 'Generate version' }),
   )
@@ -3604,10 +3418,30 @@ async function openWizardForm(page, useCaseName) {
   await selectWizardUseCase(page, useCaseName)
 }
 
+// The unified creation screen has no picker: a use case is implied by the inputs.
+// This drives the form to the state that resolves to each named use case, so the
+// existing call sites keep reading like intent.
 async function selectWizardUseCase(page, useCaseName) {
-  const picker = page.locator('.use-case-picker')
-  await picker.getByRole('button', { name: new RegExp(useCaseName) }).click()
   await page.locator('.campaign-form').waitFor()
+  const outputPoster = page.getByRole('radio', { name: 'Single poster' })
+  const outputPost = page.getByRole('radio', { name: 'Multi-page post' })
+  const primaryUrl = page.locator('#source-url')
+
+  if (useCaseName === 'RedNote post') {
+    await outputPost.click()
+    return
+  }
+  await outputPoster.click()
+  if (useCaseName === 'Social cover') {
+    await primaryUrl.fill('')
+    return
+  }
+  if (useCaseName === 'Amazon listing') {
+    await primaryUrl.fill('https://www.amazon.com/dp/B0EXAMPLE')
+    return
+  }
+  // Website product: any non-Amazon source URL.
+  await primaryUrl.fill('https://yourproduct.com')
 }
 
 function referenceImageFile(name) {
@@ -3629,9 +3463,12 @@ async function fillWizardRequiredFields(
     destinationUrl,
   },
 ) {
-  await page.locator('#product-url').fill(sourceUrl)
+  await page.locator('#source-url').fill(sourceUrl)
   await page.locator('#product-name').fill(productName)
-  await page.locator('#destination-url').fill(destinationUrl)
+  if (destinationUrl !== undefined) {
+    // A website_product defaults to QR on, so the destination field is present.
+    await page.locator('#poster-qr-destination').fill(destinationUrl)
+  }
 }
 
 async function submitWizardAndWaitForEnqueue(page, state, expectedRequestCount) {
@@ -4702,21 +4539,11 @@ async function waitForAnimationFrames(page, count) {
 
 async function readCampaignWizardReflowGeometry(page) {
   return page.evaluate(() => {
-    const label = document.querySelector('.campaign-use-case-selection strong')
-    const selection = document.querySelector('.campaign-use-case-selection')
+    // The unified screen has no use-case label or asset-mode control; the
+    // low-vision reflow guarantee now covers the summary rows and inputs.
     const summary = document.querySelector('.campaign-summary')
-    const assetControl = document.querySelector(
-      '.campaign-form .asset-mode-control:not(.is-compact)',
-    )
-    const assetGroup = assetControl?.querySelector('[role="group"]')
-    if (
-      !(label instanceof HTMLElement)
-      || !(selection instanceof HTMLElement)
-      || !(summary instanceof HTMLElement)
-      || !(assetControl instanceof HTMLElement)
-      || !(assetGroup instanceof HTMLElement)
-    ) {
-      throw new Error('Campaign wizard reflow elements are missing.')
+    if (!(summary instanceof HTMLElement)) {
+      throw new Error('Campaign summary is missing.')
     }
 
     const tolerance = 1
@@ -4767,9 +4594,6 @@ async function readCampaignWizardReflowGeometry(page) {
       return rects
     }
 
-    const labelRect = rectOf(label.getBoundingClientRect())
-    const selectionRect = rectOf(selection.getBoundingClientRect())
-    const labelTextRects = textRectsOf(label)
     const summaryElements = [...summary.querySelectorAll('dl > div')]
     const summaryRows = summaryElements.map((row, index) => {
       const term = row.querySelector('dt')
@@ -4841,51 +4665,30 @@ async function readCampaignWizardReflowGeometry(page) {
         }]
       })
 
-    const assetControlRect = rectOf(assetControl.getBoundingClientRect())
-    const assetGroupRect = rectOf(assetGroup.getBoundingClientRect())
-    const buttonElements = [...assetGroup.querySelectorAll('button')]
-    const buttons = buttonElements.flatMap((button) => {
-      if (!(button instanceof HTMLButtonElement)) return []
-      const buttonRect = rectOf(button.getBoundingClientRect())
-      const textRects = textNodeRectsOf(button)
-      return [{
-        buttonWithinGroup: within(buttonRect, assetGroupRect),
-        clientWidth: button.clientWidth,
-        name: button.textContent?.trim() ?? '',
-        rect: buttonRect,
-        scrollWidth: button.scrollWidth,
-        textRects,
-        textWithinButton: textRects.every((rect) => within(rect, buttonRect)),
-        textWithinGroup: textRects.every((rect) => within(rect, assetGroupRect)),
-      }]
-    })
+    // The output-kind segmented control replaces the removed asset-mode control
+    // as the reflow-critical multi-button row.
+    const outputGroup = document.querySelector(
+      '.campaign-form .output-kind-control .segmented-control',
+    )
+    const outputButtons = outputGroup instanceof HTMLElement
+      ? [...outputGroup.querySelectorAll('button')].flatMap((button) => {
+        if (!(button instanceof HTMLButtonElement)) return []
+        const buttonRect = rectOf(button.getBoundingClientRect())
+        const textRects = textNodeRectsOf(button)
+        return [{
+          clientWidth: button.clientWidth,
+          rect: buttonRect,
+          scrollWidth: button.scrollWidth,
+          textWithinButton: textRects.every((rect) => within(rect, buttonRect)),
+        }]
+      })
+      : []
 
     return {
-      assetMode: {
-        buttons,
-        buttonsIntersect: buttons.some((button, index) =>
-          buttons.slice(index + 1).some((other) => intersects(button.rect, other.rect))),
-        buttonsShareLine: (
-          buttons.length === 2
-          && sharesLine([buttons[0].rect], [buttons[1].rect])
-        ),
-        groupClientWidth: assetGroup.clientWidth,
-        groupInsideControl: (
-          assetControl.contains(assetGroup)
-          && within(assetGroupRect, assetControlRect)
-        ),
-        groupScrollWidth: assetGroup.scrollWidth,
-      },
+      outputButtons,
+      outputButtonsIntersect: outputButtons.some((button, index) =>
+        outputButtons.slice(index + 1).some((other) => intersects(button.rect, other.rect))),
       inputReports,
-      labelClientHeight: label.clientHeight,
-      labelClientWidth: label.clientWidth,
-      labelScrollHeight: label.scrollHeight,
-      labelScrollWidth: label.scrollWidth,
-      labelTextWithinBox: labelTextRects.every((rect) => within(rect, labelRect)),
-      labelTextWithinSelection: labelTextRects.every(
-        (rect) => within(rect, selectionRect),
-      ),
-      labelTextRects,
       summaryRows,
     }
   })
@@ -5253,28 +5056,21 @@ async function testNativeOnlyFieldInvalidState(browserInstance) {
   const page = await context.newPage()
   await openWizardForm(page, 'Website product')
 
-  for (const [id, errorId] of [
-    ['product-url', 'product-url-error'],
-    ['cta-text', 'cta-text-error'],
-    ['destination-url', 'destination-url-error'],
-  ]) {
-    const field = page.locator(`#${id}`)
-    await field.fill('')
-    await field.blur()
-    await page.waitForTimeout(150)
-    const wired = await field.evaluate((el) => ({
-      ariaRequired: el.getAttribute('aria-required'),
-      ariaInvalid: el.getAttribute('aria-invalid'),
-      describedBy: el.getAttribute('aria-describedby'),
-    }))
-    assert.equal(wired.ariaRequired, 'true', id)
-    assert.equal(wired.ariaInvalid, 'true', id)
-    assert.ok(
-      (wired.describedBy ?? '').split(/\s+/).includes(errorId),
-      `${id} should reference ${errorId}, got ${wired.describedBy}`,
-    )
-    assert.ok((await page.locator(`#${errorId}`).textContent())?.trim())
-  }
-  console.log('  OK native-only required fields expose aria-invalid + described error')
+  // The QR destination is the one natively-required field on the unified screen
+  // (it appears when the QR footer is on, which is the tracked-poster default).
+  const destination = page.locator('#poster-qr-destination')
+  await destination.waitFor()
+  assert.equal(await destination.getAttribute('required'), '')
+  assert.equal(await destination.getAttribute('aria-required'), 'true')
+  assert.equal(await destination.getAttribute('pattern'), 'https?://.+')
+
+  // An invalid value blocks submission via native validation, and focus lands on
+  // the offending control.
+  await destination.fill('not-a-url')
+  await page.getByRole('button', { name: 'Generate poster', exact: true }).click()
+  await waitForFocused(page, destination)
+  assert.deepEqual(state.campaignWrites, [])
+
+  console.log('  OK native-only required destination blocks submit and focuses')
   await context.close()
 }

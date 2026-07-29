@@ -758,6 +758,21 @@ export const ENGLISH_MESSAGE_IDS = [
   'Kundan Ramisetti',
   'Enter the {count}-digit code from the email.',
   'you@company.com',
+  'Output',
+  'Single poster',
+  'Multi-page post',
+  'A single tracked poster in the format you choose below.',
+  'A multi-page 3:4 RedNote post built from your draft copy. No QR tracking.',
+  'Source URLs',
+  'We read the first URL for brand and product context. Extra URLs are used as text only.',
+  'Primary source URL',
+  'Additional source URL {number}',
+  'https://another-page.example',
+  'Remove source URL {number}',
+  'Add another source URL',
+  'Campaign details',
+  'Add a title, sources, and references, then generate.',
+  'Title',
 ] as const
 
 export type TranslationKey = (typeof ENGLISH_MESSAGE_IDS)[number]
@@ -1631,6 +1646,25 @@ export const zhCN: Record<TranslationKey, string> = {
   'Kundan Ramisetti': 'Kundan Ramisetti',
   'Enter the {count}-digit code from the email.': '输入邮件中的 {count} 位验证码。',
   'you@company.com': 'you@company.com',
+  Output: '输出',
+  'Single poster': '单张海报',
+  'Multi-page post': '多页笔记',
+  'A single tracked poster in the format you choose below.':
+    '一张可追踪的海报，采用你在下方选择的版式。',
+  'A multi-page 3:4 RedNote post built from your draft copy. No QR tracking.':
+    '根据你的草稿文案生成的 3:4 多页小红书笔记，不含二维码追踪。',
+  'Source URLs': '来源网址',
+  'We read the first URL for brand and product context. Extra URLs are used as text only.':
+    '我们会读取第一个网址以获取品牌和产品信息，其余网址仅作为文本参考。',
+  'Primary source URL': '主要来源网址',
+  'Additional source URL {number}': '附加来源网址 {number}',
+  'https://another-page.example': 'https://another-page.example',
+  'Remove source URL {number}': '移除来源网址 {number}',
+  'Add another source URL': '添加来源网址',
+  'Campaign details': '推广活动详情',
+  'Add a title, sources, and references, then generate.':
+    '添加标题、来源和参考素材，然后生成。',
+  Title: '标题',
 }
 
 export const messages = {

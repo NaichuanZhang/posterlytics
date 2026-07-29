@@ -342,56 +342,57 @@ test('registry labels are localized without carrying a prompt recipe', () => {
   )
 })
 
-test('wizard persists spec-driven nullable sources and the platform target atomically', () => {
+test('the unified wizard persists intent-derived use_case and nullable sources', () => {
+  // use_case is resolved from explicit intent, never derived from evidence at
+  // read time, and the scalar + array are written from one list.
   assert.match(
     wizard,
-    /const resolvedProductUrl = fields\.productUrl\.requirement === 'hidden'\s+\? null\s+: productUrl\.trim\(\)/,
+    /const resolvedUseCase = resolveCreationUseCase\(\{\s*\.\.\.sourceSignals,\s*outputKind,\s*\}\)/,
   )
   assert.match(
     wizard,
-    /const resolvedDestinationUrl = qrEnabled\s+\? destinationUrl\.trim\(\)\s+: fields\.destinationUrl === 'hidden'\s+\? null/,
+    /const sourceWrite = buildSourceUrlWrite\(sourceUrls\)/,
   )
   assert.match(
     wizard,
-    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: selectedUseCaseId,[\s\S]*product_url: resolvedProductUrl,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: fields\.platformHint === 'hidden'[\s\S]*normalizePlatformHint\(platformHint\)[\s\S]*poster_format: selectedUseCaseId === 'social_cover'[\s\S]*posterFormatWithQr\(posterFormat, qrEnabled\)/,
+    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: resolvedUseCase,[\s\S]*product_url: sourceWrite\.product_url,[\s\S]*source_urls: sourceWrite\.source_urls,[\s\S]*product_name: productName\.trim\(\) \|\| null,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: null,[\s\S]*poster_format: persistedFormat,/,
+  )
+  // No CTA input: cta_text is absent so the NOT NULL DEFAULT absorbs it.
+  assert.doesNotMatch(wizard, /cta_text:/)
+  // Multi-page post is locked to the bandless 3:4 format and clears QR/destination.
+  assert.match(
+    wizard,
+    /const persistedFormat = isPost \? POST_POSTER_FORMAT : posterFormat/,
+  )
+  assert.match(
+    wizard,
+    /const resolvedDestinationUrl = qrEnabled \? destinationUrl\.trim\(\) : null/,
   )
   assert.match(
     wizard,
     /\.insert\(\[\{ \.\.\.values, user_id: user\.id \}]\)/,
   )
   assert.match(wizard, /\.update\(values\)/)
-  assert.match(wizard, /CREATABLE_USE_CASES\.map/)
+  // The picker is gone.
+  assert.doesNotMatch(wizard, /CREATABLE_USE_CASES/)
+  assert.doesNotMatch(wizard, /use-case-picker/)
+  assert.doesNotMatch(wizard, /Change campaign type/)
+  // Creation always runs the full pipeline, never the editor asset-review page.
+  assert.match(wizard, /assetSelectionMode: 'yolo'/)
+  assert.doesNotMatch(wizard, /asset_selection_mode === 'editor'/)
+  assert.doesNotMatch(wizard, /AssetSelectionModeControl/)
+  // References become required only when no fetchable source evidence exists.
   assert.match(
     wizard,
-    /useCase\.id === 'rednote_post'[\s\S]{0,100}<FileText size=\{22\}/,
+    /const referencesRequired = !hasFetchableEvidence/,
   )
-  assert.match(wizard, /inputFields\.productUrl\.requirement/)
-  assert.match(wizard, /inputFields\.referenceImages\.requirement/)
   assert.match(
     wizard,
     /pendingReferences\.length < minimumReferenceImages/,
   )
   assert.match(
     wizard,
-    /inputFields\?\.referenceContext !== 'required'\s+\|\| normalizeReferenceContext\(referenceContext\) !== null/,
-  )
-  assert.match(
-    wizard,
     /disabled=\{[\s\S]*!referenceMinimumMet[\s\S]*!referenceContextRequirementMet[\s\S]*!pendingReferencesReady\(pendingReferences\)/,
-  )
-  const artworkDetailsPosition = wizard.indexOf('aria-labelledby="source-heading"')
-  const generationReferencesPosition = wizard.indexOf(
-    '{referenceOnlyMode && renderGenerationReferences(inputFields)}',
-    artworkDetailsPosition,
-  )
-  const artworkOutputPosition = wizard.indexOf(
-    '{referenceOnlyMode && renderArtworkOutputFields(inputFields)}',
-    generationReferencesPosition,
-  )
-  assert.ok(
-    artworkDetailsPosition >= 0
-      && artworkDetailsPosition < generationReferencesPosition
-      && generationReferencesPosition < artworkOutputPosition,
   )
   assert.doesNotMatch(wizard, /use_case:[\s\S]{0,120}(?:prompt|recipe)/i)
 })
@@ -452,7 +453,9 @@ test('editor and preflight consume persisted intent while reference-only modes a
   }
   assert.doesNotMatch(editorSource, /isAmazonSourceUrl/)
   assert.doesNotMatch(generationTracesSource, /isAmazonSourceUrl/)
-  assert.match(wizard, /isAmazonSourceUrl\(productUrl\)/)
+  // The unified wizard resolves use_case from intent; it only touches Amazon
+  // hosts for the optional product-title lookup on the primary source URL.
+  assert.match(wizard, /isAmazonSourceUrl\(requestedUrl\)/)
 })
 
 test('tracking policy suppresses placement UI, default creation, and direct routes', () => {

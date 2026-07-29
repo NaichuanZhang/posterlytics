@@ -18,7 +18,7 @@ import {
 const NOW_MS = Date.parse('2026-07-22T12:00:00.000Z')
 const OWNER_ID = 'user/one'
 
-test('campaign drafts round-trip serializable wizard state without file bytes', () => {
+test('campaign drafts round-trip serializable creation state without file bytes', () => {
   const file = new File(['private image bytes'], 'product.png', {
     type: 'image/png',
   })
@@ -41,14 +41,12 @@ test('campaign drafts round-trip serializable wizard state without file bytes', 
     },
   }
   const data = buildCampaignDraftData({
-    selectedUseCaseId: 'website_product',
-    productUrl: 'https://example.com/product',
+    sourceUrls: ['https://example.com/product'],
     productName: 'Signal Studio',
     tagline: 'Make it visible',
-    ctaText: 'Try now',
     destinationUrl: 'https://example.com/start',
     posterFormat: 'a4_2x3',
-    platformHint: '',
+    outputKind: 'poster',
     referenceContext: 'Keep the approved headline.',
     pendingReferences: [
       { id: 'file-1', kind: 'file', file },
@@ -104,24 +102,73 @@ test('campaign drafts round-trip serializable wizard state without file bytes', 
   assert.equal(isCampaignDraftDirty(data), true)
   assert.equal(
     campaignDraftKey(OWNER_ID),
-    'posterlytics.campaignDraft.v1:user%2Fone',
+    'posterlytics.campaignDraft.v2:user%2Fone',
   )
   assert.equal(restoreCampaignEagerCapture({
     metadata: parsed?.data.eagerCapture ?? null,
     availableCapture: null,
-    productUrl: 'https://example.com/product',
-    useCase: 'website_product',
+    sourceUrls: ['https://example.com/product'],
+    outputKind: 'poster',
     colorScheme: 'dark',
     nowMs: NOW_MS,
   }), null)
   assert.deepEqual(restoreCampaignEagerCapture({
     metadata: parsed?.data.eagerCapture ?? null,
     availableCapture: eagerCapture,
-    productUrl: 'https://example.com/product',
-    useCase: 'website_product',
+    sourceUrls: ['https://example.com/product'],
+    outputKind: 'poster',
     colorScheme: 'dark',
     nowMs: NOW_MS,
   }), eagerCapture)
+})
+
+test('a pristine unified form is not dirty; each field flips it', () => {
+  const pristine = buildCampaignDraftData({
+    sourceUrls: [],
+    productName: '',
+    tagline: '',
+    destinationUrl: '',
+    posterFormat: 'a4_2x3',
+    outputKind: 'poster',
+    referenceContext: '',
+    pendingReferences: [],
+    serverCampaignId: null,
+    eagerCapture: null,
+  })
+  assert.equal(isCampaignDraftDirty(pristine), false)
+
+  assert.equal(isCampaignDraftDirty({ ...pristine, sourceUrls: ['https://a.example'] }), true)
+  assert.equal(isCampaignDraftDirty({ ...pristine, productName: 'Named' }), true)
+  assert.equal(isCampaignDraftDirty({ ...pristine, outputKind: 'post' }), true)
+  assert.equal(isCampaignDraftDirty({ ...pristine, posterFormat: 'luma_1x1' }), true)
+  assert.equal(isCampaignDraftDirty({ ...pristine, referenceContext: 'x' }), true)
+})
+
+test('the source URL list normalizes on build and round-trips', () => {
+  const data = buildCampaignDraftData({
+    sourceUrls: ['  https://a.example ', '', 'https://a.example', 'https://b.example', 'https://c.example', 'https://d.example'],
+    productName: '',
+    tagline: '',
+    destinationUrl: '',
+    posterFormat: 'a4_2x3',
+    outputKind: 'poster',
+    referenceContext: '',
+    pendingReferences: [],
+    serverCampaignId: null,
+    eagerCapture: null,
+  })
+  // Trimmed, de-duplicated and capped at three.
+  assert.deepEqual(data.sourceUrls, [
+    'https://a.example',
+    'https://b.example',
+    'https://c.example',
+  ])
+  const parsed = parseCampaignDraft(
+    serializeCampaignDraft(OWNER_ID, data, NOW_MS),
+    OWNER_ID,
+    NOW_MS,
+  )
+  assert.deepEqual(parsed?.data.sourceUrls, data.sourceUrls)
 })
 
 test('campaign draft round-trip preserves mixed reference insertion order', () => {
@@ -130,14 +177,12 @@ test('campaign draft round-trip preserves mixed reference insertion order', () =
     type: 'image/webp',
   })
   const data = buildCampaignDraftData({
-    selectedUseCaseId: 'website_product',
-    productUrl: '',
+    sourceUrls: [],
     productName: '',
     tagline: '',
-    ctaText: 'Get started',
     destinationUrl: '',
     posterFormat: 'a4_2x3',
-    platformHint: '',
+    outputKind: 'poster',
     referenceContext: '',
     pendingReferences: [
       { id: 'first-file', kind: 'file', file: firstFile },
@@ -181,16 +226,14 @@ test('campaign draft round-trip preserves mixed reference insertion order', () =
   ])
 })
 
-test('social-cover QR drafts round-trip their banded format and destination', () => {
+test('a QR-on draft round-trips its banded format and destination', () => {
   const data = buildCampaignDraftData({
-    selectedUseCaseId: 'social_cover',
-    productUrl: '',
+    sourceUrls: [],
     productName: 'Summer signals',
     tagline: '',
-    ctaText: 'Get started',
     destinationUrl: 'https://example.com/social',
     posterFormat: 'rednote_3x4',
-    platformHint: 'Instagram',
+    outputKind: 'poster',
     referenceContext: 'Keep the diagonal light.',
     pendingReferences: [],
     serverCampaignId: null,
@@ -204,26 +247,51 @@ test('social-cover QR drafts round-trip their banded format and destination', ()
   )
 
   assert.equal(parsed?.data.posterFormat, 'rednote_3x4')
-  assert.equal(
-    parsed?.data.destinationUrl,
-    'https://example.com/social',
-  )
+  assert.equal(parsed?.data.destinationUrl, 'https://example.com/social')
 })
 
-test('restoring an OFF social-cover draft clears a stale destination', () => {
+test('restoring a multi-page-post draft clears a stale destination', () => {
   const envelope = validEnvelope()
-  envelope.data.selectedUseCaseId = 'social_cover'
+  envelope.data.outputKind = 'post'
   envelope.data.posterFormat = 'rednote_cover_3x4'
   envelope.data.destinationUrl = 'https://example.com/stale'
 
-  const parsed = parseCampaignDraft(
-    JSON.stringify(envelope),
-    OWNER_ID,
-    NOW_MS,
-  )
+  const parsed = parseCampaignDraft(JSON.stringify(envelope), OWNER_ID, NOW_MS)
 
-  assert.equal(parsed?.data.posterFormat, 'rednote_cover_3x4')
+  assert.equal(parsed?.data.outputKind, 'post')
   assert.equal(parsed?.data.destinationUrl, '')
+})
+
+test('a v1 envelope restores nothing and does not throw', () => {
+  // The v1 payload shape (selectedUseCaseId/ctaText/platformHint, no sourceUrls).
+  const v1Data = {
+    selectedUseCaseId: 'website_product',
+    productUrl: 'https://example.com/product',
+    productName: 'Legacy',
+    tagline: '',
+    ctaText: 'Get started',
+    destinationUrl: 'https://example.com/start',
+    posterFormat: 'a4_2x3',
+    platformHint: '',
+    referenceContext: '',
+    references: [],
+    serverCampaignId: null,
+    eagerCapture: null,
+  }
+  const v1Envelope = JSON.parse(serializeCampaignDraft(
+    OWNER_ID,
+    // Cast through unknown: this is deliberately the OLD shape.
+    v1Data as never,
+    NOW_MS,
+  ))
+  // Missing sourceUrls => parse returns null rather than throwing or half-restoring.
+  assert.equal(parseCampaignDraft(JSON.stringify(v1Envelope), OWNER_ID, NOW_MS), null)
+
+  // And the v1 storage key is never even read: the version suffix changed.
+  assert.equal(
+    campaignDraftKey(OWNER_ID).startsWith('posterlytics.campaignDraft.v2:'),
+    true,
+  )
 })
 
 test('campaign draft reader rejects malformed, partial, incompatible, foreign, and expired envelopes', () => {
@@ -235,7 +303,7 @@ test('campaign draft reader rejects malformed, partial, incompatible, foreign, a
   }), OWNER_ID, NOW_MS), null)
   assert.equal(parseCampaignDraft(JSON.stringify({
     ...valid,
-    data: { ...valid.data, selectedUseCaseId: undefined },
+    data: { ...valid.data, sourceUrls: undefined },
   }), OWNER_ID, NOW_MS), null)
   assert.equal(parseCampaignDraft(JSON.stringify({
     ...valid,
@@ -264,10 +332,9 @@ test('campaign draft reader rejects malformed, partial, incompatible, foreign, a
   }), OWNER_ID, NOW_MS))
 })
 
-test('campaign draft reader filters URLs and repairs disabled use cases and formats', () => {
+test('campaign draft reader filters URLs and repairs an unknown format', () => {
   const envelope = validEnvelope()
-  envelope.data.selectedUseCaseId = 'event'
-  envelope.data.posterFormat = 'yt_thumb_16x9'
+  envelope.data.posterFormat = 'not-a-format'
   envelope.data.references = [
     { kind: 'url', url: 'http://assets.example/insecure.png', name: 'bad' },
     {
@@ -283,38 +350,26 @@ test('campaign draft reader filters URLs and repairs disabled use cases and form
     { kind: 'file', name: 'script.svg', size: 12, type: 'image/svg+xml' },
   ]
 
-  const disabled = parseCampaignDraft(
-    JSON.stringify(envelope),
-    OWNER_ID,
-    NOW_MS,
-  )
-  assert.equal(disabled?.data.selectedUseCaseId, null)
-  assert.equal(disabled?.data.posterFormat, 'yt_thumb_16x9')
-  assert.deepEqual(disabled?.data.references, [{
+  const parsed = parseCampaignDraft(JSON.stringify(envelope), OWNER_ID, NOW_MS)
+  // Unknown format falls back to the A4 default.
+  assert.equal(parsed?.data.posterFormat, 'a4_2x3')
+  assert.deepEqual(parsed?.data.references, [{
     kind: 'url',
     url: 'https://assets.example/one.png',
     name: 'one.png',
   }])
-
-  envelope.data.selectedUseCaseId = 'social_cover'
-  const repaired = parseCampaignDraft(
-    JSON.stringify(envelope),
-    OWNER_ID,
-    NOW_MS,
-  )
-  assert.equal(repaired?.data.posterFormat, 'rednote_cover_3x4')
 })
 
 test('clearAllLocalDrafts removes campaign and editor drafts without touching preferences', () => {
   const storage = new MemoryStorage([
-    ['posterlytics.campaignDraft.v1:user', 'campaign'],
+    ['posterlytics.campaignDraft.v2:user', 'campaign'],
     ['posterlytics.editorDraft.v1:user:campaign', 'editor'],
     ['posterlytics.workspacePreferences.v1', 'preferences'],
   ])
 
   clearAllLocalDrafts(storage)
 
-  assert.equal(storage.getItem('posterlytics.campaignDraft.v1:user'), null)
+  assert.equal(storage.getItem('posterlytics.campaignDraft.v2:user'), null)
   assert.equal(storage.getItem('posterlytics.editorDraft.v1:user:campaign'), null)
   assert.equal(
     storage.getItem('posterlytics.workspacePreferences.v1'),
@@ -333,14 +388,12 @@ test('clearAllLocalDrafts removes campaign and editor drafts without touching pr
 
 function validEnvelope() {
   return JSON.parse(serializeCampaignDraft(OWNER_ID, buildCampaignDraftData({
-    selectedUseCaseId: 'website_product',
-    productUrl: '',
+    sourceUrls: [],
     productName: '',
     tagline: '',
-    ctaText: 'Get started',
     destinationUrl: '',
     posterFormat: 'a4_2x3',
-    platformHint: '',
+    outputKind: 'poster',
     referenceContext: '',
     pendingReferences: [],
     serverCampaignId: null,

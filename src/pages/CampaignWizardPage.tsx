@@ -1,14 +1,9 @@
 import {
   ArrowLeft,
-  ArrowRight,
-  ArrowRightLeft,
   CheckCircle2,
   FileText,
-  Globe2,
   ImagePlus,
-  ShoppingBag,
   Sparkles,
-  Type,
 } from 'lucide-react'
 import {
   useCallback,
@@ -25,10 +20,10 @@ import { useAuth } from '../auth/AuthProvider'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { DurableGenerationStatus } from '../components/DurableGenerationStatus'
 import { DraftPersistenceStatus } from '../components/DraftPersistenceStatus'
-import { AssetSelectionModeControl } from '../components/AssetSelectionModeControl'
 import { GenerationReferences } from '../components/GenerationReferences'
-import { PlatformHintField } from '../components/PlatformHintField'
+import { OutputKindControl } from '../components/OutputKindControl'
 import { PosterFormatSelect } from '../components/PosterFormatSelect'
+import { SourceUrlsField } from '../components/SourceUrlsField'
 import {
   isValidPosterQrDestination,
   PosterQrSettings,
@@ -38,9 +33,12 @@ import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
 import { displayNameOrUntitled } from '../lib/campaignDisplayName'
-import { posterFormatHasQr, posterFormatWithQr } from '../lib/qrPolicy'
+import {
+  posterFormatHasQr,
+  posterFormatSupportsQrToggle,
+  posterFormatWithQr,
+} from '../lib/qrPolicy'
 import { insforge } from '../lib/insforge'
-import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import { useCampaign } from '../hooks/useCampaign'
 import { useDebouncedLocalDraft } from '../hooks/useDebouncedLocalDraft'
 import { useRequiredFieldValidity } from '../hooks/useRequiredFieldValidity'
@@ -55,20 +53,15 @@ import {
   enqueuePosterGeneration,
   retryPosterGeneration,
 } from '../lib/generationApi'
-import {
-  AMAZON_SOURCE_HOSTS,
-  classifyProductSourceUrl,
-  getSourceUseCaseSwitchTarget,
-  isAmazonSourceUrl,
-} from '../lib/amazonSource'
+import { isAmazonSourceUrl } from '../lib/amazonSource'
 import { parseAmazonAsin } from '../lib/amazonProduct'
 import { lookupAmazonProductTitle } from '../lib/amazonProductLookup'
 import {
   DEFAULT_POSTER_SIZE_SLUG,
   getPosterSize,
+  resolvePosterFormat,
   type PosterSizeSlug,
 } from '../lib/posterSize'
-import { normalizePlatformHint } from '../lib/platformHints'
 import { ensureDefaultCampaignPlacement } from '../lib/placementService'
 import {
   EagerCaptureSyncError,
@@ -90,12 +83,13 @@ import {
   type LocalDraftFileReference,
 } from '../lib/localDraft'
 import {
-  CREATABLE_USE_CASES,
-  getUseCase,
-  isReferenceOnlyUseCaseId,
-  resolvePosterFormatOnUseCaseSwitch,
-  type CreatableUseCaseId,
-  type UseCaseFieldRequirement,
+  buildSourceUrlWrite,
+  creationSourceSignals,
+  primarySourceUrl,
+} from '../lib/sourceUrls'
+import {
+  resolveCreationUseCase,
+  type CreationOutputKind,
 } from '../lib/useCases'
 import { PosterThumbnail } from '../components/posters/PosterThumbnail'
 import { derivePosterTranscript } from '../lib/posterTranscript'
@@ -103,21 +97,38 @@ import { derivePosterTranscript } from '../lib/posterTranscript'
 type Phase = 'form' | 'uploading' | 'started' | 'error'
 type AmazonTitleLookupStatus = 'idle' | 'loading' | 'unavailable'
 
-const AMAZON_SOURCE_HOST_LIST = AMAZON_SOURCE_HOSTS.join(', ')
+// The RedNote post pipeline is full-bleed 3:4; the DB forbids placements on it.
+const POST_POSTER_FORMAT = resolvePosterFormat('3:4', false)
+
+// One slug per provider aspect, matching the QR toggle's current band, derived
+// from the registry rather than hardcoded. The QR toggle controls band, so the
+// select shows exactly one option per aspect and never both twins at once. A 3:4
+// full-bleed slug is a valid SINGLE poster (a social cover); only outputKind, not
+// the format, routes to the multi-page post pipeline.
+const SINGLE_POSTER_ASPECTS = ['2:3', '3:4', '16:9', '1:1'] as const
+
+function formatsForBand(qrEnabled: boolean): readonly PosterSizeSlug[] {
+  const formats: PosterSizeSlug[] = []
+  for (const aspect of SINGLE_POSTER_ASPECTS) {
+    try {
+      formats.push(resolvePosterFormat(aspect, qrEnabled))
+    } catch {
+      // An aspect without this band mode simply is not offered.
+    }
+  }
+  return formats
+}
 
 export function CampaignWizardPage() {
   const { locale, t } = useI18n()
   const { user } = useAuth()
   const navigate = useNavigate()
   const { items: activityItems, refresh: refreshActivity } = useGenerationActivity()
-  const { preferences, updatePreferences } = useWorkspacePreferences()
   const [phase, setPhase] = useState<Phase>('form')
   const [validationAttempt, setValidationAttempt] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [draftId, setDraftId] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
-  const [selectedUseCaseId, setSelectedUseCaseId] = useState<CreatableUseCaseId | null>(null)
-  const [sourceMismatchAttempted, setSourceMismatchAttempted] = useState(false)
   const [amazonTitleLookupStatus, setAmazonTitleLookupStatus] =
     useState<AmazonTitleLookupStatus>('idle')
   const [eagerCapturePreview, setEagerCapturePreview] =
@@ -130,19 +141,15 @@ export function CampaignWizardPage() {
   const [initialPersistedCanonical, setInitialPersistedCanonical] =
     useState<string | null>(null)
 
-  const [productUrl, setProductUrl] = useState('')
+  const [sourceUrls, setSourceUrls] = useState<string[]>([])
   const [productName, setProductName] = useState('')
   const [tagline, setTagline] = useState('')
-  const [ctaText, setCtaText] = useState('Get started')
   const [destinationUrl, setDestinationUrl] = useState('')
   const [posterFormat, setPosterFormat] = useState<PosterSizeSlug>(DEFAULT_POSTER_SIZE_SLUG)
-  const [platformHint, setPlatformHint] = useState('')
+  const [outputKind, setOutputKind] = useState<CreationOutputKind>('poster')
   const [referenceContext, setReferenceContext] = useState('')
   const [pendingReferences, setPendingReferences] = useState<PendingReference[]>([])
   const pageHeadingRef = useRef<HTMLHeadingElement>(null)
-  const sourceHeadingRef = useRef<HTMLHeadingElement>(null)
-  const useCasePickerHeadingRef = useRef<HTMLHeadingElement>(null)
-  const productUrlInputRef = useRef<HTMLInputElement>(null)
   const validationTargetRef = useRef<HTMLElement | null>(null)
   const validationAttemptQueuedRef = useRef(false)
   const amazonTitleRequestToken = useRef(0)
@@ -154,14 +161,36 @@ export function CampaignWizardPage() {
   const attemptedAmazonTitleAsins = useRef(new Set<string>())
   const restoredOwnerRef = useRef<string | null>(null)
   const pendingReferencesRef = useRef(pendingReferences)
-  const latestProductUrl = useRef(productUrl)
+  const latestSourceUrls = useRef(sourceUrls)
   const latestProductName = useRef(productName)
-  const latestUseCaseId = useRef(selectedUseCaseId)
-  const useCasePickerOriginRef = useRef<CreatableUseCaseId | null>(null)
-  latestProductUrl.current = productUrl
+  const latestOutputKind = useRef(outputKind)
+  latestSourceUrls.current = sourceUrls
   latestProductName.current = productName
-  latestUseCaseId.current = selectedUseCaseId
+  latestOutputKind.current = outputKind
   pendingReferencesRef.current = pendingReferences
+
+  // The persisted source URL is source_urls[0]; the rest are declared context.
+  const primaryUrl = primarySourceUrl(sourceUrls) ?? ''
+  const sourceSignals = creationSourceSignals(sourceUrls)
+  const resolvedUseCase = resolveCreationUseCase({
+    ...sourceSignals,
+    outputKind,
+  })
+  const isPost = outputKind === 'post'
+  const isAmazon = resolvedUseCase === 'amazon_listing'
+  const hasFetchableEvidence = sourceSignals.hasSourceUrl && !isAmazon && !isPost
+  const qrEnabled = !isPost && posterFormatHasQr(posterFormat)
+  // No fetchable source evidence => at least one asset is required. Amazon never
+  // fetches (seller images are the evidence), reference-only has no URL, and a
+  // multi-page post is built from its references.
+  const referencesRequired = !hasFetchableEvidence
+  const minimumReferenceImages = referencesRequired ? 1 : 0
+  const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
+  const creativeDirectionRequired = isPost
+  const referenceContextRequirementMet = (
+    !creativeDirectionRequired
+    || normalizeReferenceContext(referenceContext) !== null
+  )
 
   useEffect(() => {
     if (!user || restoredOwnerRef.current === user.id) return
@@ -171,14 +200,12 @@ export function CampaignWizardPage() {
       const restoredReferences = rehydrateLocalDraftReferences(
         localDraft.data.references,
       )
-      setSelectedUseCaseId(localDraft.data.selectedUseCaseId)
-      setProductUrl(localDraft.data.productUrl)
+      setSourceUrls(localDraft.data.sourceUrls)
       setProductName(localDraft.data.productName)
       setTagline(localDraft.data.tagline)
-      setCtaText(localDraft.data.ctaText)
       setDestinationUrl(localDraft.data.destinationUrl)
       setPosterFormat(localDraft.data.posterFormat)
-      setPlatformHint(localDraft.data.platformHint)
+      setOutputKind(localDraft.data.outputKind)
       setReferenceContext(localDraft.data.referenceContext)
       setPendingReferences(restoredReferences.pendingReferences)
       setRestoredFileReferences(restoredReferences.unrestorableFiles)
@@ -186,8 +213,8 @@ export function CampaignWizardPage() {
       setEagerCapturePreview(restoreCampaignEagerCapture({
         metadata: localDraft.data.eagerCapture,
         availableCapture: eagerCapturePreview,
-        productUrl: localDraft.data.productUrl,
-        useCase: localDraft.data.selectedUseCaseId,
+        sourceUrls: localDraft.data.sourceUrls,
+        outputKind: localDraft.data.outputKind,
         colorScheme: getDeviceColorScheme(),
       }))
       setInitialPersistedCanonical(
@@ -204,62 +231,29 @@ export function CampaignWizardPage() {
     activeAmazonTitleRequest.current = null
   }, [])
 
-  const selectedUseCase = selectedUseCaseId ? getUseCase(selectedUseCaseId) : null
-  const inputFields = selectedUseCase?.inputFields ?? null
-  const productSourceKind = classifyProductSourceUrl(productUrl)
-  const mismatchTarget = selectedUseCase
-    ? getSourceUseCaseSwitchTarget(
-        selectedUseCase.inputFields.productUrl.sourceKind,
-        productSourceKind,
-      )
-    : null
-  const invalidAmazonSource = (
-    selectedUseCase?.inputFields.productUrl.sourceKind === 'amazon'
-    && productSourceKind === 'invalid'
-  )
-  const amazonListing = selectedUseCaseId === 'amazon_listing'
-  const socialCover = selectedUseCaseId === 'social_cover'
-  const socialCoverQrEnabled = socialCover && posterFormatHasQr(posterFormat)
-  const referenceOnlyMode = isReferenceOnlyUseCaseId(selectedUseCaseId)
-  const redNotePost = selectedUseCaseId === 'rednote_post'
-  const minimumReferenceImages = inputFields
-    ? Math.max(
-        inputFields.referenceImages.minimumCount,
-        inputFields.referenceImages.requirement === 'required' ? 1 : 0,
-      )
-    : 0
-  const referenceMinimumMet = pendingReferences.length >= minimumReferenceImages
-  const referenceContextRequirementMet = (
-    inputFields?.referenceContext !== 'required'
-    || normalizeReferenceContext(referenceContext) !== null
-  )
   const campaignDraftData = useMemo(() => buildCampaignDraftData({
-    selectedUseCaseId,
-    productUrl,
+    sourceUrls,
     productName,
     tagline,
-    ctaText,
     destinationUrl,
     posterFormat,
-    platformHint,
+    outputKind,
     referenceContext,
     pendingReferences,
     unrestorableFiles: restoredFileReferences,
     serverCampaignId: draftId,
     eagerCapture: eagerCapturePreview,
   }), [
-    ctaText,
     destinationUrl,
     draftId,
     eagerCapturePreview,
+    outputKind,
     pendingReferences,
-    platformHint,
     posterFormat,
     productName,
-    productUrl,
     referenceContext,
     restoredFileReferences,
-    selectedUseCaseId,
+    sourceUrls,
     tagline,
   ])
   const campaignDraftHasContent = isCampaignDraftDirty(campaignDraftData)
@@ -284,41 +278,17 @@ export function CampaignWizardPage() {
     ),
     serialize: serializeLocalCampaignDraft,
   })
-  const productNameRequired = inputFields?.productName === 'required'
-  const productNameValidity = useRequiredFieldValidity({
-    required: productNameRequired,
-    valid: productName.trim().length > 0,
-    validationAttempt,
-    resetKey: selectedUseCaseId,
-  })
-  const productUrlValidity = useRequiredFieldValidity({
-    required: inputFields?.productUrl.requirement === 'required',
-    valid: productUrl.trim().length > 0,
-    validationAttempt,
-    resetKey: selectedUseCaseId,
-  })
-  const ctaTextValidity = useRequiredFieldValidity({
-    required: inputFields?.ctaText === 'required',
-    valid: ctaText.trim().length > 0,
-    validationAttempt,
-    resetKey: selectedUseCaseId,
-  })
   const destinationUrlValidity = useRequiredFieldValidity({
-    required: inputFields?.destinationUrl === 'required',
-    valid: destinationUrl.trim().length > 0,
+    required: qrEnabled,
+    valid: isValidPosterQrDestination(destinationUrl),
     validationAttempt,
-    resetKey: selectedUseCaseId,
+    // A constant reset key would make the gate inert; key it on QR state instead.
+    resetKey: qrEnabled ? 'qr-on' : 'qr-off',
   })
   const generationViewActive = phase === 'uploading' || phase === 'started'
 
   useFocusOnChange(pageHeadingRef, generationViewActive, {
     enabled: generationViewActive,
-  })
-  useFocusOnChange(sourceHeadingRef, selectedUseCaseId, {
-    enabled: selectedUseCaseId !== null,
-  })
-  useFocusOnChange(useCasePickerHeadingRef, selectedUseCaseId, {
-    enabled: selectedUseCaseId === null,
   })
 
   const queueValidationAttempt = useCallback((target: HTMLElement | null) => {
@@ -367,63 +337,43 @@ export function CampaignWizardPage() {
     ))
   }
 
+  function updateSourceUrls(next: string[]) {
+    latestSourceUrls.current = next
+    cancelAmazonTitleLookup()
+    setSourceUrls(next)
+    setEagerCapturePreview(null)
+  }
+
+  function updateOutputKind(next: CreationOutputKind) {
+    latestOutputKind.current = next
+    setOutputKind(next)
+    if (next === 'post') {
+      // Multi-page post is locked to bandless 3:4 with no QR or destination.
+      setPosterFormat(POST_POSTER_FORMAT)
+      setDestinationUrl('')
+    }
+  }
+
   function discardLocalDraft() {
     campaignDraftPersistence.clear()
     cancelAmazonTitleLookup()
-    useCasePickerOriginRef.current = null
     setPhase('form')
     setError(null)
     setDraftId(null)
     setJobId(null)
-    setSelectedUseCaseId(null)
-    setSourceMismatchAttempted(false)
     setEagerCapturePreview(null)
     setCaptureInFlight(false)
-    setProductUrl('')
+    setSourceUrls([])
     setProductName('')
     setTagline('')
-    setCtaText('Get started')
     setDestinationUrl('')
     setPosterFormat(DEFAULT_POSTER_SIZE_SLUG)
-    setPlatformHint('')
+    setOutputKind('poster')
     setReferenceContext('')
     setPendingReferences([])
     setRestoredFileReferences([])
     setRestoredDraft(false)
     setInitialPersistedCanonical(null)
-  }
-
-  function selectUseCase(useCaseId: CreatableUseCaseId) {
-    const source = selectedUseCaseId ?? useCasePickerOriginRef.current
-    cancelAmazonTitleLookup()
-    latestUseCaseId.current = useCaseId
-    setSelectedUseCaseId(useCaseId)
-    setSourceMismatchAttempted(false)
-    setEagerCapturePreview(null)
-    setPosterFormat((current) =>
-      resolvePosterFormatOnUseCaseSwitch(current, source, useCaseId)
-    )
-    if (useCaseId === 'social_cover' && source !== 'social_cover') {
-      setDestinationUrl('')
-    }
-    useCasePickerOriginRef.current = null
-    if (
-      useCaseId === 'amazon_listing'
-      && !destinationUrl.trim()
-      && isAmazonSourceUrl(productUrl)
-    ) {
-      setDestinationUrl(productUrl.trim())
-    }
-  }
-
-  function prefillAmazonDestination() {
-    if (
-      selectedUseCaseId === 'amazon_listing'
-      && !destinationUrl.trim()
-      && isAmazonSourceUrl(productUrl)
-    ) {
-      setDestinationUrl(productUrl.trim())
-    }
   }
 
   function cancelAmazonTitleLookup() {
@@ -435,13 +385,16 @@ export function CampaignWizardPage() {
 
   async function prefillAmazonProductName() {
     if (
-      latestUseCaseId.current !== 'amazon_listing'
+      resolveCreationUseCase({
+        ...creationSourceSignals(latestSourceUrls.current),
+        outputKind: latestOutputKind.current,
+      }) !== 'amazon_listing'
       || latestProductName.current.trim()
     ) {
       return
     }
 
-    const requestedUrl = latestProductUrl.current.trim()
+    const requestedUrl = primarySourceUrl(latestSourceUrls.current) ?? ''
     const asin = parseAmazonAsin(requestedUrl)
     if (!asin) {
       if (isAmazonSourceUrl(requestedUrl)) {
@@ -498,56 +451,38 @@ export function CampaignWizardPage() {
   function amazonTitleRequestIsCurrent(token: number, asin: string) {
     return (
       token === amazonTitleRequestToken.current
-      && latestUseCaseId.current === 'amazon_listing'
-      && parseAmazonAsin(latestProductUrl.current) === asin
+      && resolveCreationUseCase({
+        ...creationSourceSignals(latestSourceUrls.current),
+        outputKind: latestOutputKind.current,
+      }) === 'amazon_listing'
+      && parseAmazonAsin(primarySourceUrl(latestSourceUrls.current) ?? '') === asin
       && !latestProductName.current.trim()
     )
   }
 
   async function persistDraft(): Promise<string> {
     if (!user) throw new Error(t('Sign in before creating a campaign.'))
-    if (!selectedUseCaseId) throw new Error(t('Choose a use case before creating a campaign.'))
 
-    const fields = getUseCase(selectedUseCaseId).inputFields
-    const qrEnabled = (
-      selectedUseCaseId === 'social_cover'
-      && posterFormatHasQr(posterFormat)
-    )
     if (qrEnabled && !isValidPosterQrDestination(destinationUrl)) {
       throw new Error(t('Use a complete HTTP or HTTPS destination URL.'))
     }
-    const resolvedProductUrl = fields.productUrl.requirement === 'hidden'
-      ? null
-      : productUrl.trim()
-    const resolvedDestinationUrl = qrEnabled
-      ? destinationUrl.trim()
-      : fields.destinationUrl === 'hidden'
-        ? null
-        : selectedUseCaseId === 'amazon_listing'
-          && !destinationUrl.trim()
-          && isAmazonSourceUrl(productUrl)
-            ? productUrl.trim()
-            : destinationUrl.trim()
-    if (resolvedDestinationUrl && resolvedDestinationUrl !== destinationUrl) {
-      setDestinationUrl(resolvedDestinationUrl)
-    }
+    const sourceWrite = buildSourceUrlWrite(sourceUrls)
+    const resolvedDestinationUrl = qrEnabled ? destinationUrl.trim() : null
+    const persistedFormat = isPost ? POST_POSTER_FORMAT : posterFormat
 
     const values = {
       scenario: 'product',
-      use_case: selectedUseCaseId,
-      product_url: resolvedProductUrl,
-      // NULL, never '': every downstream fallback uses ?? / ||, and '' would
-      // yield blank prompt identity lines and colliding export filenames.
+      use_case: resolvedUseCase,
+      product_url: sourceWrite.product_url,
+      source_urls: sourceWrite.source_urls,
+      // NULL, never '': every downstream fallback uses ?? / ||.
       product_name: productName.trim() || null,
       tagline: tagline.trim() || null,
-      cta_text: ctaText.trim() || 'Learn more',
+      // Absent so NOT NULL DEFAULT 'Learn more' absorbs it; no CTA input remains.
       destination_url: resolvedDestinationUrl,
-      platform_hint: fields.platformHint === 'hidden'
-        ? null
-        : normalizePlatformHint(platformHint),
-      poster_format: selectedUseCaseId === 'social_cover'
-        ? posterFormatWithQr(posterFormat, qrEnabled)
-        : posterFormat,
+      // No platform-hint input in the unified screen.
+      platform_hint: null,
+      poster_format: persistedFormat,
       status: 'draft',
     }
 
@@ -583,15 +518,10 @@ export function CampaignWizardPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!user || !selectedUseCaseId || !selectedUseCase || !inputFields) return
+    if (!user) return
     const invalidControl = firstInvalidControl(event.currentTarget)
     if (invalidControl) {
       queueValidationAttempt(invalidControl)
-      return
-    }
-    if (mismatchTarget || invalidAmazonSource) {
-      setSourceMismatchAttempted(true)
-      queueValidationAttempt(productUrlInputRef.current)
       return
     }
     if (!referenceContextRequirementMet) {
@@ -613,9 +543,9 @@ export function CampaignWizardPage() {
       return
     }
     const submittedColorScheme = getDeviceColorScheme()
-    const submittedProductUrl = productUrl
-    const submittedUseCase = selectedUseCaseId
-    const submittedSocialQrEnabled = socialCoverQrEnabled
+    const submittedPrimaryUrl = primaryUrl
+    const submittedUseCase = resolvedUseCase
+    const submittedQrEnabled = qrEnabled
     const submittedEagerCapture = eagerCapturePreview
     setError(null)
     setPhase('uploading')
@@ -629,7 +559,7 @@ export function CampaignWizardPage() {
       return
     }
 
-    if (submittedSocialQrEnabled) {
+    if (submittedQrEnabled) {
       const placementError = await ensureDefaultCampaignPlacement({
         campaignId,
         userId: user.id,
@@ -649,7 +579,7 @@ export function CampaignWizardPage() {
     try {
       await syncEagerCaptureEvidence({
         campaignId,
-        productUrl: submittedProductUrl,
+        productUrl: submittedPrimaryUrl,
         useCase: submittedUseCase,
         colorScheme: submittedColorScheme,
         preview: submittedEagerCapture?.preview ?? null,
@@ -674,7 +604,9 @@ export function CampaignWizardPage() {
         instruction: normalizeReferenceContext(referenceContext),
         referenceImages: uploaded,
         refreshWebsite: true,
-        assetSelectionMode: preferences.assetSelectionMode,
+        // Creation always runs the full pipeline; the mid-pipeline asset-review
+        // page is an editor-only preference.
+        assetSelectionMode: 'yolo',
         colorScheme: submittedColorScheme,
         locale,
       })
@@ -684,11 +616,6 @@ export function CampaignWizardPage() {
       setJobId(result.job.id)
       setPhase('started')
       await refreshActivity()
-      if (result.generation.asset_selection_mode === 'editor') {
-        navigate(
-          `/campaigns/${campaignId}/generations/${result.generation.id}/assets`,
-        )
-      }
     } catch (cause) {
       if (uploaded.length > 0) await deleteReferenceImages(uploaded)
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -704,11 +631,6 @@ export function CampaignWizardPage() {
       setJobId(result.job.id)
       setPhase('started')
       await refreshActivity()
-      if (result.generation.asset_selection_mode === 'editor') {
-        navigate(
-          `/campaigns/${result.generation.campaign_id}/generations/${result.generation.id}/assets`,
-        )
-      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -737,227 +659,23 @@ export function CampaignWizardPage() {
     && activity?.status !== 'canceled'
   )
 
-  function renderCampaignAction(fields: NonNullable<typeof inputFields>) {
-    if (fields.ctaText === 'hidden' && fields.destinationUrl === 'hidden') return null
-
-    return (
-      <section className="form-section" aria-labelledby="message-heading">
-        <div className="form-section-heading">
-          <span><Type size={17} aria-hidden="true" /></span>
-          <div>
-            <h2 id="message-heading">{t('Campaign action')}</h2>
-            <p>{t('Define the poster action and its tracked destination.')}</p>
-          </div>
-        </div>
-        <div className="field-grid">
-          {fields.ctaText !== 'hidden' && (
-            <div className="field">
-              <label htmlFor="cta-text">
-                {t('Call to action')} <FieldRequirement requirement={fields.ctaText} />
-              </label>
-              <input
-                id="cta-text"
-                className="input"
-                {...requiredInputProps(fields.ctaText === 'required', {
-                  invalid: ctaTextValidity.invalid,
-                  errorId: 'cta-text-error',
-                  onBlur: ctaTextValidity.onBlur,
-                })}
-                placeholder={t('Start free trial')}
-                value={ctaText}
-                onChange={(event) => setCtaText(event.target.value)}
-              />
-              {ctaTextValidity.invalid && (
-                <p className="field-error" id="cta-text-error">
-                  {t('{name} is required.', { name: t('Call to action') })}
-                </p>
-              )}
-            </div>
-          )}
-          {fields.destinationUrl !== 'hidden' && (
-            <div className="field">
-              <label htmlFor="destination-url">
-                {t('Destination URL')}{' '}
-                <FieldRequirement requirement={fields.destinationUrl} />
-              </label>
-              <input
-                id="destination-url"
-                className="input"
-                type="url"
-                {...requiredInputProps(fields.destinationUrl === 'required', {
-                  invalid: destinationUrlValidity.invalid,
-                  errorId: 'destination-url-error',
-                  onBlur: destinationUrlValidity.onBlur,
-                })}
-                placeholder="https://yourproduct.com/signup"
-                value={destinationUrl}
-                onChange={(event) => setDestinationUrl(event.target.value)}
-              />
-              {destinationUrlValidity.invalid && (
-                <p className="field-error" id="destination-url-error">
-                  {t('{name} is required.', { name: t('Destination URL') })}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-    )
-  }
-
-  function renderArtworkOutputFields(fields: NonNullable<typeof inputFields>) {
-    if (!selectedUseCase) return null
-
-    const outputFields = (
-      <>
-        {fields.tagline !== 'hidden' && (
-          <div className="field">
-            <label htmlFor="tagline">
-              {referenceOnlyMode ? t('Supporting line') : t('Tagline')}{' '}
-              <FieldRequirement requirement={fields.tagline} />
-            </label>
-            <input
-              id="tagline"
-              className="input"
-              {...requiredInputProps(fields.tagline === 'required')}
-              placeholder={referenceOnlyMode
-                ? t('A short optional line')
-                : t('Reports your team can act on')}
-              value={tagline}
-              onChange={(event) => setTagline(event.target.value)}
-            />
-          </div>
-        )}
-        {socialCover ? (
-          <PosterQrSettings
-            idPrefix="social-cover-qr"
-            enabled={socialCoverQrEnabled}
-            destinationUrl={destinationUrl}
-            onEnabledChange={(enabled) => {
-              setPosterFormat(posterFormatWithQr(posterFormat, enabled))
-              if (!enabled) setDestinationUrl('')
-            }}
-            onDestinationUrlChange={setDestinationUrl}
-          />
-        ) : (
-          <PosterFormatSelect
-            id="poster-format"
-            value={posterFormat}
-            allowedFormats={selectedUseCase.allowedPosterFormats}
-            onChange={setPosterFormat}
-          />
-        )}
-        {fields.platformHint !== 'hidden' && (
-          <PlatformHintField
-            id="platform-hint"
-            value={platformHint}
-            onChange={setPlatformHint}
-          />
-        )}
-      </>
-    )
-
-    if (!referenceOnlyMode) return outputFields
-
-    return (
-      <section className="form-section" aria-labelledby="artwork-output-heading">
-        <div className="form-section-heading">
-          <span><Type size={17} aria-hidden="true" /></span>
-          <div>
-            <h2 id="artwork-output-heading">{t('Artwork output')}</h2>
-            <p>
-              {socialCover
-                ? t('Keep the full-bleed default or add a tracked QR footer.')
-                : t('Name the artwork and choose its full-bleed output format.')}
-            </p>
-          </div>
-        </div>
-        <div className="field-grid">
-          {outputFields}
-        </div>
-      </section>
-    )
-  }
-
-  function renderGenerationReferences(fields: NonNullable<typeof inputFields>) {
-    if (
-      fields.referenceContext === 'hidden'
-      && fields.referenceImages.requirement === 'hidden'
-    ) {
-      return null
-    }
-
-    const referenceProps = amazonListing
+  const referenceLabels = isAmazon
+    ? {
+        contextLabel: t('Listing copy'),
+        contextPlaceholder: t('Paste the product title, bullets, description, and approved claims.'),
+        contextHint: t('Seller-provided copy is the primary copy source.'),
+        referenceImagesLabel: t('Product and brand images'),
+        referenceImagesHint: t('Seller-provided images are the primary visual source.'),
+      }
+    : isPost
       ? {
-          contextLabel: t('Listing copy'),
-          contextPlaceholder: t('Paste the product title, bullets, description, and approved claims.'),
-          contextHint: t('Seller-provided copy is the primary copy source.'),
-          referenceImagesLabel: t('Product and brand images'),
-          referenceImagesHint: t('Seller-provided images are the primary visual source.'),
+          contextLabel: t('Draft copy'),
+          contextPlaceholder: t('Paste the full draft copy for this RedNote post.'),
+          contextHint: t('The draft copy is interpreted together with the reference images.'),
+          referenceImagesLabel: t('Creative references'),
+          referenceImagesHint: t('Reference images are the primary visual source.'),
         }
-      : redNotePost
-        ? {
-            contextLabel: t('Draft copy'),
-            contextPlaceholder: t('Paste the full draft copy for this RedNote post.'),
-            contextHint: t('The draft copy is interpreted together with the reference images.'),
-            referenceImagesLabel: t('Creative references'),
-            referenceImagesHint: t('Reference images are the primary visual source.'),
-          }
-        : referenceOnlyMode
-          ? {
-            contextLabel: t('Creative direction'),
-            contextPlaceholder: t('Describe the mood, visual hook, audience, and anything the artwork should preserve.'),
-            contextHint: t('Creative direction is interpreted together with the reference images.'),
-            referenceImagesLabel: t('Creative references'),
-            referenceImagesHint: t('Reference images are the primary visual source.'),
-          }
-          : {}
-
-    return (
-      <section className="form-section" aria-labelledby="references-heading">
-        <div className="form-section-heading">
-          <span><ImagePlus size={17} aria-hidden="true" /></span>
-          <div>
-            <h2 id="references-heading">
-              {amazonListing
-                ? t('Listing copy and product images')
-                : redNotePost
-                  ? t('Draft copy and creative references')
-                  : referenceOnlyMode
-                    ? t('Creative references and direction')
-                : t('Generation references')}
-            </h2>
-            <p>
-              {amazonListing
-                ? t('Provide the seller-owned text and visuals Posterlytics should use.')
-                : redNotePost
-                  ? t('Add the complete draft copy and at least one image for the post.')
-                  : referenceOnlyMode
-                    ? t('Start with at least one image, then add any context that should shape the artwork.')
-                : t('Add direction or images that are not present on the website.')}
-            </p>
-          </div>
-        </div>
-        <GenerationReferences
-          context={referenceContext}
-          onContextChange={setReferenceContext}
-          existingImages={[]}
-          onRemoveExisting={() => {}}
-          pendingReferences={pendingReferences}
-          onPendingReferencesChange={updatePendingReferences}
-          contextRequirement={fields.referenceContext}
-          referenceImagesRequirement={fields.referenceImages.requirement}
-          referenceImagesMinimumCount={fields.referenceImages.minimumCount}
-          validationAttempt={validationAttempt}
-          {...referenceProps}
-        />
-        <AssetSelectionModeControl
-          value={preferences.assetSelectionMode}
-          onChange={(assetSelectionMode) => updatePreferences({ assetSelectionMode })}
-        />
-      </section>
-    )
-  }
+      : {}
 
   return (
     <AppShell
@@ -988,13 +706,7 @@ export function CampaignWizardPage() {
               ? t('Keep this page open while the source files finish uploading.')
               : working
                 ? t('Generation continues in the background after the inputs are queued.')
-                : selectedUseCase
-                  ? redNotePost
-                    ? t('Set artwork details, draft copy, creative references, and an optional platform hint.')
-                    : referenceOnlyMode
-                      ? t('Set artwork details, creative references, and an optional platform hint.')
-                    : t('Set the source, message, and tracked destination.')
-                  : t('Choose the campaign source that matches what you want to create.')}
+                : t('Add a title, sources, and references, then generate.')}
           </p>
         </div>
       </header>
@@ -1112,42 +824,6 @@ export function CampaignWizardPage() {
             <p>{t('Safe to leave Posterlytics. Activity will update shortly.')}</p>
           </div>
         </div>
-      ) : !selectedUseCase || !inputFields ? (
-        <section className="use-case-picker" aria-labelledby="use-case-picker-heading">
-          <div className="use-case-picker-heading">
-            <h2 ref={useCasePickerHeadingRef} id="use-case-picker-heading">
-              {t('Choose a campaign type')}
-            </h2>
-            <p>{t('Select the source workflow that matches this campaign.')}</p>
-          </div>
-          <div className="use-case-card-grid">
-            {CREATABLE_USE_CASES.map((useCase) => (
-              <button
-                key={useCase.id}
-                type="button"
-                className="use-case-card"
-                onClick={() => selectUseCase(useCase.id)}
-              >
-                <span className="use-case-card-icon" aria-hidden="true">
-                  {useCase.id === 'amazon_listing'
-                    ? <ShoppingBag size={22} />
-                    : useCase.id === 'rednote_post'
-                      ? <FileText size={22} />
-                      : isReferenceOnlyUseCaseId(useCase.id)
-                        ? <ImagePlus size={22} />
-                        : <Globe2 size={22} />}
-                </span>
-                <span className="use-case-card-copy">
-                  <strong>{t(useCase.label)}</strong>
-                  {useCase.creationDescription && (
-                    <span>{t(useCase.creationDescription)}</span>
-                  )}
-                </span>
-                <ArrowRight size={18} aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-        </section>
       ) : (
         <div className="wizard-layout">
           <form
@@ -1155,206 +831,160 @@ export function CampaignWizardPage() {
             onInvalidCapture={handleInvalidCapture}
             onSubmit={handleSubmit}
           >
-            <div className="campaign-use-case-selection">
-              <div>
-                <span>{t('Campaign type')}</span>
-                <strong>{t(selectedUseCase.label)}</strong>
-              </div>
-              <button
-                type="button"
-                className="button button-secondary button-small"
-                onClick={() => {
-                  useCasePickerOriginRef.current = selectedUseCaseId
-                  cancelAmazonTitleLookup()
-                  latestUseCaseId.current = null
-                  setSelectedUseCaseId(null)
-                  setSourceMismatchAttempted(false)
-                  setEagerCapturePreview(null)
-                }}
-              >
-                <ArrowRightLeft size={14} aria-hidden="true" />
-                {t('Change campaign type')}
-              </button>
-            </div>
-
-            <section className="form-section" aria-labelledby="source-heading">
+            <section className="form-section" aria-labelledby="details-heading">
               <div className="form-section-heading">
-                <span>
-                  {referenceOnlyMode
-                    ? <ImagePlus size={17} aria-hidden="true" />
-                    : <Globe2 size={17} aria-hidden="true" />}
-                </span>
+                <span><Sparkles size={17} aria-hidden="true" /></span>
                 <div>
-                  <h2 ref={sourceHeadingRef} id="source-heading">
-                    {referenceOnlyMode ? t('Artwork details') : t('Product source')}
-                  </h2>
-                  <p>
-                    {amazonListing
-                      ? t('Use a supported Amazon listing URL. Posterlytics will use seller-provided references instead of scraping the page.')
-                      : referenceOnlyMode
-                        ? t('Name the artwork and choose its full-bleed output format.')
-                      : t('The website supplies the visual and product context.')}
-                  </p>
+                  <h2 id="details-heading">{t('Campaign details')}</h2>
+                  <p>{t('Add a title, sources, and references, then generate.')}</p>
                 </div>
               </div>
               <div className="field-grid">
-                {inputFields.productUrl.requirement !== 'hidden' && (
-                  <div className="field field-wide">
-                    <label htmlFor="product-url">
-                      {amazonListing ? t('Amazon listing URL') : t('Website URL')}{' '}
-                      <FieldRequirement requirement={inputFields.productUrl.requirement} />
-                    </label>
-                    <input
-                      ref={productUrlInputRef}
-                      id="product-url"
-                      className="input"
-                      type="url"
-                      {...requiredInputProps(
-                        inputFields.productUrl.requirement === 'required',
-                      )}
-                      aria-invalid={productUrlValidity.invalid}
-                      placeholder={amazonListing
-                        ? t('https://www.amazon.com/dp/B0EXAMPLE')
-                        : 'https://yourproduct.com'}
-                      value={productUrl}
-                      aria-describedby={[
-                        mismatchTarget || invalidAmazonSource
-                          ? 'product-url-mismatch'
-                          : '',
-                        productUrlValidity.invalid ? 'product-url-error' : '',
-                      ].filter(Boolean).join(' ') || undefined}
-                      onChange={(event) => {
-                        const nextUrl = event.target.value
-                        latestProductUrl.current = nextUrl
-                        cancelAmazonTitleLookup()
-                        setProductUrl(nextUrl)
-                        setSourceMismatchAttempted(false)
-                        setEagerCapturePreview(null)
-                      }}
-                      onBlur={() => {
-                        productUrlValidity.onBlur()
-                        prefillAmazonDestination()
-                        void prefillAmazonProductName()
-                      }}
-                    />
-                    {productUrlValidity.invalid && (
-                      <p className="field-error" id="product-url-error">
-                        {t('{name} is required.', {
-                          name: amazonListing
-                            ? t('Amazon listing URL')
-                            : t('Website URL'),
-                        })}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {(mismatchTarget || invalidAmazonSource) && (
-                  <div
-                    className="field field-wide source-mismatch"
-                    id="product-url-mismatch"
-                  >
-                    <InlineNotice tone={sourceMismatchAttempted ? 'error' : 'warning'}>
-                      <span className="source-mismatch-copy">
-                        <strong>
-                          {invalidAmazonSource
-                            ? t('Enter a supported Amazon listing URL.')
-                            : mismatchTarget === 'amazon_listing'
-                              ? t('This source belongs to Amazon listing.')
-                              : t('This is not a supported Amazon listing URL.')}
-                        </strong>
-                        <span>
-                          {invalidAmazonSource
-                            ? t('Use a complete HTTP or HTTPS URL on one of these hosts: {hosts}.', {
-                              hosts: AMAZON_SOURCE_HOST_LIST,
-                            })
-                            : mismatchTarget === 'amazon_listing'
-                              ? t('Amazon sources use seller-provided copy and images instead of website capture.')
-                              : t('Use a complete HTTP or HTTPS URL on one of these hosts: {hosts}.', {
-                                hosts: AMAZON_SOURCE_HOST_LIST,
-                              })}
-                        </span>
-                      </span>
-                      {mismatchTarget && (
-                        <button
-                          type="button"
-                          className="button button-secondary button-small"
-                          onClick={() => selectUseCase(mismatchTarget)}
-                        >
-                          <ArrowRightLeft size={14} aria-hidden="true" />
-                          {mismatchTarget === 'amazon_listing'
-                            ? t('Switch to Amazon listing')
-                            : t('Switch to Website product')}
-                        </button>
-                      )}
-                    </InlineNotice>
-                  </div>
-                )}
-                {selectedUseCaseId === 'website_product' && (
+                {/* First, so a layout shift below can never move the primary
+                    choice out from under a click. */}
+                <div className="field field-wide">
+                  <OutputKindControl
+                    idPrefix="output-kind"
+                    value={outputKind}
+                    onChange={updateOutputKind}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="product-name">
+                    {t('Title')} <span className="optional-label">{t('Optional')}</span>
+                  </label>
+                  <input
+                    id="product-name"
+                    className="input"
+                    placeholder="Northstar Reports"
+                    value={productName}
+                    aria-describedby={
+                      isAmazon && amazonTitleLookupStatus !== 'idle'
+                        ? 'amazon-title-lookup-status'
+                        : undefined
+                    }
+                    onChange={(event) => {
+                      const nextName = event.target.value
+                      latestProductName.current = nextName
+                      if (nextName.trim()) cancelAmazonTitleLookup()
+                      setProductName(nextName)
+                    }}
+                  />
+                  {isAmazon && amazonTitleLookupStatus !== 'idle' && (
+                    <p
+                      className="hint"
+                      id="amazon-title-lookup-status"
+                      aria-live="polite"
+                    >
+                      {amazonTitleLookupStatus === 'loading'
+                        ? t('Looking up the Amazon product title...')
+                        : t('Product title unavailable. Enter the product name.')}
+                    </p>
+                  )}
+                </div>
+                <div className="field">
+                  <label htmlFor="tagline">
+                    {t('Supporting line')}{' '}
+                    <span className="optional-label">{t('Optional')}</span>
+                  </label>
+                  <input
+                    id="tagline"
+                    className="input"
+                    placeholder={t('A short optional line')}
+                    value={tagline}
+                    onChange={(event) => setTagline(event.target.value)}
+                  />
+                </div>
+                <SourceUrlsField
+                  id="source-url"
+                  values={sourceUrls}
+                  onChange={updateSourceUrls}
+                  onPrimaryBlur={() => void prefillAmazonProductName()}
+                />
+                {resolvedUseCase === 'website_product' && (
                   <WebsiteCapturePreview
-                    url={productUrl}
-                    disabled={Boolean(mismatchTarget)}
+                    url={primaryUrl}
+                    disabled={false}
                     onPreviewChange={setEagerCapturePreview}
                     onCaptureInFlightChange={setCaptureInFlight}
                   />
                 )}
-                {inputFields.productName !== 'hidden' && (
-                  <div className="field">
-                    <label htmlFor="product-name">
-                      {referenceOnlyMode ? t('Artwork name') : t('Product name')}{' '}
-                      <FieldRequirement requirement={inputFields.productName} />
-                    </label>
-                    <input
-                      id="product-name"
-                      className="input"
-                      {...requiredInputProps(productNameRequired)}
-                      aria-invalid={productNameValidity.invalid}
-                      placeholder={referenceOnlyMode ? t('Summer launch cover') : 'Northstar Reports'}
-                      value={productName}
-                      aria-describedby={[
-                        amazonListing && amazonTitleLookupStatus !== 'idle'
-                          ? 'amazon-title-lookup-status'
-                          : '',
-                        productNameValidity.invalid ? 'product-name-error' : '',
-                      ].filter(Boolean).join(' ') || undefined}
-                      onChange={(event) => {
-                        const nextName = event.target.value
-                        latestProductName.current = nextName
-                        if (nextName.trim()) cancelAmazonTitleLookup()
-                        setProductName(nextName)
-                      }}
-                      onBlur={productNameValidity.onBlur}
-                    />
-                    {amazonListing && amazonTitleLookupStatus !== 'idle' && (
-                      <p
-                        className="hint"
-                        id="amazon-title-lookup-status"
-                        aria-live="polite"
-                      >
-                        {amazonTitleLookupStatus === 'loading'
-                          ? t('Looking up the Amazon product title...')
-                          : t('Product title unavailable. Enter the product name.')}
-                      </p>
-                    )}
-                    {productNameValidity.invalid && (
-                      <p className="field-error" id="product-name-error">
-                        {t('{name} is required.', {
-                          name: referenceOnlyMode
-                            ? t('Artwork name')
-                            : t('Product name'),
-                        })}
-                      </p>
-                    )}
+                {isAmazon && (
+                  <div className="field field-wide" id="amazon-source-hint">
+                    <InlineNotice tone="warning">
+                      <strong>{t('Amazon seller reference mode')}</strong>
+                      <span>
+                        {t('Amazon sources use seller-provided copy and images instead of website capture.')}
+                      </span>
+                    </InlineNotice>
                   </div>
                 )}
-                {!referenceOnlyMode && renderArtworkOutputFields(inputFields)}
+                {isPost ? null : posterFormatSupportsQrToggle(posterFormat) ? (
+                  <PosterQrSettings
+                    idPrefix="poster-qr"
+                    enabled={qrEnabled}
+                    destinationUrl={destinationUrl}
+                    onEnabledChange={(enabled) => {
+                      setPosterFormat(posterFormatWithQr(posterFormat, enabled))
+                      if (!enabled) setDestinationUrl('')
+                    }}
+                    onDestinationUrlChange={setDestinationUrl}
+                  />
+                ) : null}
+                {!isPost && (
+                  <PosterFormatSelect
+                    id="poster-format"
+                    value={posterFormat}
+                    // One option per aspect for the current band; the QR toggle
+                    // controls band, so the select never duplicates aspects.
+                    allowedFormats={formatsForBand(qrEnabled)}
+                    onChange={setPosterFormat}
+                  />
+                )}
+                {qrEnabled && destinationUrlValidity.invalid && (
+                  <p className="field-error" id="poster-qr-destination-error">
+                    {t('Use a complete HTTP or HTTPS destination URL.')}
+                  </p>
+                )}
               </div>
             </section>
 
-            {referenceOnlyMode && renderGenerationReferences(inputFields)}
-            {referenceOnlyMode && renderArtworkOutputFields(inputFields)}
-            {amazonListing && renderGenerationReferences(inputFields)}
-            {renderCampaignAction(inputFields)}
-            {!amazonListing && !referenceOnlyMode && renderGenerationReferences(inputFields)}
+            <section className="form-section" aria-labelledby="references-heading">
+              <div className="form-section-heading">
+                <span><ImagePlus size={17} aria-hidden="true" /></span>
+                <div>
+                  <h2 id="references-heading">
+                    {isAmazon
+                      ? t('Listing copy and product images')
+                      : isPost
+                        ? t('Draft copy and creative references')
+                        : t('Generation references')}
+                  </h2>
+                  <p>
+                    {isAmazon
+                      ? t('Provide the seller-owned text and visuals Posterlytics should use.')
+                      : isPost
+                        ? t('Add the complete draft copy and at least one image for the post.')
+                        : hasFetchableEvidence
+                          ? t('Add direction or images that are not present on the website.')
+                          : t('Start with at least one image, then add any context that should shape the artwork.')}
+                  </p>
+                </div>
+              </div>
+              <GenerationReferences
+                context={referenceContext}
+                onContextChange={setReferenceContext}
+                existingImages={[]}
+                onRemoveExisting={() => {}}
+                pendingReferences={pendingReferences}
+                onPendingReferencesChange={updatePendingReferences}
+                contextRequirement={creativeDirectionRequired ? 'required' : 'optional'}
+                referenceImagesRequirement={referencesRequired ? 'required' : 'optional'}
+                referenceImagesMinimumCount={minimumReferenceImages}
+                validationAttempt={validationAttempt}
+                {...referenceLabels}
+              />
+            </section>
 
             {restoredFileReferences.length > 0 && (
               <div className="draft-file-restore-notice">
@@ -1407,28 +1037,18 @@ export function CampaignWizardPage() {
               <span>{tagline.trim() || t('Poster preview pending')}</span>
             </div>
             <dl>
-              {inputFields.productUrl.requirement !== 'hidden' && (
-                <div>
-                  <dt>{t('Source')}</dt>
-                  <dd>{summarizeUrl(productUrl) || t('Not set')}</dd>
-                </div>
-              )}
-              {inputFields.ctaText !== 'hidden' && (
-                <div>
-                  <dt>{t('Action')}</dt>
-                  <dd>{ctaText.trim() || t('Not set')}</dd>
-                </div>
-              )}
-              {(inputFields.destinationUrl !== 'hidden' || socialCoverQrEnabled) && (
+              <div>
+                <dt>{t('Source')}</dt>
+                <dd>{summarizeUrl(primaryUrl) || t('Not set')}</dd>
+              </div>
+              <div>
+                <dt>{t('Output')}</dt>
+                <dd>{isPost ? t('Multi-page post') : t('Single poster')}</dd>
+              </div>
+              {qrEnabled && (
                 <div>
                   <dt>{t('Destination')}</dt>
                   <dd>{summarizeUrl(destinationUrl) || t('Not set')}</dd>
-                </div>
-              )}
-              {inputFields.platformHint !== 'hidden' && (
-                <div>
-                  <dt>{t('Target platform')}</dt>
-                  <dd>{platformHint.trim() || t('No platform hint')}</dd>
                 </div>
               )}
               <div>
@@ -1441,7 +1061,7 @@ export function CampaignWizardPage() {
               </div>
               <div>
                 <dt>{t('Format')}</dt>
-                <dd>{t(getPosterSize(posterFormat).label)}</dd>
+                <dd>{t(getPosterSize(isPost ? POST_POSTER_FORMAT : posterFormat).label)}</dd>
               </div>
             </dl>
           </aside>
@@ -1527,46 +1147,4 @@ function summarizeUrl(value: string) {
 
 function isAbortError(value: unknown): boolean {
   return value instanceof DOMException && value.name === 'AbortError'
-}
-
-interface RequiredFieldGate {
-  invalid: boolean
-  errorId: string
-  onBlur: () => void
-}
-
-/**
- * Native `required` alone leaves AT with no programmatic invalid state outside
- * the submit moment, and no app-authored (localized) reason. Pass a validity
- * gate to emit `aria-invalid` plus a described error, matching what
- * `#product-name` already did; omit it and the field keeps required-only
- * behaviour.
- */
-function requiredInputProps(required: boolean, gate?: RequiredFieldGate) {
-  if (!gate) {
-    return {
-      required,
-      'aria-required': required,
-    }
-  }
-  return {
-    required,
-    'aria-required': required,
-    'aria-invalid': gate.invalid,
-    'aria-describedby': gate.invalid ? gate.errorId : undefined,
-    onBlur: gate.onBlur,
-  }
-}
-
-function FieldRequirement({
-  requirement,
-}: {
-  requirement: UseCaseFieldRequirement
-}) {
-  const { t } = useI18n()
-  return requirement === 'required' ? (
-    <span className="required-label">{t('Required')}</span>
-  ) : (
-    <span className="optional-label">{t('Optional')}</span>
-  )
 }

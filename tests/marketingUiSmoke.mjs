@@ -855,10 +855,12 @@ async function testCampaignCreationFailure(browserInstance) {
   page.on('pageerror', (error) => pageErrors.push(error.message))
 
   await page.goto(`${BASE_URL}/campaigns/new`)
-  await page.getByRole('button', { name: /Website product/ }).click()
-  await page.getByLabel('Website URL').fill('https://example.test/product')
-  await page.getByLabel('Product name').fill('Failed campaign')
-  await page.getByLabel('Destination URL').fill('https://example.test/buy')
+  await page.locator('.campaign-form').waitFor()
+  // The unified screen: a source URL resolves to website_product; QR is on by
+  // default, so fill the revealed destination. References stay optional.
+  await page.locator('#source-url').fill('https://example.test/product')
+  await page.locator('#product-name').fill('Failed campaign')
+  await page.locator('#poster-qr-destination').fill('https://example.test/buy')
   await page.getByRole('button', { name: 'Generate poster' }).click()
 
   await page.getByText(

@@ -93,18 +93,16 @@ test('the RedNote gate keys on aspect and band, not on a slug', () => {
   }
 })
 
-test('creation, editing and draft restore share one QR policy with no slug literals', () => {
-  for (const source of [wizard, editor, draft]) {
+test('creation and editing share one QR policy with no slug literals', () => {
+  // The wizard and editor must not hardcode the RedNote pair.
+  for (const source of [wizard, editor]) {
     assert.doesNotMatch(source, /'rednote_3x4'/)
     assert.doesNotMatch(source, /'rednote_cover_3x4'/)
-  }
-  // All three read the band through the shared helper.
-  for (const source of [wizard, editor, draft]) {
+    // Both read the band through the shared helper and flip it through the writer.
     assert.match(source, /posterFormatHasQr\(/)
-  }
-  // Only the two writers flip the format.
-  for (const source of [wizard, editor]) {
     assert.match(source, /posterFormatWithQr\(/)
   }
+  // The v2 draft keys destination-clearing off outputKind, not the band, so it
+  // does not read the band helpers at all.
   assert.doesNotMatch(draft, /posterFormatWithQr\(/)
 })
