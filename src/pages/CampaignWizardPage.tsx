@@ -34,6 +34,7 @@ import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
 import { displayNameOrUntitled } from '../lib/campaignDisplayName'
 import {
+  formatsForBand,
   posterFormatHasQr,
   posterFormatSupportsQrToggle,
   posterFormatWithQr,
@@ -99,25 +100,6 @@ type AmazonTitleLookupStatus = 'idle' | 'loading' | 'unavailable'
 
 // The RedNote post pipeline is full-bleed 3:4; the DB forbids placements on it.
 const POST_POSTER_FORMAT = resolvePosterFormat('3:4', false)
-
-// One slug per provider aspect, matching the QR toggle's current band, derived
-// from the registry rather than hardcoded. The QR toggle controls band, so the
-// select shows exactly one option per aspect and never both twins at once. A 3:4
-// full-bleed slug is a valid SINGLE poster (a social cover); only outputKind, not
-// the format, routes to the multi-page post pipeline.
-const SINGLE_POSTER_ASPECTS = ['2:3', '3:4', '16:9', '1:1'] as const
-
-function formatsForBand(qrEnabled: boolean): readonly PosterSizeSlug[] {
-  const formats: PosterSizeSlug[] = []
-  for (const aspect of SINGLE_POSTER_ASPECTS) {
-    try {
-      formats.push(resolvePosterFormat(aspect, qrEnabled))
-    } catch {
-      // An aspect without this band mode simply is not offered.
-    }
-  }
-  return formats
-}
 
 export function CampaignWizardPage() {
   const { locale, t } = useI18n()

@@ -1,8 +1,3 @@
-import type {
-  CreatableUseCaseId,
-  UseCaseSourceKind,
-} from './useCases'
-
 export const AMAZON_SOURCE_HOSTS = [
   'amazon.com',
   'www.amazon.com',
@@ -31,13 +26,4 @@ export function classifyProductSourceUrl(value: string): ProductSourceUrlKind {
 
 export function isAmazonSourceUrl(value: string): boolean {
   return classifyProductSourceUrl(value) === 'amazon'
-}
-
-export function getSourceUseCaseSwitchTarget(
-  expectedSource: UseCaseSourceKind,
-  actualSource: ProductSourceUrlKind,
-): CreatableUseCaseId | null {
-  if (expectedSource === 'website' && actualSource === 'amazon') return 'amazon_listing'
-  if (expectedSource === 'amazon' && actualSource === 'website') return 'website_product'
-  return null
 }

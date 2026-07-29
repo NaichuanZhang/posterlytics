@@ -3,9 +3,32 @@ import {
   getPosterSize,
   getPosterSizeTwin,
   hasPosterQrBand,
+  resolvePosterFormat,
   splitPosterFormat,
   type PosterSizeSlug,
 } from './posterSize'
+
+// The four provider aspects a single poster can take. The QR toggle picks the
+// band; the format select picks the aspect within it, so neither surface ever
+// shows both twins of an aspect.
+const SINGLE_POSTER_ASPECTS = ['2:3', '3:4', '16:9', '1:1'] as const
+
+/**
+ * One slug per aspect for the given band, in registry order. Restricting a format
+ * select to this list means a change can never cross the band (that is the QR
+ * toggle's job), so it can never strand a banded format without a destination.
+ */
+export function formatsForBand(qrEnabled: boolean): PosterSizeSlug[] {
+  const formats: PosterSizeSlug[] = []
+  for (const aspect of SINGLE_POSTER_ASPECTS) {
+    try {
+      formats.push(resolvePosterFormat(aspect, qrEnabled))
+    } catch {
+      // An aspect without this band mode simply is not offered.
+    }
+  }
+  return formats
+}
 
 /**
  * The QR band is a property of the poster format, not of the use case.

@@ -763,7 +763,10 @@ async function testSocialCoverQrLifecycle(browserInstance) {
     await editorPage.getByRole('button', { name: 'Publish', exact: true }).count(),
     0,
   )
-  assert.equal(await editorPage.locator('#next-poster-format').count(), 0)
+  // The editor now offers the aspect select alongside the QR toggle for every
+  // tracking-enabled use case (item 7). QR is off here, so bandless formats show.
+  assert.equal(await editorPage.locator('#next-poster-format').count(), 1)
+  assert.equal(await editorPage.locator('#next-poster-format option').count(), 4)
   await editorPage.locator('[data-poster-hero]').waitFor()
 
   const editorSwitch = editorPage.getByRole('switch', {
@@ -1835,7 +1838,9 @@ async function testEditorUseCaseInputs(browserInstance) {
     await page.getByText('Amazon seller reference mode', { exact: true }).count(),
     0,
   )
-  assert.equal(await page.locator('#next-poster-format option').count(), 8)
+  // qrCapable use case with a banded default: QR toggle + 4 banded aspect options.
+  assert.equal(await page.getByRole('switch', { name: /Add a tracked QR footer/ }).count(), 1)
+  assert.equal(await page.locator('#next-poster-format option').count(), 4)
 
   state.campaign.use_case = 'amazon_listing'
   state.currentGeneration.use_case = 'amazon_listing'
@@ -1855,7 +1860,9 @@ async function testEditorUseCaseInputs(browserInstance) {
   assert.equal(await generate.isDisabled(), true)
   await page.getByText('Add at least 1 images.', { exact: true }).waitFor()
   await page.getByText('Amazon seller reference mode', { exact: true }).waitFor()
-  assert.equal(await page.locator('#next-poster-format option').count(), 8)
+  // qrCapable use case with a banded default: QR toggle + 4 banded aspect options.
+  assert.equal(await page.getByRole('switch', { name: /Add a tracked QR footer/ }).count(), 1)
+  assert.equal(await page.locator('#next-poster-format option').count(), 4)
   await assertNoOverflow(page)
   await page.screenshot({
     path: `${OUTPUT_DIR}/amazon-editor-inputs-desktop.png`,

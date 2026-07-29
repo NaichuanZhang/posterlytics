@@ -260,17 +260,3 @@ export function resolveCreationUseCase(
   return input.primarySourceUrlIsAmazon ? 'amazon_listing' : 'website_product'
 }
 
-export function resolvePosterFormatOnUseCaseSwitch(
-  currentFormat: PosterSizeSlug,
-  fromUseCaseId: CreatableUseCaseId | null,
-  toUseCaseId: CreatableUseCaseId,
-): PosterSizeSlug {
-  const destination = getUseCase(toUseCaseId)
-  if (
-    fromUseCaseId === toUseCaseId
-    && destination.allowedPosterFormats.includes(currentFormat)
-  ) {
-    return currentFormat
-  }
-  return destination.defaultPosterFormat
-}

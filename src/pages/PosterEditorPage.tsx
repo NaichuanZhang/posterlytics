@@ -60,7 +60,7 @@ import {
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
 import { campaignDisplayName } from '../lib/campaignDisplayName'
-import { posterFormatHasQr, posterFormatWithQr } from '../lib/qrPolicy'
+import { formatsForBand, posterFormatHasQr, posterFormatWithQr } from '../lib/qrPolicy'
 import { resolveGenerationReferenceInput } from '../lib/generationReferenceInput'
 import { overlayGeneration } from '../lib/generations'
 import { deriveGenerationPreflight } from '../lib/generationTraces'
@@ -201,7 +201,13 @@ export function PosterEditorPage() {
   }, [campaignTrackingActive, ensureDefault, t, user?.id])
 
   useEffect(() => {
-    if (!campaign || campaign.use_case !== 'social_cover') {
+    // The QR toggle is offered for every tracking-enabled use case whose format
+    // can carry a band; rednote_post is locked (multi-page, untracked).
+    if (
+      !campaign
+      || campaign.use_case === 'rednote_post'
+      || !getUseCase(campaign.use_case).trackingEnabled
+    ) {
       setSocialCoverQrEnabled(false)
       setSocialCoverDestination('')
       setPlacementProvisioningError(null)
@@ -470,12 +476,18 @@ export function PosterEditorPage() {
   const published = campaign.status === 'published'
   const firstVersion = !campaign.current_generation_id
   const campaignUseCase = getUseCase(campaign.use_case)
-  const socialCover = campaignUseCase.id === 'social_cover'
+  // Every tracking-enabled use case may carry a QR band; rednote_post is locked to
+  // its untracked multi-page format. This is the editor twin of the wizard's
+  // format+QR control, keyed on band capability rather than on social_cover.
+  const qrCapable = (
+    campaignUseCase.trackingEnabled
+    && campaignUseCase.id !== 'rednote_post'
+  )
   const persistedSocialCoverQrEnabled = (
-    socialCover
+    qrCapable
     && posterFormatHasQr(campaign.poster_format)
   )
-  const socialCoverQrSettingsDirty = socialCover && (
+  const socialCoverQrSettingsDirty = qrCapable && (
     socialCoverQrEnabled !== persistedSocialCoverQrEnabled
     || (
       socialCoverQrEnabled
@@ -745,7 +757,7 @@ export function PosterEditorPage() {
   }
 
   async function savePosterQrSettings() {
-    if (!campaign || !socialCover || !socialCoverQrSettingsDirty) return
+    if (!campaign || !qrCapable || !socialCoverQrSettingsDirty) return
     if (!socialCoverQrDestinationValid) {
       setGenerationError(t('Use a complete HTTP or HTTPS destination URL.'))
       return
@@ -951,7 +963,7 @@ export function PosterEditorPage() {
           )}
         </div>
       )}
-      {socialCover ? (
+      {qrCapable ? (
         <div className="editor-social-cover-qr">
           <PosterQrSettings
             idPrefix="editor-social-cover-qr"
@@ -967,6 +979,16 @@ export function PosterEditorPage() {
               setSocialCoverDestination(value)
               setPlacementProvisioningError(null)
             }}
+          />
+          {/* The QR toggle picks the band; this select picks the aspect within
+              it, so a format change never strands a banded slug without a
+              destination — that transition only happens through the toggle. */}
+          <PosterFormatSelect
+            id="next-poster-format"
+            value={targetPosterSize.slug}
+            disabled={generationInputsDisabled || !!busy}
+            allowedFormats={formatsForBand(socialCoverQrEnabled)}
+            onChange={(posterFormat) => void updatePosterFormat(posterFormat)}
           />
           <button
             type="button"
