@@ -227,8 +227,17 @@ export type CreationOutputKind = 'poster' | 'post'
 export interface CreationUseCaseInput {
   /** Whether the creator supplied at least one source URL. */
   readonly hasSourceUrl: boolean
-  /** Whether EVERY supplied source URL is a recognized Amazon host. */
-  readonly allSourceUrlsAmazon: boolean
+  /**
+   * Whether the CAPTURED source — `source_urls[0]`, the only URL ever fetched — is
+   * a recognized Amazon host.
+   *
+   * Deliberately the first URL rather than "all of them": `product_url` is
+   * `source_urls[0]`, so an "all Amazon" test would resolve a mixed set whose
+   * first URL is Amazon to `website_product` while persisting an Amazon
+   * `product_url` — a pair `useCaseSourceMismatch` rejects terminally in
+   * `analyze`. Keying on the fetched URL makes the mismatch unreachable.
+   */
+  readonly primarySourceUrlIsAmazon: boolean
   readonly outputKind: CreationOutputKind
 }
 
@@ -248,7 +257,7 @@ export function resolveCreationUseCase(
 ): CreatableUseCaseId {
   if (input.outputKind === 'post') return 'rednote_post'
   if (!input.hasSourceUrl) return 'social_cover'
-  return input.allSourceUrlsAmazon ? 'amazon_listing' : 'website_product'
+  return input.primarySourceUrlIsAmazon ? 'amazon_listing' : 'website_product'
 }
 
 export function resolvePosterFormatOnUseCaseSwitch(

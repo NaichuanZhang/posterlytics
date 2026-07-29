@@ -535,22 +535,22 @@ test('creation mapping enumerates every intent combination and never yields even
     [true, true, 'post', 'rednote_post'],
     // No source URL means there is nothing to read: reference-led cover artwork.
     [false, false, 'poster', 'social_cover'],
-    // allSourceUrlsAmazon is vacuously true with no URLs and must not promote.
+    // The flag cannot be true with no URLs, but guard against it promoting anyway.
     [false, true, 'poster', 'social_cover'],
     [true, false, 'poster', 'website_product'],
     [true, true, 'poster', 'amazon_listing'],
   ]
 
-  for (const [hasSourceUrl, allSourceUrlsAmazon, outputKind, expected] of cases) {
+  for (const [hasSourceUrl, primarySourceUrlIsAmazon, outputKind, expected] of cases) {
     const resolved = resolveCreationUseCase({
       hasSourceUrl,
-      allSourceUrlsAmazon,
+      primarySourceUrlIsAmazon,
       outputKind,
     })
     assert.equal(
       resolved,
       expected,
-      `${JSON.stringify({ hasSourceUrl, allSourceUrlsAmazon, outputKind })}`,
+      `${JSON.stringify({ hasSourceUrl, primarySourceUrlIsAmazon, outputKind })}`,
     )
     assert.notEqual(resolved, 'event')
     assert.equal(isCreatableUseCaseId(resolved), true)
@@ -564,10 +564,10 @@ test('creation mapping only ever returns creatable use cases the catalog knows',
   const creatableIds = CREATABLE_USE_CASES.map((useCase) => useCase.id)
   for (const outputKind of ['poster', 'post'] as const) {
     for (const hasSourceUrl of [false, true]) {
-      for (const allSourceUrlsAmazon of [false, true]) {
+      for (const primarySourceUrlIsAmazon of [false, true]) {
         const resolved = resolveCreationUseCase({
           hasSourceUrl,
-          allSourceUrlsAmazon,
+          primarySourceUrlIsAmazon,
           outputKind,
         })
         assert.ok(creatableIds.includes(resolved))

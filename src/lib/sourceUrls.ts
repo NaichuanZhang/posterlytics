@@ -1,3 +1,5 @@
+import { isAmazonSourceUrl } from './amazonSource'
+
 /**
  * Campaign source URL list handling.
  *
@@ -54,4 +56,21 @@ export function buildSourceUrlWrite(value: unknown): {
 } {
   const source_urls = normalizeSourceUrls(value)
   return { product_url: source_urls[0] ?? null, source_urls }
+}
+
+/**
+ * The `resolveCreationUseCase` inputs implied by a source URL list.
+ *
+ * Derives both fields from ONE list so they cannot disagree, and keys the Amazon
+ * test on the captured URL (`source_urls[0]`) — the only one ever fetched.
+ */
+export function creationSourceSignals(value: unknown): {
+  hasSourceUrl: boolean
+  primarySourceUrlIsAmazon: boolean
+} {
+  const primary = primarySourceUrl(value)
+  return {
+    hasSourceUrl: primary !== null,
+    primarySourceUrlIsAmazon: primary !== null && isAmazonSourceUrl(primary),
+  }
 }

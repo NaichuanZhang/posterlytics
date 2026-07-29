@@ -753,7 +753,7 @@ function designTokens(): BackendDesignTokens {
 test('the creation mapping still satisfies the website_product capture gate', () => {
   const useCase = resolveCreationUseCase({
     hasSourceUrl: true,
-    allSourceUrlsAmazon: false,
+    primarySourceUrlIsAmazon: false,
     outputKind: 'poster',
   })
   assert.equal(useCase, 'website_product')

@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import { useCaseSourceMismatch } from '../functions/_useCasePolicy.ts'
+import { resolveCreationUseCase } from '../src/lib/useCases.ts'
 import {
   MAX_SOURCE_URLS,
   additionalSourceUrls,
   buildSourceUrlWrite,
+  creationSourceSignals,
   normalizeSourceUrls,
   primarySourceUrl,
 } from '../src/lib/sourceUrls.ts'
@@ -238,6 +241,61 @@ test('eager-capture matching stays single-source against source_urls[0]', () => 
         nowMs: 2_000,
       }),
       { matched: false, reason: 'url_mismatch' },
+    )
+  }
+})
+
+test('creation signals key on the fetched URL so the mismatch guard is unreachable', () => {
+  const amazon = 'https://www.amazon.com/dp/B0EXAMPLE'
+  const website = 'https://other.example/spec'
+
+  // The captured URL decides, because product_url IS source_urls[0].
+  assert.deepEqual(creationSourceSignals([amazon, website]), {
+    hasSourceUrl: true,
+    primarySourceUrlIsAmazon: true,
+  })
+  assert.deepEqual(creationSourceSignals([website, amazon]), {
+    hasSourceUrl: true,
+    primarySourceUrlIsAmazon: false,
+  })
+  assert.deepEqual(creationSourceSignals([]), {
+    hasSourceUrl: false,
+    primarySourceUrlIsAmazon: false,
+  })
+  assert.deepEqual(creationSourceSignals(null), {
+    hasSourceUrl: false,
+    primarySourceUrlIsAmazon: false,
+  })
+
+  // The pairing that previously self-destructed: a mixed set is now resolved from
+  // whichever URL will actually be persisted as product_url, so
+  // useCaseSourceMismatch can never fire on a freshly created campaign.
+  for (const urls of [
+    [amazon, website],
+    [website, amazon],
+    [amazon],
+    [website],
+    [amazon, amazon, website],
+  ]) {
+    const signals = creationSourceSignals(urls)
+    const useCase = resolveCreationUseCase({ ...signals, outputKind: 'poster' })
+    const write = buildSourceUrlWrite(urls)
+    assert.equal(useCase, signals.primarySourceUrlIsAmazon ? 'amazon_listing' : 'website_product')
+    assert.equal(useCaseSourceMismatch(useCase, write.product_url), null)
+  }
+})
+
+test('multi-page post output ignores source evidence entirely', () => {
+  // enqueue_poster_generation demands >=1 reference image AND a non-null
+  // instruction for rednote_post, and outputKind short-circuits before any URL is
+  // read — so a pasted URL must never be treated as relaxing those requirements.
+  for (const urls of [[], ['https://a.example'], ['https://www.amazon.com/dp/B0X']]) {
+    assert.equal(
+      resolveCreationUseCase({
+        ...creationSourceSignals(urls),
+        outputKind: 'post',
+      }),
+      'rednote_post',
     )
   }
 })

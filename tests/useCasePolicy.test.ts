@@ -301,13 +301,13 @@ function materializeReferencePurposes(
 // the mapping is wrong, not that a golden needs regenerating.
 test('creation mapping reaches the same recipe identity the picker selected', () => {
   const expectations: Array<[
-    { hasSourceUrl: boolean; allSourceUrlsAmazon: boolean; outputKind: 'poster' | 'post' },
+    { hasSourceUrl: boolean; primarySourceUrlIsAmazon: boolean; outputKind: 'poster' | 'post' },
     'website_product' | 'amazon_listing' | 'social_cover' | 'rednote_post',
   ]> = [
-    [{ hasSourceUrl: true, allSourceUrlsAmazon: false, outputKind: 'poster' }, 'website_product'],
-    [{ hasSourceUrl: true, allSourceUrlsAmazon: true, outputKind: 'poster' }, 'amazon_listing'],
-    [{ hasSourceUrl: false, allSourceUrlsAmazon: false, outputKind: 'poster' }, 'social_cover'],
-    [{ hasSourceUrl: true, allSourceUrlsAmazon: true, outputKind: 'post' }, 'rednote_post'],
+    [{ hasSourceUrl: true, primarySourceUrlIsAmazon: false, outputKind: 'poster' }, 'website_product'],
+    [{ hasSourceUrl: true, primarySourceUrlIsAmazon: true, outputKind: 'poster' }, 'amazon_listing'],
+    [{ hasSourceUrl: false, primarySourceUrlIsAmazon: false, outputKind: 'poster' }, 'social_cover'],
+    [{ hasSourceUrl: true, primarySourceUrlIsAmazon: true, outputKind: 'post' }, 'rednote_post'],
   ]
 
   for (const [input, pickedId] of expectations) {
@@ -327,12 +327,12 @@ test('creation mapping reaches the same recipe identity the picker selected', ()
   assert.notEqual(
     resolveUseCaseRecipe(resolveCreationUseCase({
       hasSourceUrl: false,
-      allSourceUrlsAmazon: false,
+      primarySourceUrlIsAmazon: false,
       outputKind: 'post',
     })),
     resolveUseCaseRecipe(resolveCreationUseCase({
       hasSourceUrl: false,
-      allSourceUrlsAmazon: false,
+      primarySourceUrlIsAmazon: false,
       outputKind: 'poster',
     })),
   )
@@ -353,7 +353,7 @@ test('the creation mapping can never produce a source-mismatching pair', () => {
   for (const url of websiteUrls) {
     const useCase = resolveCreationUseCase({
       hasSourceUrl: true,
-      allSourceUrlsAmazon: false,
+      primarySourceUrlIsAmazon: false,
       outputKind: 'poster',
     })
     assert.equal(useCase, 'website_product')
@@ -363,7 +363,7 @@ test('the creation mapping can never produce a source-mismatching pair', () => {
   for (const url of amazonUrls) {
     const useCase = resolveCreationUseCase({
       hasSourceUrl: true,
-      allSourceUrlsAmazon: true,
+      primarySourceUrlIsAmazon: true,
       outputKind: 'poster',
     })
     assert.equal(useCase, 'amazon_listing')
@@ -375,7 +375,7 @@ test('the creation mapping can never produce a source-mismatching pair', () => {
   for (const outputKind of ['poster', 'post'] as const) {
     const useCase = resolveCreationUseCase({
       hasSourceUrl: false,
-      allSourceUrlsAmazon: false,
+      primarySourceUrlIsAmazon: false,
       outputKind,
     })
     assert.equal(useCaseSourceMismatch(useCase, null), null)

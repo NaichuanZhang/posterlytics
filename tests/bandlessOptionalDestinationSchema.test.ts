@@ -98,15 +98,15 @@ test('every unified-creation quadrant produces a legal campaign row', () => {
   const quadrants: Array<{
     outputKind: 'poster' | 'post'
     hasSourceUrl: boolean
-    allSourceUrlsAmazon: boolean
+    primarySourceUrlIsAmazon: boolean
     qrEnabled: boolean
   }> = []
   for (const outputKind of ['poster', 'post'] as const) {
     for (const hasSourceUrl of [false, true]) {
-      for (const allSourceUrlsAmazon of [false, true]) {
-        if (!hasSourceUrl && allSourceUrlsAmazon) continue
+      for (const primarySourceUrlIsAmazon of [false, true]) {
+        if (!hasSourceUrl && primarySourceUrlIsAmazon) continue
         for (const qrEnabled of [true, false]) {
-          quadrants.push({ outputKind, hasSourceUrl, allSourceUrlsAmazon, qrEnabled })
+          quadrants.push({ outputKind, hasSourceUrl, primarySourceUrlIsAmazon, qrEnabled })
         }
       }
     }
