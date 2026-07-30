@@ -1468,6 +1468,18 @@
   margin-top: 3px;
 }
 
+/* Sits directly above the consent line and carries the same measure, so the
+   two read as one block: what it costs, then what you are agreeing to. */
+.public-auth-cost {
+  margin: -8px 0 0;
+  color: var(--public-ink);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.55;
+  text-align: center;
+  text-wrap: pretty;
+}
+
 .public-auth-consent {
   margin: -8px 0 0;
   color: var(--public-ink-soft);

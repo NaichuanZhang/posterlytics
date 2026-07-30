@@ -103,6 +103,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'An account with this email is already registered. Sign in or reset your password.',
   'Too many attempts. Wait a moment and try again.',
   'This password was rejected. Choose a stronger password and try again.',
+  'Free, and no payment details. It is a personal demo project.',
   'By creating an account, you agree to:',
   'Terms of Service',
   'Privacy Policy',
@@ -910,6 +911,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Too many attempts. Wait a moment and try again.': '尝试次数过多。请稍后再试。',
   'This password was rejected. Choose a stronger password and try again.':
     '此密码未被接受。请选择更强的密码后重试。',
+  'Free, and no payment details. It is a personal demo project.': '完全免费，无需支付信息。这是一个个人演示项目。',
   'By creating an account, you agree to:': '创建账户即表示你同意：',
   'Terms of Service': '服务条款',
   '{page} | Posterlytics': '{page} | Posterlytics',

@@ -291,12 +291,21 @@ export function SignInPage() {
                     )}
                   </button>
                   {mode === 'signup' && (
-                    <p className="public-auth-consent">
-                      {t('By creating an account, you agree to:')}{' '}
-                      <Link to="/terms">{t('Terms of Service')}</Link>
-                      <span aria-hidden="true"> / </span>
-                      <Link to="/privacy">{t('Privacy Policy')}</Link>
-                    </p>
+                    <>
+                      {/* The cost answer belongs where the credentials are asked
+                          for, not only on /terms. Order-153's complaint is that
+                          signup requested an email and password without ever
+                          saying what it costs. */}
+                      <p className="public-auth-cost">
+                        {t('Free, and no payment details. It is a personal demo project.')}
+                      </p>
+                      <p className="public-auth-consent">
+                        {t('By creating an account, you agree to:')}{' '}
+                        <Link to="/terms">{t('Terms of Service')}</Link>
+                        <span aria-hidden="true"> / </span>
+                        <Link to="/privacy">{t('Privacy Policy')}</Link>
+                      </p>
+                    </>
                   )}
                 </form>
               )}

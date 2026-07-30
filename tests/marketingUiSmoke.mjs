@@ -639,9 +639,20 @@ async function testSignupMode(browserInstance) {
     '/privacy',
   )
 
+  // Order-153: signup asked for an email and password without ever saying what
+  // it costs. The answer belongs here, not only on /terms.
+  const cost = page.locator('.public-auth-cost')
+  await cost.waitFor()
+  assert.equal(
+    await cost.innerText(),
+    'Free, and no payment details. It is a personal demo project.',
+  )
+
   await page.getByRole('button', { name: 'Sign in', exact: true }).first().click()
   await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
   assert.equal(await page.locator('.public-auth-consent').count(), 0)
+  // Signing in is not the moment to pitch price; it is signup-only, like consent.
+  assert.equal(await page.locator('.public-auth-cost').count(), 0)
 
   await page.getByRole('button', { name: 'Create account', exact: true }).first().click()
   await page.getByRole('heading', { name: 'Create an account' }).waitFor()
