@@ -57,6 +57,7 @@ import {
   enqueuePosterGeneration,
   retryPosterGeneration,
 } from '../lib/generationApi'
+import { deleteAbandonedCampaign } from '../lib/abandonedCampaign'
 import { isAmazonSourceUrl } from '../lib/amazonSource'
 import { parseAmazonAsin } from '../lib/amazonProduct'
 import { lookupAmazonProductTitle } from '../lib/amazonProductLookup'
@@ -340,6 +341,10 @@ export function CampaignWizardPage() {
   }
 
   function discardLocalDraft() {
+    // Discarding drops serverCampaignId, which is the only pointer to a campaign
+    // row the wizard already persisted. Delete that row first, or it survives as
+    // an indistinguishable 'Draft' the user never chose to keep.
+    if (draftId) void deleteAbandonedCampaign(draftId)
     campaignDraftPersistence.clear()
     cancelAmazonTitleLookup()
     setPhase('form')
@@ -712,7 +717,11 @@ export function CampaignWizardPage() {
               className="button button-secondary button-small"
               onClick={discardLocalDraft}
             >
-              {t('Discard local draft')}
+              {/* Naming the campaign only when one exists: discarding deletes it,
+                  and 'Discard local draft' alone reads as browser-only. */}
+              {draftId
+                ? t('Discard draft and saved campaign')
+                : t('Discard local draft')}
             </button>
           )}
         </div>

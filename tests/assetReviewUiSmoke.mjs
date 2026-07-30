@@ -59,6 +59,7 @@ try {
   await testWebsiteCapturePreview(browser)
   await testSinglePaidEagerCapture(browser)
   await testCampaignWizardDraftSwitch(browser)
+  await testCampaignWizardDiscardDeletesOrphanedCampaign(browser)
   await testCampaignWizardPreference(browser)
   await testEditorUseCaseInputs(browser)
   await testReferenceOnlyEditorReusesPersistedImages(browser)
@@ -1822,6 +1823,73 @@ async function testCampaignWizardDraftSwitch(browserInstance) {
   assert.equal(state.enqueueModes.length, 1)
   // Creation never runs the editor asset-review mode.
   assert.deepEqual(state.enqueueModes, ['yolo'])
+  assert.deepEqual(pageErrors, [])
+  await context.close()
+}
+
+// Order-139: the wizard persists the campaign BEFORE uploading references and
+// enqueueing, so a failed submit leaves a real row. Discarding the local draft
+// drops serverCampaignId — the only pointer to it — so the row has to be deleted
+// as part of the discard or it survives as an indistinguishable 'Draft'.
+async function testCampaignWizardDiscardDeletesOrphanedCampaign(browserInstance) {
+  const context = await browserInstance.newContext({
+    locale: 'en-US',
+    viewport: { width: 1360, height: 980 },
+    reducedMotion: 'reduce',
+  })
+  const state = createState({ enqueueFailuresRemaining: 1 })
+  state.campaign.current_generation_id = null
+  await installBackendMock(context, state)
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error))
+
+  await openWizardForm(page, 'Website product')
+  await fillWizardRequiredFields(page, {
+    sourceUrl: 'https://example.com/product',
+    productName: 'Orphan Check',
+    destinationUrl: 'https://example.com/start',
+  })
+  await submitWizardAndWaitForEnqueue(page, state, 1)
+  await page.getByText(
+    'Campaign details were saved; generation did not start.',
+    { exact: true },
+  ).waitFor()
+  // The row exists at this point and nothing has deleted it.
+  assert.equal(state.campaignDeleted, false)
+
+  // Discard is offered on a RESTORED draft, so reload the way a user who walked
+  // away and came back would. The restored draft carries serverCampaignId, which
+  // is what makes the orphaned row reachable at all.
+  await page.reload()
+  await page.getByRole('heading', { name: 'Create campaign' }).waitFor()
+  await page.getByText('Local draft restored.', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Retry generation' }).waitFor()
+
+  // The discard label names the campaign only once one exists, because discarding
+  // now deletes it — 'Discard local draft' alone reads as browser-only.
+  assert.equal(
+    await page.getByRole('button', { name: 'Discard local draft' }).count(),
+    0,
+  )
+  await page.getByRole('button', { name: 'Discard draft and saved campaign' })
+    .click()
+
+  await waitFor(() => state.campaignDeleted === true)
+  assert.deepEqual(
+    state.operationLog.filter((entry) => entry.type === 'campaign-delete').length,
+    1,
+  )
+  // The form is reset back to a fresh create, and the failed-submit notice is
+  // gone along with the draft that pointed at the deleted row.
+  await page.getByRole('button', { name: 'Generate poster' }).waitFor()
+  assert.equal(
+    await page.getByText(
+      'Campaign details were saved; generation did not start.',
+      { exact: true },
+    ).count(),
+    0,
+  )
   assert.deepEqual(pageErrors, [])
   await context.close()
 }
@@ -3900,6 +3968,12 @@ async function installBackendMock(context, state) {
         Object.assign(state.campaign, body)
         return json(route, [])
       }
+      if (method === 'DELETE') {
+        state.campaignWrites.push({ method, body })
+        state.operationLog.push({ type: 'campaign-delete' })
+        state.campaignDeleted = true
+        return json(route, [])
+      }
       state.operationLog.push({ type: 'campaign-read' })
       const campaignReadGate = state.campaignReadGate
       if (campaignReadGate) await campaignReadGate
@@ -4116,6 +4190,7 @@ function createState({
     confirmedSelections: [],
     cancelCalls: 0,
     campaignWrites: [],
+    campaignDeleted: false,
     amazonProductLookupRequests: [],
     amazonProductLookupResponses: [],
     capturePreviewRequests: [],

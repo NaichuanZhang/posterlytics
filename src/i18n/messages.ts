@@ -369,6 +369,7 @@ export const ENGLISH_MESSAGE_IDS = [
   'Local draft restored.',
   'Your inputs were restored from this browser.',
   'Discard local draft',
+  'Discard draft and saved campaign',
   'Re-add image files',
   'This local draft included image files that cannot be restored. Re-add them before generating.',
   'Retry generation',
@@ -1236,6 +1237,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'Local draft restored.': '已恢复本地草稿。',
   'Your inputs were restored from this browser.': '已从此浏览器恢复输入内容。',
   'Discard local draft': '丢弃本地草稿',
+  'Discard draft and saved campaign': '丢弃草稿及已保存的推广活动',
   'Re-add image files': '重新添加图片文件',
   'This local draft included image files that cannot be restored. Re-add them before generating.':
     '此本地草稿包含无法恢复的图片文件。请重新添加后再生成。',
