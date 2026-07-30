@@ -274,6 +274,19 @@ async function testPublicLegalPages(browserInstance) {
     'Posterlytics is a personal demo project for creating posters and measuring placement visits. It is provided as-is and without warranties.',
     { exact: true },
   ).waitFor()
+  // Order-153: the public surface asked for an email and password without saying
+  // what it costs. State the facts the code actually enforces, and quote the same
+  // quota the capture RPC admits on (6 / 10 min, 30 / day).
+  await page.getByRole('heading', { name: 'Cost and limits', exact: true }).waitFor()
+  await page.getByText(
+    'Posterlytics does not charge for an account and takes no payment details.',
+    { exact: true },
+  ).waitFor()
+  await page.getByText(
+    'Website capture previews are limited to 6 in any ten minutes and 30 per day'
+    + ' per account. A campaign accepts up to 5 reference images.',
+    { exact: true },
+  ).waitFor()
   await assertNoHorizontalOverflow(page, 'terms 390px')
 
   await page.getByRole('link', { name: 'Privacy Policy', exact: true }).click()

@@ -3,6 +3,11 @@ import { Link } from 'react-router-dom'
 import { LanguageSelect } from '../components/LanguageSelect'
 import { useDocumentMetadata } from '../hooks/useDocumentMetadata'
 import { useI18n } from '../i18n/I18nProvider'
+import {
+  CAPTURE_PREVIEW_LIMIT_PER_10_MINUTES,
+  CAPTURE_PREVIEW_LIMIT_PER_DAY,
+} from '../lib/publicLimits'
+import { MAX_REFERENCE_IMAGES } from '../lib/references'
 import '../marketing/public.css'
 
 export type LegalPageKind = 'terms' | 'privacy'
@@ -76,6 +81,22 @@ function TermsSections() {
         <p>
           {t('Use Posterlytics only with websites, images, copy, and destination links you are authorized to use. Do not use it for unlawful, abusive, or misleading content.')}
         </p>
+      </section>
+      <section>
+        <h2>{t('Cost and limits')}</h2>
+        {/* Only limits the code actually enforces are stated here. The
+            capture-preview quota is asserted by consume_capture_preview_quota,
+            and the reference cap by MAX_REFERENCE_IMAGES. No price or plan is
+            claimed, because none exists to describe. */}
+        <p>{t('Posterlytics does not charge for an account and takes no payment details.')}</p>
+        <p>
+          {t('Website capture previews are limited to {short} in any ten minutes and {daily} per day per account. A campaign accepts up to {references} reference images.', {
+            short: CAPTURE_PREVIEW_LIMIT_PER_10_MINUTES,
+            daily: CAPTURE_PREVIEW_LIMIT_PER_DAY,
+            references: MAX_REFERENCE_IMAGES,
+          })}
+        </p>
+        <p>{t('Because this is a demo project, poster generation is not guaranteed to be available, and these limits can change without notice.')}</p>
       </section>
       <section>
         <h2>{t('Availability')}</h2>

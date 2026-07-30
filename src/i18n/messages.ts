@@ -115,6 +115,10 @@ export const ENGLISH_MESSAGE_IDS = [
   'Posterlytics is a personal demo project for creating posters and measuring placement visits. It is provided as-is and without warranties.',
   'Acceptable use',
   'Use Posterlytics only with websites, images, copy, and destination links you are authorized to use. Do not use it for unlawful, abusive, or misleading content.',
+  'Cost and limits',
+  'Posterlytics does not charge for an account and takes no payment details.',
+  'Website capture previews are limited to {short} in any ten minutes and {daily} per day per account. A campaign accepts up to {references} reference images.',
+  'Because this is a demo project, poster generation is not guaranteed to be available, and these limits can change without notice.',
   'Availability',
   'Posterlytics may change, suspend, or stop without notice.',
   'Information we collect',
@@ -920,6 +924,10 @@ export const zhCN: Record<TranslationKey, string> = {
   'Acceptable use': '可接受的使用方式',
   'Use Posterlytics only with websites, images, copy, and destination links you are authorized to use. Do not use it for unlawful, abusive, or misleading content.':
     '仅可将 Posterlytics 用于你有权使用的网站、图片、文案和目标链接。不得将其用于违法、滥用或误导性内容。',
+  'Cost and limits': '费用与使用限制',
+  'Posterlytics does not charge for an account and takes no payment details.': 'Posterlytics 不收取账户费用，也不收集任何支付信息。',
+  'Website capture previews are limited to {short} in any ten minutes and {daily} per day per account. A campaign accepts up to {references} reference images.': '每个账户的网站抓取预览限制为每十分钟 {short} 次、每天 {daily} 次。每个推广活动最多可使用 {references} 张参考图。',
+  'Because this is a demo project, poster generation is not guaranteed to be available, and these limits can change without notice.': '由于这是一个演示项目，海报生成不保证始终可用，上述限制也可能随时调整，恕不另行通知。',
   Availability: '服务可用性',
   'Posterlytics may change, suspend, or stop without notice.':
     'Posterlytics 可能会变更、暂停或停止服务，恕不另行通知。',
