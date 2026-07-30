@@ -1007,6 +1007,13 @@ img {
   color: var(--success);
 }
 
+/* Neutral on purpose: "no poster yet" is a factual state, not a failure. */
+.status-awaiting {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
 .page-heading {
   display: flex;
   align-items: flex-end;

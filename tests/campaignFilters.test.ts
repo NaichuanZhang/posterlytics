@@ -51,6 +51,40 @@ test('filterCampaigns uses durable activity for the Generating filter', () => {
   )
 })
 
+test('filterCampaigns isolates campaigns awaiting a first poster', () => {
+  // Order-139: a failed creation leaves a real row with no artwork, which read as
+  // an ordinary 'Draft'. Both rows below are status 'draft'; only one is awaiting.
+  const rows = [
+    {
+      product_name: 'Deliberate draft',
+      product_url: 'https://deliberate.example',
+      status: 'draft' as const,
+      is_awaiting_poster: false,
+    },
+    {
+      product_name: 'Failed creation',
+      product_url: 'https://failed.example',
+      status: 'draft' as const,
+      is_awaiting_poster: true,
+    },
+  ]
+
+  assert.deepEqual(
+    filterCampaigns(rows, '', 'awaiting_poster').map((row) => row.product_name),
+    ['Failed creation'],
+  )
+  // The status filter still sees both, so the new filter narrows rather than
+  // reclassifies — status is untouched by this derivation.
+  assert.equal(filterCampaigns(rows, '', 'draft').length, 2)
+  // Locale-free search token, matching the existing 'generating' precedent.
+  assert.deepEqual(
+    filterCampaigns(rows, 'awaiting poster', 'all').map((row) => row.product_name),
+    ['Failed creation'],
+  )
+  // Campaigns that never set the derived flag are unaffected.
+  assert.deepEqual(filterCampaigns(campaigns, '', 'awaiting_poster'), [])
+})
+
 test('filterCampaigns accepts URL-less campaigns', () => {
   const socialCover = {
     product_name: 'Summer launch cover',

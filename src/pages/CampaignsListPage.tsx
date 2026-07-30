@@ -5,6 +5,7 @@ import { AppShell } from '../components/AppShell'
 import { useGenerationActivity } from '../activity/GenerationActivityProvider'
 import { EmptyState, InlineNotice, Skeleton } from '../components/ui/Feedback'
 import { campaignDisplayName } from '../lib/campaignDisplayName'
+import { isCampaignAwaitingFirstPoster } from '../lib/campaignPosterState'
 import { insforge } from '../lib/insforge'
 import {
   filterCampaigns,
@@ -34,7 +35,7 @@ export function CampaignsListPage() {
     try {
       const { data, error: queryError } = await insforge.database
         .from('campaigns')
-        .select('id, product_name, product_url, tagline, destination_url, scenario, use_case, poster_format, poster_copy, poster_content, poster_spec, poster_layout, status, created_at, brand_assets, hero_image_url')
+        .select('id, product_name, product_url, tagline, destination_url, scenario, use_case, poster_format, poster_copy, poster_content, poster_spec, poster_layout, status, created_at, brand_assets, hero_image_url, current_generation_id')
         .order('created_at', { ascending: false })
 
       if (queryError) {
@@ -63,6 +64,10 @@ export function CampaignsListPage() {
       product_url: campaign.product_url,
       status: campaign.status,
       is_generating: !!activity,
+      is_awaiting_poster: isCampaignAwaitingFirstPoster({
+        campaign,
+        isGenerating: !!activity,
+      }),
     }
   }), [campaigns, generationActivity])
 
@@ -74,6 +79,7 @@ export function CampaignsListPage() {
     { value: 'all', label: t('All') },
     { value: 'draft', label: t('Draft') },
     { value: 'generating', label: t('Generating') },
+    { value: 'awaiting_poster', label: t('No poster yet') },
     { value: 'published', label: t('Published') },
   ]
 
@@ -200,6 +206,10 @@ function CampaignFile({
       }).shortAlt
     : ''
   const trackingActive = isCampaignTrackingActive(campaign)
+  const awaitingFirstPoster = isCampaignAwaitingFirstPoster({
+    campaign,
+    isGenerating: !!activity,
+  })
 
   return (
     <Link to={`/campaigns/${campaign.id}`} className="campaign-file">
@@ -215,7 +225,15 @@ function CampaignFile({
             <GalleryVerticalEnd size={26} />
           </span>
         )}
-        {(activity || trackingActive) && (
+        {/* A campaign with no finished poster and nothing generating reads as an
+            ordinary 'Draft' otherwise, which is exactly how a failed creation
+            hides itself. Say so instead, and take precedence over the status
+            badge because 'no poster yet' is the more actionable fact. */}
+        {awaitingFirstPoster ? (
+          <span className="status-badge status-awaiting">
+            {t('No poster yet')}
+          </span>
+        ) : (activity || trackingActive) && (
           <span className={`status-badge status-${activity ? 'generating' : campaign.status}`}>
             {activity
               ? generationActivityLabel(activity, locale)
