@@ -272,8 +272,11 @@ test('the unified wizard persists intent-derived use_case and nullable sources',
   )
   assert.match(
     wizard,
-    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: resolvedUseCase,[\s\S]*product_url: sourceWrite\.product_url,[\s\S]*source_urls: sourceWrite\.source_urls,[\s\S]*product_name: productName\.trim\(\) \|\| null,[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: null,[\s\S]*poster_format: persistedFormat,/,
+    /const values = \{[\s\S]*scenario: 'product',[\s\S]*use_case: resolvedUseCase,[\s\S]*product_url: sourceWrite\.product_url,[\s\S]*source_urls: sourceWrite\.source_urls,[\s\S]*product_name: normalizeCampaignTitleWrite\(productName\),[\s\S]*destination_url: resolvedDestinationUrl,[\s\S]*platform_hint: null,[\s\S]*poster_format: persistedFormat,/,
   )
+  // The title normalizer is SHARED with the editor's rename rather than inlined,
+  // so a title cleared on one surface cannot persist differently from the other.
+  assert.doesNotMatch(wizard, /product_name: productName\.trim\(\) \|\| null/)
   // No CTA input: cta_text is absent so the NOT NULL DEFAULT absorbs it.
   assert.doesNotMatch(wizard, /cta_text:/)
   // Multi-page post is locked to the bandless 3:4 format and clears QR/destination.

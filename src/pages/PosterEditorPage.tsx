@@ -7,6 +7,7 @@ import {
   MapPin,
   PanelLeft,
   PanelRight,
+  Pencil,
   Send,
   Sparkles,
   Trash2,
@@ -59,7 +60,11 @@ import {
   isActiveGenerationJob,
   shouldAutoSelectGeneration,
 } from '../lib/generationActivity'
-import { campaignDisplayName } from '../lib/campaignDisplayName'
+import {
+  campaignDisplayName,
+  campaignTitleWriteChanged,
+  normalizeCampaignTitleWrite,
+} from '../lib/campaignDisplayName'
 import { formatsForBand, posterFormatHasQr, posterFormatWithQr } from '../lib/qrPolicy'
 import { resolveGenerationReferenceInput } from '../lib/generationReferenceInput'
 import { overlayGeneration } from '../lib/generations'
@@ -115,6 +120,7 @@ type BusyAction =
   | 'format'
   | 'platform'
   | 'qr-settings'
+  | 'rename'
 type MobileSection = 'versions' | 'create' | 'export'
 
 export function PosterEditorPage() {
@@ -175,6 +181,9 @@ export function PosterEditorPage() {
   const [placementProvisioningError, setPlacementProvisioningError] =
     useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
   const [versionsDrawerOpen, setVersionsDrawerOpen] = useState(false)
   const [mobileSection, setMobileSection] = useState<MobileSection>('create')
   const [detailsGeneration, setDetailsGeneration] = useState<PosterGeneration | null>(null)
@@ -188,6 +197,13 @@ export function PosterEditorPage() {
   const [initialPersistedCanonical, setInitialPersistedCanonical] =
     useState<string | null>(null)
   pendingReferencesRef.current = pendingReferences
+
+  // The rename popover is opened by a control that is not the field itself, so
+  // move focus into the input — otherwise a keyboard user opens a panel whose
+  // only purpose is text entry and stays parked on the trigger.
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.focus()
+  }, [renaming])
 
   useEffect(() => {
     if (!user?.id || !campaignTrackingActive) return
@@ -829,6 +845,41 @@ export function PosterEditorPage() {
     notify(t('Primary placement ready.'), 'success')
   }
 
+  function openRename() {
+    // Seed with the RAW stored title, never the 'Untitled campaign' placeholder —
+    // that is a rendered label, and saving it would persist the English string as
+    // a real title (and a different one per active language).
+    setRenameValue(campaign?.product_name ?? '')
+    setRenaming(true)
+  }
+
+  async function saveRename() {
+    if (!campaign) return
+    if (!campaignTitleWriteChanged(campaign.product_name, renameValue)) {
+      setRenaming(false)
+      return
+    }
+
+    setBusy('rename')
+    setGenerationError(null)
+    try {
+      const { error } = await insforge.database
+        .from('campaigns')
+        .update({ product_name: normalizeCampaignTitleWrite(renameValue) })
+        .eq('id', campaignId)
+      if (error) throw new Error(error.message)
+      await reload()
+      setRenaming(false)
+      notify(t('Campaign name updated.'), 'success')
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setGenerationError(message)
+      notify(t('Campaign name could not be updated.'), 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function setStatus(status: 'published' | 'draft') {
     setBusy(status)
     try {
@@ -1276,6 +1327,65 @@ export function PosterEditorPage() {
               </button>
             </>
           )}
+          <div className="toolbar-confirm-wrap">
+            <button
+              type="button"
+              className="toolbar-icon"
+              aria-label={t('Rename campaign')}
+              data-tooltip={t('Rename campaign')}
+              aria-expanded={renaming}
+              onClick={() => (renaming ? setRenaming(false) : openRename())}
+            >
+              <Pencil size={16} aria-hidden="true" />
+            </button>
+            {renaming && (
+              <form
+                className="toolbar-confirmation toolbar-rename"
+                aria-label={t('Rename campaign')}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void saveRename()
+                }}
+              >
+                <label htmlFor="campaign-rename">{t('Campaign name')}</label>
+                <input
+                  id="campaign-rename"
+                  ref={renameInputRef}
+                  className="input"
+                  value={renameValue}
+                  maxLength={120}
+                  autoComplete="off"
+                  placeholder={t('Untitled campaign')}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setRenaming(false)
+                  }}
+                />
+                {/* Renaming is forward-only for artwork: existing versions keep the
+                    pixels they were painted with. */}
+                <span>{t('Posters already generated keep their current text.')}</span>
+                <div>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    onClick={() => setRenaming(false)}
+                  >
+                    {t('Cancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    className="button button-primary button-small"
+                    disabled={
+                      !!busy
+                      || !campaignTitleWriteChanged(campaign.product_name, renameValue)
+                    }
+                  >
+                    {busy === 'rename' ? t('Saving') : t('Save')}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
           <div className="toolbar-confirm-wrap">
             <button
               type="button"

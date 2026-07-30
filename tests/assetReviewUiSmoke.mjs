@@ -878,6 +878,58 @@ async function testSocialCoverQrLifecycle(browserInstance) {
     'campaign-read',
   ])
   assert.equal(await generateVersionButton.isEnabled(), true)
+
+  // Order-147: the campaign name is editable after creation. The name is baked
+  // into posters, export filenames and utm_campaign, so the only prior escape
+  // from a typo was deleting the campaign.
+  editorState.campaignWrites.length = 0
+  assert.equal(
+    await editorPage.locator('.campaign-identity strong').textContent(),
+    'Signal Studio',
+  )
+  await editorPage.getByRole('button', { name: 'Rename campaign' }).click()
+  const renameField = editorPage.locator('#campaign-rename')
+  await renameField.waitFor()
+  // The field is seeded with the stored title and takes focus, so a keyboard
+  // user is not parked on the trigger of a panel that exists only for typing.
+  assert.equal(await renameField.inputValue(), 'Signal Studio')
+  assert.equal(
+    await renameField.evaluate((node) => node === document.activeElement),
+    true,
+  )
+  const saveRename = editorPage.getByRole('button', { name: 'Save', exact: true })
+  // Re-saving an unchanged title is not a write.
+  assert.equal(await saveRename.isDisabled(), true)
+  // Whitespace-only differences normalize away, so they are not a change either.
+  await renameField.fill('  Signal Studio  ')
+  assert.equal(await saveRename.isDisabled(), true)
+
+  await renameField.fill('Signal Studio EU')
+  assert.equal(await saveRename.isDisabled(), false)
+  await saveRename.click()
+  await editorPage.getByText('Campaign name updated.', { exact: true }).waitFor()
+  assert.deepEqual(
+    editorState.campaignWrites.map((write) => write.body.product_name),
+    ['Signal Studio EU'],
+  )
+  // Every surface reads the name from the shared campaign bar, so one write
+  // renames the editor, placements and analytics together.
+  await editorPage.getByText('Signal Studio EU', { exact: true }).first().waitFor()
+  assert.equal(await editorPage.locator('#campaign-rename').count(), 0)
+
+  // Clearing the title persists NULL, never '' — '' passes a ?? guard and would
+  // squat a blank utm_campaign and an export filename beginning with '-'.
+  editorState.campaignWrites.length = 0
+  await editorPage.getByRole('button', { name: 'Rename campaign' }).click()
+  await editorPage.locator('#campaign-rename').fill('   ')
+  await editorPage.getByRole('button', { name: 'Save', exact: true }).click()
+  await editorPage.getByText('Campaign name updated.', { exact: true }).waitFor()
+  assert.deepEqual(
+    editorState.campaignWrites.map((write) => write.body.product_name),
+    [null],
+  )
+  await editorPage.getByText('Untitled campaign', { exact: true }).first().waitFor()
+
   assert.deepEqual(editorErrors, [])
   await editorContext.close()
 

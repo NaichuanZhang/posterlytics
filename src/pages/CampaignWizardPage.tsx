@@ -32,7 +32,10 @@ import { WebsiteCapturePreview } from '../components/WebsiteCapturePreview'
 import { AppShell } from '../components/AppShell'
 import { InlineNotice } from '../components/ui/Feedback'
 import { useI18n } from '../i18n/I18nProvider'
-import { displayNameOrUntitled } from '../lib/campaignDisplayName'
+import {
+  displayNameOrUntitled,
+  normalizeCampaignTitleWrite,
+} from '../lib/campaignDisplayName'
 import {
   formatsForBand,
   posterFormatHasQr,
@@ -457,8 +460,9 @@ export function CampaignWizardPage() {
       use_case: resolvedUseCase,
       product_url: sourceWrite.product_url,
       source_urls: sourceWrite.source_urls,
-      // NULL, never '': every downstream fallback uses ?? / ||.
-      product_name: productName.trim() || null,
+      // NULL, never '': every downstream fallback uses ?? / ||. Shared with the
+      // editor's rename so the two writers cannot normalize differently.
+      product_name: normalizeCampaignTitleWrite(productName),
       tagline: tagline.trim() || null,
       // Absent so NOT NULL DEFAULT 'Learn more' absorbs it; no CTA input remains.
       destination_url: resolvedDestinationUrl,

@@ -26,3 +26,28 @@ export function campaignDisplayName(
 ): string {
   return displayNameOrUntitled(campaign.product_name, untitled)
 }
+
+/**
+ * The single normalizer for every writer of `campaigns.product_name`.
+ *
+ * NULL, never `''` — see 2026-07-28-optional-campaign-title. The wizard and the
+ * editor's rename both go through this so a title cleared on one surface cannot
+ * persist differently from one cleared on the other.
+ */
+export function normalizeCampaignTitleWrite(name: string): string | null {
+  return name.trim() || null
+}
+
+/**
+ * Whether a rename would actually change the stored value.
+ *
+ * Compares the NORMALIZED forms, so trimming whitespace off an otherwise
+ * unchanged title is correctly treated as a no-op, and a legacy `''` row counts
+ * as equal to NULL rather than inviting a pointless write.
+ */
+export function campaignTitleWriteChanged(
+  current: string | null | undefined,
+  next: string,
+): boolean {
+  return normalizeCampaignTitleWrite(next) !== (current?.trim() || null)
+}

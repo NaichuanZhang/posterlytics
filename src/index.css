@@ -523,6 +523,20 @@ img {
   margin-top: 5px;
 }
 
+/* Wider than the delete confirmation: this one holds a text field. */
+.toolbar-rename {
+  width: 288px;
+}
+
+.toolbar-rename label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.toolbar-rename > div {
+  justify-content: flex-end;
+}
+
 .campaign-bar {
   position: sticky;
   top: var(--toolbar-height);
