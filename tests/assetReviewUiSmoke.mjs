@@ -1858,6 +1858,21 @@ async function testCampaignWizardDiscardDeletesOrphanedCampaign(browserInstance)
   // The row exists at this point and nothing has deleted it.
   assert.equal(state.campaignDeleted, false)
 
+  // Order-139 claims the orphaned campaign has "no retry". It does: the row opens
+  // in the editor and offers a working 'Generate version', because generation is
+  // driven by campaign fields rather than by any prior generation. Assert that
+  // recovery path so it cannot silently regress into the dead end the ticket
+  // describes.
+  const orphanPage = await context.newPage()
+  await orphanPage.goto(`${BASE_URL}/campaigns/campaign-asset`)
+  await orphanPage.getByRole('heading', { name: 'Create next version' }).waitFor()
+  const orphanGenerate = orphanPage.getByRole('button', {
+    name: 'Generate version',
+  })
+  await orphanGenerate.waitFor()
+  assert.equal(await orphanGenerate.isEnabled(), true)
+  await orphanPage.close()
+
   // Discard is offered on a RESTORED draft, so reload the way a user who walked
   // away and came back would. The restored draft carries serverCampaignId, which
   // is what makes the orphaned row reachable at all.
