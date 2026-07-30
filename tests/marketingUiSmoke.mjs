@@ -1389,6 +1389,34 @@ async function testAnalyticsBreakdownFailure(browserInstance) {
     ['\u2014', '\u2014', '\u2014'],
   )
 
+  // Refresh must not claim success while the metrics are em-dashes. The hooks
+  // capture their error into state and resolve normally, so a success toast taken
+  // off the await alone contradicted the inline notice on the same screen.
+  const refresh = page.getByRole('button', { name: 'Refresh' })
+  await refresh.click()
+  await page.getByText('Some analytics could not be loaded.', { exact: false })
+    .first().waitFor()
+  assert.equal(
+    await page.getByText('Analytics refreshed.', { exact: true }).count(),
+    0,
+    'Refresh announced success while analytics were unavailable',
+  )
+  // The strip is swapped for a skeleton while refreshing, so wait for the three
+  // metrics to return before asserting they still read as unavailable.
+  await page.waitForFunction(
+    () => document.querySelectorAll('.metric-strip .metric strong').length === 3,
+  )
+  assert.deepEqual(
+    await campaignSummary.locator('.metric strong').allInnerTexts(),
+    ['\u2014', '\u2014', '\u2014'],
+  )
+  // The success toast must never appear, even after the refresh settles.
+  assert.equal(
+    await page.getByText('Analytics refreshed.', { exact: true }).count(),
+    0,
+    'Refresh announced success after settling while analytics were unavailable',
+  )
+
   await context.close()
 }
 

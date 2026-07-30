@@ -10,12 +10,19 @@ export function usePlacementStats(
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const reload = useCallback(async () => {
+  /**
+   * Resolves to whether this load actually succeeded. Mirrors
+   * useCampaignBreakdowns: the error is still captured into state to drive the
+   * degraded display, and the boolean exists only so a caller can distinguish a
+   * real success from a swallowed failure.
+   */
+  const reload = useCallback(async (): Promise<boolean> => {
     if (!campaignId || !enabled) {
       setStats([])
       setLoading(false)
       setError(null)
-      return
+      // Nothing was requested, so there is nothing to report as refreshed.
+      return false
     }
     setLoading(true)
     const { data, error } = await insforge.database.rpc('placement_stats', {
@@ -37,6 +44,7 @@ export function usePlacementStats(
       setError(null)
     }
     setLoading(false)
+    return !error
   }, [campaignId, enabled])
 
   useEffect(() => {

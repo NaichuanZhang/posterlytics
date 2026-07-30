@@ -63,9 +63,21 @@ export function AnalyticsPage() {
 
   async function refreshAll() {
     setRefreshing(true)
-    await Promise.all([reload(), reloadBreakdowns()])
+    // Both hooks capture their error into state and resolve normally, so
+    // Promise.all can never reject — announcing success off the await alone
+    // claimed fresh data on the very screen where the metrics had just blanked
+    // to em-dashes. Read the outcomes instead, and reuse the same wording as the
+    // inline notice so the toast cannot contradict what is already on screen.
+    const [statsOk, breakdownsOk] = await Promise.all([
+      reload(),
+      reloadBreakdowns(),
+    ])
     setRefreshing(false)
-    notify(t('Analytics refreshed.'), 'success')
+    if (statsOk && breakdownsOk) {
+      notify(t('Analytics refreshed.'), 'success')
+      return
+    }
+    notify(t('Some analytics could not be loaded.'), 'error')
   }
 
   if (loading) {

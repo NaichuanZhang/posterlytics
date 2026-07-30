@@ -22,12 +22,22 @@ export function useCampaignBreakdowns(
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const reload = useCallback(async () => {
+  /**
+   * Resolves to whether this load actually succeeded.
+   *
+   * The error is still captured into state — that is what drives the em-dash
+   * fallback and the inline notice, so the hook deliberately does NOT throw. The
+   * boolean is an additional channel so a caller (the Refresh action) can tell a
+   * real success from a swallowed failure instead of assuming an awaited call
+   * that cannot reject means the data is fresh.
+   */
+  const reload = useCallback(async (): Promise<boolean> => {
     if (!campaignId || !enabled) {
       setBreakdowns(EMPTY)
       setLoading(false)
       setError(null)
-      return
+      // Nothing was requested, so there is nothing to report as refreshed.
+      return false
     }
     setLoading(true)
     const { data, error } = await insforge.database.rpc('campaign_breakdowns', {
@@ -53,6 +63,7 @@ export function useCampaignBreakdowns(
       setError(null)
     }
     setLoading(false)
+    return !error
   }, [campaignId, enabled])
 
   useEffect(() => {
