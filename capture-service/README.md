@@ -30,9 +30,12 @@ Subhosting cannot run a browser.
 - DOM style weights use only each element's visible intersection with the
   current frame. `tokens.colors.visualPalette` records pixel usage proportions;
   `tokens.colors.theme` is `light`, `dark`, or `mixed`.
-- Chromium warms before the service accepts traffic. Page capture has a
-  13-second hard deadline below the edge caller's 15-second timeout and rejects
-  private/reserved network targets, including redirects and subresources.
+- The service accepts traffic first and warms Chromium in the background, so a
+  cold machine answers within its own deadline instead of stalling the caller.
+  Page capture has a 13-second hard deadline below the edge caller's 15-second
+  timeout and rejects private/reserved network targets, including redirects and
+  subresources. The 10-second sampling budget starts once a browser exists, so a
+  launch is never charged to page work.
 - Failures return a non-2xx response with
   `{ "error": { "code", "message", "retryable" } }`. `analyze` records the
   structured error and falls back to HTML color extraction.

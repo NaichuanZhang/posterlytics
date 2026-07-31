@@ -64,14 +64,19 @@ export async function captureUrl(
   colorScheme: ColorScheme = 'light',
   signal?: AbortSignal,
 ): Promise<CaptureExecutionResult> {
-  const timer = startMonotonicTimer();
-  const hasSamplingBudget = (minimumMs: number): boolean =>
-    timer.hasRemaining(minimumMs, SOFT_SAMPLING_BUDGET_MS);
   const url = normalizeUrl(rawUrl);
   await assertPublicUrl(url);
   signal?.throwIfAborted();
   const browser = await getBrowser();
   signal?.throwIfAborted();
+  // The 10-second sampling budget governs PAGE work, so it starts only once a
+  // browser exists. Starting it earlier charged a cold Chromium launch (~11s on
+  // this container) to the page, which then had no budget left and returned
+  // zero-frame evidence. The 13-second request deadline in server.ts is the
+  // ceiling that still covers the launch.
+  const timer = startMonotonicTimer();
+  const hasSamplingBudget = (minimumMs: number): boolean =>
+    timer.hasRemaining(minimumMs, SOFT_SAMPLING_BUDGET_MS);
   const context = await browser.newContext({
     viewport: VIEWPORT,
     userAgent:

@@ -25,6 +25,7 @@ import {
   startMonotonicTimer,
 } from './captureLifecycle.js';
 import { UnsafeTargetError } from './networkSafety.js';
+import { bootstrapCaptureService } from './serverBootstrap.js';
 import type {
   CaptureErrorBody,
   CaptureExecutionResult,
@@ -183,24 +184,28 @@ function logCaptureOutcome(
 }
 
 async function startServer(): Promise<void> {
-  const warmTimer = startMonotonicTimer();
-  try {
-    await warmBrowser();
-    console.log(JSON.stringify({
-      event: 'capture_browser_warmed',
-      timestamp: new Date().toISOString(),
-      duration_ms: Math.round(warmTimer.elapsedMs()),
-      process_uptime_ms: Math.round(process.uptime() * 1000),
-    }));
-  } catch (error) {
-    console.error(JSON.stringify({
-      event: 'capture_browser_warm_failed',
-      message: error instanceof Error ? error.message : String(error),
-    }));
-  }
-
-  server.listen(PORT, () => {
-    console.log(`capture-service listening on :${PORT}`);
+  await bootstrapCaptureService({
+    listen: () => new Promise<void>((resolve) => {
+      server.listen(PORT, () => {
+        console.log(`capture-service listening on :${PORT}`);
+        resolve();
+      });
+    }),
+    warmBrowser,
+    onWarmed: (durationMs) => {
+      console.log(JSON.stringify({
+        event: 'capture_browser_warmed',
+        timestamp: new Date().toISOString(),
+        duration_ms: Math.round(durationMs),
+        process_uptime_ms: Math.round(process.uptime() * 1000),
+      }));
+    },
+    onWarmFailed: (error) => {
+      console.error(JSON.stringify({
+        event: 'capture_browser_warm_failed',
+        message: error instanceof Error ? error.message : String(error),
+      }));
+    },
   });
 }
 
