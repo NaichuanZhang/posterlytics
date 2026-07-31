@@ -2178,11 +2178,18 @@ export function productPosterActionInstructions(
   if (hasPosterQrBand(posterSize)) {
     return {
       designerRule:
-        'CRITICAL: do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere — the tracked QR footer bar (printed separately below the artwork) IS the call-to-action, so a CTA zone would be redundant. Use the "lower" zone for a closing value prop or proof point instead. ',
+        'CRITICAL: do NOT add a QR code, barcode, or scannable-code zone, and do NOT reserve space for one — the tracked QR footer bar is composited mechanically below the artwork, outside the layout you are designing. Do NOT add a call-to-action / "Get started" / "Sign up" / "Join now" zone anywhere either — that footer IS the call-to-action, so a CTA zone would be redundant. Use the "lower" zone for a closing value prop or proof point instead. ',
       designerRequest:
-        'Design the poster layout JSON now (no CTA zone — the QR footer is the action).',
+        'Design the poster layout JSON now (no QR/barcode zone and no CTA zone — the composited QR footer is the action).',
+      // The real QR is composited by the SPA outside this artwork, never painted.
+      // This branch used to describe the footer only positively ("the QR footer
+      // bar IS the call-to-action") and leave the prohibition to a fragment in
+      // the trailing Avoid list, so the most imperative sentence in the prompt
+      // told the painter a QR belongs on this poster. It obliged: a banded
+      // product generation came back with a model-drawn QR. The band's existence
+      // is now stated as a reason NOT to draw one.
       painterRule:
-        'This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. The scannable QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.',
+        'This is a PRINTED POSTER IMAGE, not a web page or app screen: do NOT draw buttons, pills, tabs, or clickable controls. Do NOT render, draw, imitate, or leave space for any QR code, barcode, data matrix, or scannable code anywhere in this artwork — a real scannable QR is added mechanically outside this image afterwards, so any code you paint is a fake that must be discarded. That QR footer bar (printed separately below the artwork) IS the call-to-action, so do NOT render any "Get started" / "Sign up" / "Join now" CTA line or button anywhere — it would be redundant.',
       painterAvoid:
         'any "Get started"/"Sign up" CTA line (the QR footer bar is the call-to-action), any QR code or barcode drawn by you',
     };

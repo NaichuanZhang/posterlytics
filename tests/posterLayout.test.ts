@@ -11,6 +11,7 @@ import {
 import {
   getPosterFrameLabel,
   getPosterSize,
+  hasPosterQrBand,
   POSTER_SIZES,
 } from '../src/lib/posterSize.ts'
 import { stripPainterPromptEmoji } from '../functions/_copySanitizer.ts'
@@ -269,8 +270,8 @@ test('scaled product prompts retain the placement QR footer contract', () => {
   const instructions = productPosterActionInstructions(getPosterSize('a4_2x3'))
 
   assert.match(instructions.designerRule, /tracked QR footer bar.*IS the call-to-action/i)
-  assert.match(instructions.painterRule, /scannable QR footer bar.*IS the call-to-action/i)
-  assert.match(instructions.designerRequest, /QR footer is the action/i)
+  assert.match(instructions.painterRule, /QR footer bar.*IS the call-to-action/i)
+  assert.match(instructions.designerRequest, /composited QR footer is the action/i)
 })
 
 test('QR-band instructions take precedence over reference-only artwork policy', () => {
@@ -280,10 +281,59 @@ test('QR-band instructions take precedence over reference-only artwork policy', 
   )
 
   assert.match(instructions.designerRule, /tracked QR footer bar.*IS the call-to-action/i)
-  assert.match(instructions.painterRule, /scannable QR footer bar.*IS the call-to-action/i)
+  assert.match(instructions.painterRule, /QR footer bar.*IS the call-to-action/i)
   assert.doesNotMatch(instructions.designerRule, /no footer or tracking mechanics/i)
   assert.doesNotMatch(instructions.painterRule, /FULL-BLEED SOCIAL ARTWORK/)
 })
+
+// A banded product generation came back with a model-painted QR code. The band
+// branch described the footer only positively and left the prohibition to a
+// fragment in the trailing Avoid list, while both bandless branches carried an
+// explicit "Do NOT render any QR code" imperative. That asymmetry is the defect,
+// so every branch is pinned here rather than only the ones that happened to say it.
+for (const size of POSTER_SIZES) {
+  for (const useCase of ['website_product', 'social_cover'] as const) {
+    const recipe = resolveProductUseCaseRecipe(useCase)
+    const banded = hasPosterQrBand(size)
+
+    test(`${size.slug}/${useCase} forbids a painter-drawn QR in an imperative rule, not only the Avoid list`, () => {
+      const instructions = productPosterActionInstructions(size, recipe)
+
+      // The imperative sentence itself must forbid it — the Avoid list is a
+      // trailing comma-separated tail and is not a substitute.
+      assert.match(
+        instructions.painterRule,
+        /do NOT (render|draw)[^.]*\bQR code\b/i,
+        'painterRule must contain an explicit QR prohibition',
+      )
+      // The designer must not allocate or reserve a zone for one either.
+      assert.match(instructions.designerRule, /\bQR code\b/i)
+      assert.match(instructions.designerRule, /do NOT add/i)
+      // The Avoid list keeps its own belt-and-braces mention.
+      assert.match(instructions.painterAvoid, /QR code or barcode drawn by you/i)
+
+      const prompt = compileLayoutPrompt(
+        LAYOUT,
+        { product: 'Acme', essence: '' },
+        size,
+        recipe,
+      )
+      assert.match(prompt, /do NOT (render|draw)[^.]*\bQR code\b/i)
+
+      if (banded) {
+        // Only the banded formats may mention the composited footer at all, and
+        // when they do they must say the QR arrives from outside the artwork —
+        // otherwise "there is a QR footer" reads as licence to paint one.
+        assert.match(
+          instructions.painterRule,
+          /added mechanically outside this image|printed separately below/i,
+        )
+      } else {
+        assert.doesNotMatch(instructions.painterRule, /printed separately below/i)
+      }
+    })
+  }
+}
 
 test('compileLayoutPrompt preserves sparse source rhythm and visual treatment', () => {
   const prompt = compileLayoutPrompt({

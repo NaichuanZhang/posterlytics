@@ -134,8 +134,13 @@ test('banded social designer and hero prompts match their QR-footer golden', asy
 
   assert.deepEqual(actual, socialQrExpected)
   assert.match(actual.designer.system, /tracked QR footer bar/)
-  assert.match(actual.designer.user, /QR footer is the action/)
-  assert.match(actual.hero, /scannable QR footer bar/)
+  assert.match(actual.designer.user, /composited QR footer is the action/)
+  assert.match(actual.hero, /QR footer bar/)
+  // The band supplies a real composited QR, so the painter must be told not to
+  // draw one — describing the footer without prohibiting it is what produced a
+  // model-painted QR on a banded product poster.
+  assert.match(actual.hero, /Do NOT render, draw, imitate, or leave space for any QR code/)
+  assert.match(actual.designer.system, /do NOT add a QR code, barcode, or scannable-code zone/i)
   assert.doesNotMatch(actual.designer.system, /no footer or tracking mechanics/)
   assert.doesNotMatch(actual.hero, /FULL-BLEED SOCIAL ARTWORK/)
 })
