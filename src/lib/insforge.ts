@@ -1,4 +1,5 @@
 import { createClient } from '@insforge/sdk'
+import { resolveFunctionsHost } from './functionsHost'
 import {
   isSessionExpiredError,
   publishSessionExpired,
@@ -39,13 +40,9 @@ export const insforge = createClient({
   fetch: sessionAwareFetch,
 })
 
-// Base host where the public edge functions are served.
-// Derived from the API base: <appkey>.<region>.insforge.app -> <appkey>.functions.insforge.app
-export const FUNCTIONS_HOST = (() => {
-  try {
-    const appkey = new URL(INSFORGE_BASE_URL).host.split('.')[0]
-    return `https://${appkey}.functions.insforge.app`
-  } catch {
-    return ''
-  }
-})()
+// Base host where the public edge functions are served. Overridable by config
+// because the provider's function domain is not stable — see functionsHost.ts.
+export const FUNCTIONS_HOST = resolveFunctionsHost({
+  override: import.meta.env.VITE_INSFORGE_FUNCTIONS_HOST,
+  baseUrl: INSFORGE_BASE_URL,
+})
