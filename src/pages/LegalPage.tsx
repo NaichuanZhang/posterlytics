@@ -4,6 +4,11 @@ import { LanguageSelect } from '../components/LanguageSelect'
 import { useDocumentMetadata } from '../hooks/useDocumentMetadata'
 import { useI18n } from '../i18n/I18nProvider'
 import {
+  ISSUE_TRACKER_LABEL,
+  ISSUE_TRACKER_URL,
+  OPERATOR_NAME,
+} from '../lib/publicContact'
+import {
   CAPTURE_PREVIEW_LIMIT_PER_10_MINUTES,
   CAPTURE_PREVIEW_LIMIT_PER_DAY,
 } from '../lib/publicLimits'
@@ -102,7 +107,35 @@ function TermsSections() {
         <h2>{t('Availability')}</h2>
         <p>{t('Posterlytics may change, suspend, or stop without notice.')}</p>
       </section>
+      <OperatorAndContactSection />
     </div>
+  )
+}
+
+/**
+ * Order-153: the public surface asked for an email and password without naming
+ * anyone or offering a way to reach them. Both legal pages carry this — a
+ * privacy policy that identifies no operator is the same gap as terms that do.
+ * Only routes verified to answer are published, and no email address is.
+ */
+function OperatorAndContactSection() {
+  const { t } = useI18n()
+
+  return (
+    <section>
+      <h2>{t('Operator and contact')}</h2>
+      <p>
+        {t('Posterlytics is a personal demo project run by {operator}. It is not operated by a company.', {
+          operator: OPERATOR_NAME,
+        })}
+      </p>
+      <p>
+        {t('Its source code is public, and questions, bug reports, and takedown requests go to the issue tracker:')}{' '}
+        <a className="public-legal-inline-link" href={ISSUE_TRACKER_URL}>
+          {ISSUE_TRACKER_LABEL}
+        </a>
+      </p>
+    </section>
   )
 }
 
@@ -141,6 +174,7 @@ function PrivacySections() {
           {t('Generated and reference images can be viewed by anyone who has their direct URL, and published tracked links can be opened by anyone who has their URL.')}
         </p>
       </section>
+      <OperatorAndContactSection />
     </div>
   )
 }

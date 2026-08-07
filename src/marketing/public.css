@@ -1185,6 +1185,21 @@
   margin-top: 12px;
 }
 
+/* The contact route is a bare URL: one long unbreakable token that overflows
+   280px unless it may break mid-word. `overflow-x: clip` on .public-surface
+   hides that overflow from assertNoHorizontalOverflow, so this is measured, not
+   assumed. The selector is qualified with .public-surface because the bare
+   `.public-surface a { color: inherit }` rule above outranks a lone class and
+   would otherwise leave the link the exact color of its paragraph — invisible
+   as a link (WCAG 1.4.1), with only the underline distinguishing it. */
+.public-surface .public-legal-inline-link {
+  color: var(--public-accent-text);
+  font-weight: 620;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
 .public-legal-links {
   display: flex;
   flex-wrap: wrap;

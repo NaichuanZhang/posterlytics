@@ -287,6 +287,9 @@ async function testPublicLegalPages(browserInstance) {
     + ' per account. A campaign accepts up to 5 reference images.',
     { exact: true },
   ).waitFor()
+  // Order-153 also asked who runs the service and how to reach them. Both legal
+  // pages must name an operator and expose a route that resolves to a real page.
+  await assertOperatorAndContact(page, '/terms')
   await assertNoHorizontalOverflow(page, 'terms 390px')
 
   await page.getByRole('link', { name: 'Privacy Policy', exact: true }).click()
@@ -300,6 +303,9 @@ async function testPublicLegalPages(browserInstance) {
     'Posterlytics hashes a first-party cookie identifier with a secret salt to estimate unique visitors. It does not store raw IP addresses.',
     { exact: true },
   ).waitFor()
+  // A privacy policy that identifies no operator has the same gap as terms that
+  // do not, so the section is asserted on both pages.
+  await assertOperatorAndContact(page, '/privacy')
   await assertNoHorizontalOverflow(page, 'privacy 390px')
 
   await page.goto(`${BASE_URL}/`)
@@ -1041,6 +1047,12 @@ async function testPublicResponsiveAccessibility(browserInstance) {
           .getByRole('heading', { name: legalPage.heading, exact: true })
           .waitFor()
         await assertNoHorizontalOverflow(
+          page,
+          `${legalPage.heading} ${viewport.width}px`,
+        )
+        // 280px is the width where the contact URL must break mid-token; the
+        // surface's overflow-x: clip hides that from the assertion above.
+        await assertOperatorAndContact(
           page,
           `${legalPage.heading} ${viewport.width}px`,
         )
@@ -1882,6 +1894,68 @@ async function revealLazyContent(page) {
   })
   await page.waitForFunction(() => window.scrollY === 0)
   await page.waitForTimeout(100)
+}
+
+async function assertOperatorAndContact(page, label) {
+  await page.getByRole('heading', { name: 'Operator and contact', exact: true }).waitFor()
+  await page.getByText(
+    'Posterlytics is a personal demo project run by Naichuan Zhang. It is not'
+    + ' operated by a company.',
+    { exact: true },
+  ).waitFor()
+
+  // The route has to be a real link a visitor can follow, and its text has to
+  // match where it actually goes — a label disagreeing with its href would be an
+  // unverifiable support route.
+  const tracker = page.locator('.public-legal-inline-link')
+  await tracker.waitFor()
+  assert.equal(
+    await tracker.getAttribute('href'),
+    'https://github.com/NaichuanZhang/posterlytics/issues',
+    `${label} issue tracker href`,
+  )
+  assert.equal(
+    (await tracker.innerText()).trim(),
+    'github.com/NaichuanZhang/posterlytics/issues',
+    `${label} issue tracker label`,
+  )
+
+  // No email address is published, so nothing here may render a mailto.
+  assert.equal(
+    await page.locator('a[href^="mailto:"]').count(),
+    0,
+    `${label} unexpected mailto link`,
+  )
+
+  // assertNoHorizontalOverflow cannot see this link run off the page: the
+  // `overflow-x: clip` on .public-surface keeps scrollWidth == clientWidth while
+  // the URL is visually clipped. Measure the box against the surface instead,
+  // and check the link is distinguishable from its paragraph by more than color.
+  const geometry = await tracker.evaluate((element) => {
+    const styles = getComputedStyle(element)
+    const paragraph = element.closest('p')
+    const surface = element.closest('.public-surface')
+    return {
+      color: styles.color,
+      paragraphColor: getComputedStyle(paragraph).color,
+      textDecorationLine: styles.textDecorationLine,
+      right: element.getBoundingClientRect().right,
+      surfaceRight: surface.getBoundingClientRect().right,
+    }
+  })
+  assert.ok(
+    geometry.right <= geometry.surfaceRight,
+    `${label} contact URL escapes the surface: ${JSON.stringify(geometry)}`,
+  )
+  assert.ok(
+    geometry.textDecorationLine.includes('underline'),
+    `${label} contact link is not underlined: ${geometry.textDecorationLine}`,
+  )
+  assert.notEqual(
+    geometry.color,
+    geometry.paragraphColor,
+    `${label} contact link is the same color as its paragraph`,
+  )
 }
 
 async function assertNoHorizontalOverflow(page, label) {

@@ -336,6 +336,22 @@ const SOURCE_LITERAL_ALLOWLIST: AllowedLiteral[] = [
     category: 'generated-poster-copy',
     reason: 'Exact English transcript mirror of the fixed camera instruction painted by AiPoster.',
   },
+  {
+    file: 'src/lib/publicContact.ts',
+    kind: 'visible-variable',
+    text: 'github.com/NaichuanZhang/posterlytics',
+    count: 1,
+    category: 'url',
+    reason: 'Link text for the public support route; it must match its href literally in every locale, so translating it would misdirect visitors.',
+  },
+  {
+    file: 'src/lib/publicContact.ts',
+    kind: 'visible-variable',
+    text: '{…}/issues',
+    count: 1,
+    category: 'url',
+    reason: 'Issue-tracker link text derived from the repository URL above; a translated path would not resolve.',
+  },
 ]
 
 const VISIBLE_ATTRIBUTE_NAME =

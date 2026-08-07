@@ -122,6 +122,9 @@ export const ENGLISH_MESSAGE_IDS = [
   'Because this is a demo project, poster generation is not guaranteed to be available, and these limits can change without notice.',
   'Availability',
   'Posterlytics may change, suspend, or stop without notice.',
+  'Operator and contact',
+  'Posterlytics is a personal demo project run by {operator}. It is not operated by a company.',
+  'Its source code is public, and questions, bug reports, and takedown requests go to the issue tracker:',
   'Information we collect',
   'Posterlytics uses your email address for account authentication. It stores the campaigns, poster generations, placements, and visit analytics you create.',
   'Posterlytics processes the product URLs, images, and copy you submit to generate posters.',
@@ -933,6 +936,11 @@ export const zhCN: Record<TranslationKey, string> = {
   Availability: '服务可用性',
   'Posterlytics may change, suspend, or stop without notice.':
     'Posterlytics 可能会变更、暂停或停止服务，恕不另行通知。',
+  'Operator and contact': '运营者与联系方式',
+  'Posterlytics is a personal demo project run by {operator}. It is not operated by a company.':
+    'Posterlytics 是由 {operator} 运营的个人演示项目，并非由公司运营。',
+  'Its source code is public, and questions, bug reports, and takedown requests go to the issue tracker:':
+    '其源代码公开发布。如有疑问、缺陷反馈或内容移除请求，请通过以下 issue 页面提交：',
   'Information we collect': '我们收集的信息',
   'Posterlytics uses your email address for account authentication. It stores the campaigns, poster generations, placements, and visit analytics you create.':
     'Posterlytics 使用你的邮箱地址进行账户验证，并存储你创建的推广活动、海报生成版本、投放点和访问分析数据。',
