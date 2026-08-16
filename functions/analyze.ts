@@ -345,7 +345,13 @@ export async function runAnalyzeStage(
   // mining is retained strictly for a capture failure/unconfigured fallback.
   const captureSucceeded = capture?.error === null;
   const hasCapturedEvidence = !!design_tokens || !!capture?.styleBoardDataUrl;
-  const fallbackHtmlColors = captureSucceeded ? [] : extractColors(scrapeHtml);
+  // Gate on evidence, not on the status flag: a capture can return HTTP 200 with
+  // neither tokens nor a style board, which reports error === null. Keying off
+  // captureSucceeded there suppressed the HTML fallback for the one "success"
+  // that carries nothing, leaving the palette to a model guess. Mining is still
+  // capture-failure-only in the sense that matters — it runs exactly when no
+  // captured evidence exists.
+  const fallbackHtmlColors = hasCapturedEvidence ? [] : extractColors(scrapeHtml);
   const siteColors = design_tokens
     ? dedupeColors([
         ...(design_tokens.colors.visualPalette ?? []).map((entry) => entry.color),
@@ -405,6 +411,12 @@ export async function runAnalyzeStage(
       storageSource: 'user-upload',
       purpose: productRecipe.references.analysisUserReference(index + 1),
     })),
+    // Without a style board this stage was describing "observed visual treatment"
+    // from text alone, while `hero` went on to paint with these very images. They
+    // are already scraped and re-hosted above, so showing them costs no fetch and
+    // no new evidence source. Gated on the board being absent so the capture-
+    // success path stays byte- and behavior-identical.
+    ...(screenshot_url ? [] : buildSourceAssetCandidates(brand_assets, productRecipe)),
   ];
   const preparedAnalysisImages = await prepareImageReferences(analysisCandidates, {
     maxImages: 6,
@@ -893,6 +905,45 @@ interface ParsedContent {
   brand_essence: string;
   poster_spec: unknown;
   redNotePost?: RedNotePostPlan;
+}
+
+/**
+ * Scraped brand assets as analyze evidence, used only when no style board exists.
+ *
+ * These are the re-hosted logo and product images from `rehostBrandAssets`, so the
+ * URLs are already public and CORS-clean — nothing is hot-linked and no raw HTML is
+ * persisted. They are deliberately secondary: real pixels of the brand's own
+ * subjects, carrying no layout or palette-proportion evidence, which is why the
+ * purpose strings tell the model not to infer either. `orderSourceImageReferences`
+ * ranks logo(3) and product(4) below a style board and user references, so this can
+ * only ever fill space the primary evidence left empty.
+ */
+function buildSourceAssetCandidates(
+  brandAssets: { logo_url?: string; logo_key?: string; images: Array<{ url: string; key: string }> },
+  recipe: ProductUseCaseRecipe,
+): TypedImageReference[] {
+  const candidates: TypedImageReference[] = [];
+  if (brandAssets.logo_url) {
+    candidates.push({
+      kind: 'logo',
+      url: brandAssets.logo_url,
+      key: brandAssets.logo_key,
+      filename: 'Source brand logo',
+      storageSource: 'website-scrape',
+      purpose: recipe.references.analysisSourceLogo,
+    });
+  }
+  for (const [index, image] of brandAssets.images.entries()) {
+    candidates.push({
+      kind: 'product',
+      url: image.url,
+      key: image.key,
+      filename: `Source product image ${index + 1}`,
+      storageSource: 'website-scrape',
+      purpose: recipe.references.analysisSourceImage(index + 1),
+    });
+  }
+  return candidates;
 }
 
 function stripToText(htmlText: string): string {

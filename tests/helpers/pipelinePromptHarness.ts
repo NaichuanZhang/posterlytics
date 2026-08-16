@@ -489,6 +489,93 @@ export async function captureAnalyzeSourceMode(
 }
 
 /**
+ * Runs analyze against a capture outcome that carries no usable evidence, and
+ * reports which images the stage put forward as evidence.
+ *
+ * `empty-evidence` is the hole this exists for: the capture service answers 200
+ * with neither tokens nor a style board, so `error` is null and the attempt looks
+ * successful while carrying nothing. `with-board` is the control — same HTML, same
+ * scraped assets, but a real style board — and must stay unchanged.
+ *
+ * Reports the trace's `candidate_images` rather than the provider payload: the
+ * candidate list is what this stage decides to offer, recorded before any fetch or
+ * byte-budget trimming, so the assertion tests the decision and not the fixture's
+ * image plumbing.
+ */
+export async function runAnalyzeSourceAssetFallbackHarness(
+  variant: 'empty-evidence' | 'with-board',
+): Promise<{
+  prompt: string
+  candidateKinds: string[]
+  candidatePurposes: string[]
+  candidateUrls: string[]
+}> {
+  const productUrl = 'https://example.com/products/northstar'
+  const state = createState('website_product', productUrl, 'product')
+  state.sourceHtmlOverride = `<!doctype html>
+    <html>
+      <head>
+        <meta name="theme-color" content="#235789">
+        <meta property="og:logo" content="https://source.example/scraped-logo.png">
+        <meta property="og:image" content="https://source.example/scraped-product.jpg">
+      </head>
+      <body>Northstar turns operational data into decisions without delay.</body>
+    </html>`
+  // Both scraped assets must be fetchable so rehostBrandAssets can re-host them —
+  // the candidates under test carry the re-hosted URLs, never the origin ones.
+  for (const url of [
+    'https://source.example/scraped-logo.png',
+    'https://source.example/scraped-product.jpg',
+  ]) {
+    state.imageUrls.add(url)
+  }
+  state.captureServiceResponse = variant === 'with-board'
+    ? {
+        status: 200,
+        body: {
+          screenshot_b64: 'AAECAwQ=',
+          raw_tokens: {
+            colors: {
+              bg: '#ffffff',
+              text: '#101010',
+              primary: '#235789',
+              accent: '#f45b69',
+              palette: [{ color: '#ffffff', proportion: 0.8 }],
+            },
+            fonts: { heading: 'Inter', body: 'Inter' },
+          },
+        },
+      }
+    // 200, no tokens, no board: reports error === null while carrying nothing.
+    : { status: 200, body: {} }
+  await withHarnessGlobals(
+    state,
+    productAnalyzeResponse('website_product'),
+    () => runAnalyzeStage({
+      client: createHarnessClient(state) as never,
+      userId: USER_ID,
+      campaignId: CAMPAIGN_ID,
+      generationId: GENERATION_ID,
+      colorScheme: 'light',
+      finalizeFailure: false,
+      serverOwned: true,
+    }),
+  )
+  const call = (state.traces.analyze.model_calls as Array<{
+    prompt?: { user?: unknown }
+  }>)[0]
+  const candidates = ((state.traces.analyze as unknown as {
+    candidate_images?: Array<{ source?: unknown; purpose?: unknown; url?: unknown }>
+  }).candidate_images ?? [])
+  return {
+    prompt: String(call?.prompt?.user ?? ''),
+    candidateKinds: candidates.map((image) => String(image.source ?? '')),
+    candidatePurposes: candidates.map((image) => String(image.purpose ?? '')),
+    candidateUrls: candidates.map((image) => String(image.url ?? '')),
+  }
+}
+
+/**
  * Runs analyze for a campaign declaring several source URLs, and reports what was
  * actually acquired. The fixture fetch handler throws on any URL other than
  * `product_url`, so a stray acquisition of URL 2 or 3 fails loudly rather than

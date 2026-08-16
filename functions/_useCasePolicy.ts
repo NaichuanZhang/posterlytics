@@ -24,6 +24,8 @@ export interface AnalyzeBriefSet {
 export interface ReferencePurposeVocabulary {
   analysisStyleBoard: string;
   analysisUserReference: (index: number) => string;
+  analysisSourceLogo: string;
+  analysisSourceImage: (index: number) => string;
   assetPreviousRefresh: string;
   assetPreviousIteration: string;
   assetUserReference: (index: number) => string;
@@ -103,12 +105,28 @@ export interface UseCaseSourceMismatch {
   retryable: false;
 }
 
+// Attached to the analyze call only when no style board exists. These images are
+// scraped from the page's own HTML, so they show real brand subjects but carry no
+// layout, palette-proportion, or typography evidence — the wording holds the model
+// to describing what they actually show. Shared verbatim across use cases because
+// the description is of the image itself, which does not vary by use case.
+const SOURCE_ASSET_FALLBACK_REFERENCES: Pick<
+  ReferencePurposeVocabulary,
+  'analysisSourceLogo' | 'analysisSourceImage'
+> = {
+  analysisSourceLogo:
+    'Secondary source evidence, attached because no style board is available: the brand logo scraped from the page. Describe only what it shows; do not infer page layout or palette proportions from it.',
+  analysisSourceImage: (index) =>
+    `Secondary source evidence ${index}, attached because no style board is available: a product or brand image scraped from the page. Describe only its subject and treatment; do not infer page layout or palette proportions from it.`,
+};
+
 const COMMON_PRODUCT_REFERENCES: Omit<
   ReferencePurposeVocabulary,
   'analysisUserReference'
 > = {
   analysisStyleBoard:
     'Primary source evidence: three page viewports showing palette proportions, typography, imagery, lighting, motifs, hierarchy, and density.',
+  ...SOURCE_ASSET_FALLBACK_REFERENCES,
   assetPreviousRefresh:
     'Current poster version; preserve useful visual continuity while applying refreshed website evidence.',
   assetPreviousIteration:
@@ -340,6 +358,9 @@ const SOCIAL_COVER_RECIPE: ProductUseCaseRecipe = {
   references: {
     analysisStyleBoard:
       'Supporting visual reference board for palette, typography, imagery treatment, lighting, texture, motifs, and density.',
+    // Present to satisfy the shared vocabulary. This use case has no scraped
+    // website source, so the source-asset fallback never fires here.
+    ...SOURCE_ASSET_FALLBACK_REFERENCES,
     analysisUserReference: (index) =>
       `Primary creative reference ${index}; use its mood, visual hook, composition, and styling as evidence without copying text.`,
     assetPreviousRefresh:
